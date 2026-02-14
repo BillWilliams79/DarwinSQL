@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     done_ts         TIMESTAMP       NULL,
+    sort_order      SMALLINT        NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
