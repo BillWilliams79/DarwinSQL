@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS areas (
     creator_fk      VARCHAR(64)     NOT NULL,
     closed          TINYINT         NOT NULL DEFAULT 0,
     sort_order      SMALLINT        NULL,
+    sort_mode       VARCHAR(8)      NOT NULL DEFAULT 'priority',
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_fk)
