@@ -1,7 +1,7 @@
 """
 Test migration correctness and schema evolution.
 
-Applies migrations 001-007 to temporary tables in darwin2, verifies final schema
+Applies migrations 001-008 to temporary tables in darwin2, verifies final schema
 matches expected state. Validates that migrations are idempotent and can be applied
 to fresh tables.
 
@@ -44,8 +44,17 @@ def _apply_migration(cur, sql_content, table_prefix):
 
     Skips CREATE DATABASE, USE, and comment-only statements.
     """
+    # Strip lines referencing darwin2-specific table names (e.g. areas2, tasks2)
+    # These are environment-specific duplicates; the test only creates non-suffixed tables.
+    filtered_lines = []
+    for line in sql_content.split('\n'):
+        stripped = line.strip().lower()
+        if any(t in stripped for t in ['profiles2', 'domains2', 'areas2', 'tasks2']):
+            continue
+        filtered_lines.append(line)
+    sql = '\n'.join(filtered_lines)
+
     # Replace table names with prefixed versions (order: longest first to avoid partial matches)
-    sql = sql_content
     sql = sql.replace('`profiles`', f'`{table_prefix}_profiles`')
     sql = sql.replace('`domains`', f'`{table_prefix}_domains`')
     sql = sql.replace('`areas`', f'`{table_prefix}_areas`')
@@ -157,7 +166,7 @@ def test_migration_001_creates_tables(db_connection, migration_test_prefix):
 # ---------------------------------------------------------------------------
 
 def test_migration_sequence_applies(db_connection, migration_test_prefix):
-    """Apply all migrations 001-007 in sequence to temp tables.
+    """Apply all migrations 001-008 in sequence to temp tables.
 
     Verifies that migrations can be applied in order without errors.
     """
@@ -304,6 +313,7 @@ def test_migration_final_schema_matches_areas(db_connection, migration_test_pref
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - closed: TINYINT, NOT NULL, DEFAULT 0
     - sort_order: SMALLINT, NULL
+    - sort_mode: VARCHAR(8), NOT NULL, DEFAULT 'priority'
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     """
@@ -341,6 +351,10 @@ def test_migration_final_schema_matches_areas(db_connection, migration_test_pref
 
     assert columns['sort_order']['Type'] == 'smallint'
     assert columns['sort_order']['Null'] == 'YES'
+
+    assert columns['sort_mode']['Type'] == 'varchar(8)'
+    assert columns['sort_mode']['Null'] == 'NO'
+    assert columns['sort_mode']['Default'] == 'priority'
 
     assert 'timestamp' in columns['create_ts']['Type']
     assert columns['create_ts']['Null'] == 'YES'
