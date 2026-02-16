@@ -5,8 +5,6 @@ Verifies that deleting parent records automatically cascades to children
 as defined in the schema (profiles2→domains2→areas2→tasks2).
 Each test uses transactions with rollback to keep darwin2 test DB clean.
 """
-import pymysql
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -138,14 +136,7 @@ def test_delete_area_cascades_to_tasks(db_connection):
 # ---------------------------------------------------------------------------
 
 def test_delete_profile_cascades_full_hierarchy(db_connection):
-    """DELETE profile → should cascade through domain→area→task.
-
-    NOTE: darwin2's areas2_ibfk_1 (creator_fk→profiles2.id) may lack ON DELETE CASCADE
-    if the table was created from an older schema version. In that case, deleting the
-    profile is blocked by the FK constraint. This test handles both behaviors:
-    - CASCADE works: all children deleted (matches schema.sql intent)
-    - CASCADE missing: IntegrityError raised (darwin2 schema discrepancy)
-    """
+    """DELETE profile → cascades through domain→area→task (all children deleted)"""
     test_creator = 'cascade-test-full-hierarchy'
 
     with db_connection.cursor() as cur:
@@ -183,26 +174,16 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         task_id = cur.fetchone()['id']
 
-        # Delete profile — cascade behavior depends on darwin2 FK setup
-        try:
-            cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator,))
-            # CASCADE worked — verify all children are gone
-            cur.execute("SELECT id FROM domains2 WHERE id = %s", (domain_id,))
-            assert cur.fetchone() is None
-            cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_id,))
-            assert cur.fetchone() is None
-            cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_id,))
-            assert cur.fetchone() is None
-        except pymysql.IntegrityError:
-            # darwin2 FK lacks CASCADE — clean up manually (children first)
-            cur.execute("DELETE FROM tasks2 WHERE id = %s", (task_id,))
-            cur.execute("DELETE FROM areas2 WHERE id = %s", (area_id,))
-            cur.execute("DELETE FROM domains2 WHERE id = %s", (domain_id,))
-            cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator,))
-            pytest.skip(
-                "darwin2 areas2.creator_fk FK lacks ON DELETE CASCADE — "
-                "schema discrepancy vs schema.sql"
-            )
+        # Delete profile — should cascade to all children
+        cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator,))
+
+        # Verify all children are gone
+        cur.execute("SELECT id FROM domains2 WHERE id = %s", (domain_id,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_id,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_id,))
+        assert cur.fetchone() is None
 
     db_connection.rollback()
 
