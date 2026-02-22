@@ -1,7 +1,7 @@
 """
 Test migration correctness and schema evolution.
 
-Applies migrations 001-008 to temporary tables in darwin2, verifies final schema
+Applies migrations 001-008 to temporary tables in darwin_dev, verifies final schema
 matches expected state. Validates that migrations are idempotent and can be applied
 to fresh tables.
 
@@ -44,15 +44,7 @@ def _apply_migration(cur, sql_content, table_prefix):
 
     Skips CREATE DATABASE, USE, and comment-only statements.
     """
-    # Strip lines referencing darwin2-specific table names (e.g. areas2, tasks2)
-    # These are environment-specific duplicates; the test only creates non-suffixed tables.
-    filtered_lines = []
-    for line in sql_content.split('\n'):
-        stripped = line.strip().lower()
-        if any(t in stripped for t in ['profiles2', 'domains2', 'areas2', 'tasks2']):
-            continue
-        filtered_lines.append(line)
-    sql = '\n'.join(filtered_lines)
+    sql = sql_content
 
     # Replace table names with prefixed versions (order: longest first to avoid partial matches)
     sql = sql.replace('`profiles`', f'`{table_prefix}_profiles`')
@@ -147,7 +139,7 @@ def test_migration_001_creates_tables(db_connection, migration_test_prefix):
         cur.execute(
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
             "WHERE TABLE_SCHEMA = %s AND TABLE_NAME LIKE %s",
-            ('darwin2', f"{migration_test_prefix}_%")
+            ('darwin_dev', f"{migration_test_prefix}_%")
         )
         tables = {row['TABLE_NAME'] for row in cur.fetchall()}
 
@@ -183,7 +175,7 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
         cur.execute(
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
             "WHERE TABLE_SCHEMA = %s AND TABLE_NAME LIKE %s",
-            ('darwin2', f"{migration_test_prefix}_%")
+            ('darwin_dev', f"{migration_test_prefix}_%")
         )
         tables = {row['TABLE_NAME'] for row in cur.fetchall()}
 
@@ -451,7 +443,7 @@ def test_migration_001_idempotent(db_connection, migration_test_prefix):
         cur.execute(
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
             "WHERE TABLE_SCHEMA = %s AND TABLE_NAME LIKE %s",
-            ('darwin2', f"{migration_test_prefix}_%")
+            ('darwin_dev', f"{migration_test_prefix}_%")
         )
         tables = {row['TABLE_NAME'] for row in cur.fetchall()}
 

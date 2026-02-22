@@ -2,12 +2,12 @@
 Test data type definitions and schema correctness.
 
 Verifies that DESCRIBE output for each table matches the expected schema.sql
-definitions. Uses darwin2 test database (profiles2, domains2, areas2, tasks2).
+definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 """
 
 
 def test_profiles_columns(db_connection):
-    """Verify profiles2 column definitions match schema.sql.
+    """Verify profiles column definitions match schema.sql.
 
     Expected columns:
     - id: VARCHAR(64), PRI, NOT NULL
@@ -21,7 +21,7 @@ def test_profiles_columns(db_connection):
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE profiles2")
+        cur.execute("DESCRIBE profiles")
         columns = {row['Field']: row for row in cur.fetchall()}
 
     # Verify all expected columns exist
@@ -73,21 +73,22 @@ def test_profiles_columns(db_connection):
 
 
 def test_domains_columns(db_connection):
-    """Verify domains2 column definitions match schema.sql.
+    """Verify domains column definitions match schema.sql.
 
     Expected columns:
     - id: INT, PRI, AUTO_INCREMENT
     - domain_name: VARCHAR(32), NOT NULL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - closed: TINYINT, NOT NULL, DEFAULT 0
+    - sort_order: SMALLINT, NULL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE domains2")
+        cur.execute("DESCRIBE domains")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['id', 'domain_name', 'creator_fk', 'closed', 'create_ts', 'update_ts']
+    expected_fields = ['id', 'domain_name', 'creator_fk', 'closed', 'sort_order', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     # id: INT, PRI, AUTO_INCREMENT
@@ -110,6 +111,10 @@ def test_domains_columns(db_connection):
     assert columns['closed']['Null'] == 'NO'
     assert columns['closed']['Default'] == '0'
 
+    # sort_order: SMALLINT, NULL
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
     # create_ts: TIMESTAMP, NULL
     assert 'timestamp' in columns['create_ts']['Type']
     assert columns['create_ts']['Null'] == 'YES'
@@ -120,7 +125,7 @@ def test_domains_columns(db_connection):
 
 
 def test_areas_columns(db_connection):
-    """Verify areas2 column definitions match schema.sql.
+    """Verify areas column definitions match schema.sql.
 
     Expected columns:
     - id: INT, PRI, AUTO_INCREMENT
@@ -134,7 +139,7 @@ def test_areas_columns(db_connection):
     - update_ts: TIMESTAMP, NULL
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE areas2")
+        cur.execute("DESCRIBE areas")
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = [
@@ -187,7 +192,7 @@ def test_areas_columns(db_connection):
 
 
 def test_tasks_columns(db_connection):
-    """Verify tasks2 column definitions match schema.sql.
+    """Verify tasks column definitions match schema.sql.
 
     Expected columns:
     - id: INT, PRI, AUTO_INCREMENT
@@ -202,7 +207,7 @@ def test_tasks_columns(db_connection):
     - sort_order: SMALLINT, NULL
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE tasks2")
+        cur.execute("DESCRIBE tasks")
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = [
@@ -257,14 +262,14 @@ def test_tasks_columns(db_connection):
 
 
 def test_table_count(db_connection):
-    """Verify darwin2 database contains exactly 4 tables.
+    """Verify darwin_dev database contains exactly 4 tables.
 
-    Expected tables: profiles2, domains2, areas2, tasks2
+    Expected tables: profiles, domains, areas, tasks
     """
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
-        tables = {row['Tables_in_darwin2'] for row in cur.fetchall()}
+        tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
 
-    expected_tables = {'profiles2', 'domains2', 'areas2', 'tasks2'}
+    expected_tables = {'profiles', 'domains', 'areas', 'tasks'}
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

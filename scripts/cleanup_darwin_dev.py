@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
 """
-Cleanup orphaned test data from darwin2 test database.
+Cleanup orphaned test data from darwin_dev test database.
 
 This script identifies and removes test data left behind by failed or
-interrupted test runs. It operates ONLY on the darwin2 test database
-and ONLY on tables with the '2' suffix.
+interrupted test runs. It operates ONLY on the darwin_dev test database.
 
 GUARDRAILS (5 layers):
-1. Hardcoded database: connects to 'darwin2' only (literal string, not env var)
+1. Hardcoded database: connects to 'darwin_dev' only (literal string, not env var)
 2. Runtime verification: SELECT DATABASE() check before any DELETE
-3. Table suffix validation: only operates on tables ending in '2'
+3. Table validation: only operates on known tables
 4. Dry-run default: --execute flag required for actual deletes
 5. No DROP/TRUNCATE: only DELETE FROM ... WHERE with specific patterns
 
 Usage:
     # Dry run (default) — shows what WOULD be deleted
-    python3 cleanup_darwin2.py
+    python3 cleanup_darwin_dev.py
 
     # Actually delete orphaned data
-    python3 cleanup_darwin2.py --execute
+    python3 cleanup_darwin_dev.py --execute
 
     # Chain after test runs
     cd Lambda-Rest && . exports.sh && pytest tests/ -v && \\
-        python3 ../DarwinSQL/scripts/cleanup_darwin2.py --execute
+        python3 ../DarwinSQL/scripts/cleanup_darwin_dev.py --execute
 
 Environment variables required (from exports.sh):
     endpoint     — RDS MySQL hostname
@@ -38,12 +37,12 @@ import pymysql
 # ============================================================================
 # GUARDRAIL 1: Hardcoded database name — never from env var
 # ============================================================================
-TARGET_DATABASE = 'darwin2'
+TARGET_DATABASE = 'darwin_dev'
 
 # ============================================================================
-# GUARDRAIL 3: Only tables with '2' suffix
+# GUARDRAIL 3: Only known tables
 # ============================================================================
-VALID_TABLES = ('profiles2', 'domains2', 'areas2', 'tasks2')
+VALID_TABLES = ('profiles', 'domains', 'areas', 'tasks')
 
 # Test data identification patterns
 # These match the creator_fk/id patterns used by each test suite
@@ -56,7 +55,7 @@ CLEANUP_PATTERNS = [
 
 
 def get_connection():
-    """Connect to darwin2 with hardcoded database name."""
+    """Connect to darwin_dev with hardcoded database name."""
     return pymysql.connect(
         host=os.environ['endpoint'],
         user=os.environ['username'],
@@ -68,7 +67,7 @@ def get_connection():
 
 
 def verify_database(conn):
-    """GUARDRAIL 2: Runtime verification that we're on darwin2."""
+    """GUARDRAIL 2: Runtime verification that we're on darwin_dev."""
     with conn.cursor() as cur:
         cur.execute("SELECT DATABASE() AS db")
         result = cur.fetchone()
@@ -88,41 +87,38 @@ def find_orphaned_data(conn):
 
         with conn.cursor() as cur:
             # FK-order: count from leaves to roots
-            # tasks2 (leaf)
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM tasks2 WHERE creator_fk LIKE %s",
+                "SELECT COUNT(*) AS cnt FROM tasks WHERE creator_fk LIKE %s",
                 (pattern,),
             )
             count = cur.fetchone()['cnt']
             if count > 0:
-                pattern_orphans['tasks2'] = count
+                pattern_orphans['tasks'] = count
 
-            # areas2
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM areas2 WHERE creator_fk LIKE %s",
+                "SELECT COUNT(*) AS cnt FROM areas WHERE creator_fk LIKE %s",
                 (pattern,),
             )
             count = cur.fetchone()['cnt']
             if count > 0:
-                pattern_orphans['areas2'] = count
+                pattern_orphans['areas'] = count
 
-            # domains2
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM domains2 WHERE creator_fk LIKE %s",
+                "SELECT COUNT(*) AS cnt FROM domains WHERE creator_fk LIKE %s",
                 (pattern,),
             )
             count = cur.fetchone()['cnt']
             if count > 0:
-                pattern_orphans['domains2'] = count
+                pattern_orphans['domains'] = count
 
-            # profiles2 (root) — profiles use 'id' not 'creator_fk'
+            # profiles use 'id' not 'creator_fk'
             cur.execute(
-                "SELECT COUNT(*) AS cnt FROM profiles2 WHERE id LIKE %s",
+                "SELECT COUNT(*) AS cnt FROM profiles WHERE id LIKE %s",
                 (pattern,),
             )
             count = cur.fetchone()['cnt']
             if count > 0:
-                pattern_orphans['profiles2'] = count
+                pattern_orphans['profiles'] = count
 
         if pattern_orphans:
             orphans[pattern] = {
@@ -141,23 +137,23 @@ def delete_orphaned_data(conn, dry_run=True):
     orphans = find_orphaned_data(conn)
 
     if not orphans:
-        print("No orphaned test data found in darwin2.")
+        print("No orphaned test data found in darwin_dev.")
         return 0
 
     total_deleted = 0
     mode = "DRY RUN" if dry_run else "EXECUTE"
 
     print(f"\n{'=' * 60}")
-    print(f"  darwin2 Cleanup — {mode}")
+    print(f"  darwin_dev Cleanup — {mode}")
     print(f"{'=' * 60}\n")
 
     for pattern, info in orphans.items():
         print(f"  Pattern: {pattern} ({info['description']})")
         tables = info['tables']
 
-        # Delete in FK-safe order: tasks2 → areas2 → domains2 → profiles2
-        for table in ('tasks2', 'areas2', 'domains2', 'profiles2'):
-            # GUARDRAIL 3: Validate table name has '2' suffix
+        # Delete in FK-safe order: tasks → areas → domains → profiles
+        for table in ('tasks', 'areas', 'domains', 'profiles'):
+            # GUARDRAIL 3: Validate table name
             if table not in VALID_TABLES:
                 print(f"    SKIP: {table} not in valid table list")
                 continue
@@ -166,7 +162,7 @@ def delete_orphaned_data(conn, dry_run=True):
                 continue
 
             count = tables[table]
-            column = 'id' if table == 'profiles2' else 'creator_fk'
+            column = 'id' if table == 'profiles' else 'creator_fk'
 
             if dry_run:
                 print(f"    WOULD DELETE {count} rows from {table} WHERE {column} LIKE '{pattern}'")
@@ -192,7 +188,7 @@ def delete_orphaned_data(conn, dry_run=True):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Clean up orphaned test data from darwin2 test database.',
+        description='Clean up orphaned test data from darwin_dev test database.',
     )
     parser.add_argument(
         '--execute',

@@ -1,8 +1,8 @@
 """
 DarwinSQL pytest shared fixtures.
 
-All tests use darwin2 test database. Never touches darwin production.
-Constraint/integrity tests use existing darwin2 tables (profiles2, domains2, areas2, tasks2).
+All tests use darwin_dev test database. Never touches darwin production.
+Constraint/integrity tests use existing darwin_dev tables (profiles, domains, areas, tasks).
 Migration tests create temp tables with unique prefix, then DROP them.
 """
 import os
@@ -18,12 +18,12 @@ import pytest
 
 @pytest.fixture(scope="session")
 def db_connection():
-    """Direct pymysql connection to darwin2 test database."""
+    """Direct pymysql connection to darwin_dev test database."""
     conn = pymysql.connect(
         host=os.environ['endpoint'],
         user=os.environ['username'],
         password=os.environ['db_password'],
-        database='darwin2',
+        database='darwin_dev',
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=False,
     )
@@ -52,14 +52,14 @@ def seed_test_profile(db_connection, test_creator_fk):
     with db_connection.cursor() as cur:
         # Profile
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator_fk, 'Schema Test', 'schema@test.com',
              test_creator_fk, test_creator_fk, 'us-west-1', 'test-pool'),
         )
         # Domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Schema Test Domain', test_creator_fk),
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -67,7 +67,7 @@ def seed_test_profile(db_connection, test_creator_fk):
 
         # Area
         cur.execute(
-            "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed, sort_order) "
+            "INSERT INTO areas (area_name, domain_fk, creator_fk, closed, sort_order) "
             "VALUES (%s, %s, %s, 0, 1)",
             ('Schema Test Area', ids['domain_id'], test_creator_fk),
         )
@@ -80,10 +80,10 @@ def seed_test_profile(db_connection, test_creator_fk):
 
     # Cleanup
     with db_connection.cursor() as cur:
-        cur.execute("DELETE FROM tasks2 WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM areas2 WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM domains2 WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM areas WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM domains WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator_fk,))
     db_connection.commit()
 
 
