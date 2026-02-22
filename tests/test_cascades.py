@@ -2,8 +2,8 @@
 Test CASCADE DELETE and CASCADE UPDATE behavior on foreign keys.
 
 Verifies that deleting parent records automatically cascades to children
-as defined in the schema (profiles2→domains2→areas2→tasks2).
-Each test uses transactions with rollback to keep darwin2 test DB clean.
+as defined in the schema (profiles→domains→areas→tasks).
+Each test uses transactions with rollback to keep darwin_dev test DB clean.
 """
 
 
@@ -18,7 +18,7 @@ def test_delete_profile_cascades_to_domains(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -26,17 +26,17 @@ def test_delete_profile_cascades_to_domains(db_connection):
 
         # Create domain under profile
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         domain_id = cur.fetchone()['id']
 
         # Delete profile
-        cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator,))
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
 
         # Verify domain is gone
-        cur.execute("SELECT id FROM domains2 WHERE id = %s", (domain_id,))
+        cur.execute("SELECT id FROM domains WHERE id = %s", (domain_id,))
         assert cur.fetchone() is None
 
     db_connection.rollback()
@@ -49,7 +49,7 @@ def test_delete_domain_cascades_to_areas(db_connection):
     with db_connection.cursor() as cur:
         # Create profile (to satisfy domain FK)
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -57,7 +57,7 @@ def test_delete_domain_cascades_to_areas(db_connection):
 
         # Create domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -65,7 +65,7 @@ def test_delete_domain_cascades_to_areas(db_connection):
 
         # Create area under domain
         cur.execute(
-            "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+            "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
             "VALUES (%s, %s, %s, 0)",
             ('Cascade Test Area', domain_id, test_creator)
         )
@@ -73,10 +73,10 @@ def test_delete_domain_cascades_to_areas(db_connection):
         area_id = cur.fetchone()['id']
 
         # Delete domain
-        cur.execute("DELETE FROM domains2 WHERE id = %s", (domain_id,))
+        cur.execute("DELETE FROM domains WHERE id = %s", (domain_id,))
 
         # Verify area is gone
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_id,))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_id,))
         assert cur.fetchone() is None
 
     db_connection.rollback()
@@ -89,7 +89,7 @@ def test_delete_area_cascades_to_tasks(db_connection):
     with db_connection.cursor() as cur:
         # Create profile (to satisfy FKs)
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -97,7 +97,7 @@ def test_delete_area_cascades_to_tasks(db_connection):
 
         # Create domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -105,7 +105,7 @@ def test_delete_area_cascades_to_tasks(db_connection):
 
         # Create area
         cur.execute(
-            "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+            "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
             "VALUES (%s, %s, %s, 0)",
             ('Cascade Test Area', domain_id, test_creator)
         )
@@ -114,7 +114,7 @@ def test_delete_area_cascades_to_tasks(db_connection):
 
         # Create task under area
         cur.execute(
-            "INSERT INTO tasks2 (priority, done, description, area_fk, creator_fk) "
+            "INSERT INTO tasks (priority, done, description, area_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s, %s)",
             (0, 0, 'Cascade Test Task', area_id, test_creator)
         )
@@ -122,10 +122,10 @@ def test_delete_area_cascades_to_tasks(db_connection):
         task_id = cur.fetchone()['id']
 
         # Delete area
-        cur.execute("DELETE FROM areas2 WHERE id = %s", (area_id,))
+        cur.execute("DELETE FROM areas WHERE id = %s", (area_id,))
 
         # Verify task is gone
-        cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_id,))
+        cur.execute("SELECT id FROM tasks WHERE id = %s", (task_id,))
         assert cur.fetchone() is None
 
     db_connection.rollback()
@@ -142,7 +142,7 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -150,7 +150,7 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
 
         # Create domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -158,7 +158,7 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
 
         # Create area
         cur.execute(
-            "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+            "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
             "VALUES (%s, %s, %s, 0)",
             ('Cascade Test Area', domain_id, test_creator)
         )
@@ -167,7 +167,7 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
 
         # Create task
         cur.execute(
-            "INSERT INTO tasks2 (priority, done, description, area_fk, creator_fk) "
+            "INSERT INTO tasks (priority, done, description, area_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s, %s)",
             (0, 0, 'Cascade Test Task', area_id, test_creator)
         )
@@ -175,14 +175,14 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
         task_id = cur.fetchone()['id']
 
         # Delete profile — should cascade to all children
-        cur.execute("DELETE FROM profiles2 WHERE id = %s", (test_creator,))
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
 
         # Verify all children are gone
-        cur.execute("SELECT id FROM domains2 WHERE id = %s", (domain_id,))
+        cur.execute("SELECT id FROM domains WHERE id = %s", (domain_id,))
         assert cur.fetchone() is None
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_id,))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_id,))
         assert cur.fetchone() is None
-        cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_id,))
+        cur.execute("SELECT id FROM tasks WHERE id = %s", (task_id,))
         assert cur.fetchone() is None
 
     db_connection.rollback()
@@ -195,7 +195,7 @@ def test_delete_domain_cascades_full_subtree(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -203,7 +203,7 @@ def test_delete_domain_cascades_full_subtree(db_connection):
 
         # Create domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -214,7 +214,7 @@ def test_delete_domain_cascades_full_subtree(db_connection):
         task_ids = []
         for i in range(3):
             cur.execute(
-                "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+                "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
                 "VALUES (%s, %s, %s, 0)",
                 (f'Cascade Test Area {i}', domain_id, test_creator)
             )
@@ -224,7 +224,7 @@ def test_delete_domain_cascades_full_subtree(db_connection):
 
             # Create task under area
             cur.execute(
-                "INSERT INTO tasks2 (priority, done, description, area_fk, creator_fk) "
+                "INSERT INTO tasks (priority, done, description, area_fk, creator_fk) "
                 "VALUES (%s, %s, %s, %s, %s)",
                 (0, 0, f'Cascade Test Task {i}', area_id, test_creator)
             )
@@ -232,15 +232,15 @@ def test_delete_domain_cascades_full_subtree(db_connection):
             task_ids.append(cur.fetchone()['id'])
 
         # Delete domain
-        cur.execute("DELETE FROM domains2 WHERE id = %s", (domain_id,))
+        cur.execute("DELETE FROM domains WHERE id = %s", (domain_id,))
 
         # Verify all areas and tasks are gone
         for area_id in area_ids:
-            cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_id,))
+            cur.execute("SELECT id FROM areas WHERE id = %s", (area_id,))
             assert cur.fetchone() is None
 
         for task_id in task_ids:
-            cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_id,))
+            cur.execute("SELECT id FROM tasks WHERE id = %s", (task_id,))
             assert cur.fetchone() is None
 
     db_connection.rollback()
@@ -254,14 +254,14 @@ def test_domain_fk_null_allowed(db_connection, test_creator_fk):
     """INSERT area with domain_fk=NULL → succeeds (FK is nullable)"""
     with db_connection.cursor() as cur:
         cur.execute(
-            "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+            "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
             "VALUES (%s, %s, %s, 0)",
             ('area with no domain', None, test_creator_fk)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         area_id = cur.fetchone()['id']
 
-        cur.execute("SELECT domain_fk FROM areas2 WHERE id = %s", (area_id,))
+        cur.execute("SELECT domain_fk FROM areas WHERE id = %s", (area_id,))
         row = cur.fetchone()
         assert row['domain_fk'] is None
 
@@ -272,14 +272,14 @@ def test_task_area_fk_null_allowed(db_connection, test_creator_fk):
     """INSERT task with area_fk=NULL → succeeds (FK is nullable)"""
     with db_connection.cursor() as cur:
         cur.execute(
-            "INSERT INTO tasks2 (priority, done, description, area_fk, creator_fk) "
+            "INSERT INTO tasks (priority, done, description, area_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s, %s)",
             (0, 0, 'task with no area', None, test_creator_fk)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         task_id = cur.fetchone()['id']
 
-        cur.execute("SELECT area_fk FROM tasks2 WHERE id = %s", (task_id,))
+        cur.execute("SELECT area_fk FROM tasks WHERE id = %s", (task_id,))
         row = cur.fetchone()
         assert row['area_fk'] is None
 
@@ -300,7 +300,7 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
         # Create two profiles
         for creator in [creator1, creator2]:
             cur.execute(
-                "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+                "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (creator, f'Profile {creator}', f'{creator}@test.com',
                  creator, creator, 'us-west-1', 'test-pool')
@@ -311,7 +311,7 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
         area_ids = {}
         for creator in [creator1, creator2]:
             cur.execute(
-                "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+                "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
                 (f'Domain {creator}', creator)
             )
             cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -320,7 +320,7 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
 
             # Create area under domain
             cur.execute(
-                "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+                "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
                 "VALUES (%s, %s, %s, 0)",
                 (f'Area {creator}', domain_id, creator)
             )
@@ -328,13 +328,13 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
             area_ids[creator] = cur.fetchone()['id']
 
         # Delete only creator1's domain
-        cur.execute("DELETE FROM domains2 WHERE id = %s", (domain_ids[creator1],))
+        cur.execute("DELETE FROM domains WHERE id = %s", (domain_ids[creator1],))
 
         # Verify creator1's area is gone, but creator2's area survives
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_ids[creator1],))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_ids[creator1],))
         assert cur.fetchone() is None
 
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_ids[creator2],))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_ids[creator2],))
         assert cur.fetchone() is not None
 
     db_connection.rollback()
@@ -348,7 +348,7 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles2 (id, name, email, subject, userName, region, userPoolId) "
+            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (test_creator, 'Cascade Test Profile', 'cascade@test.com',
              test_creator, test_creator, 'us-west-1', 'test-pool')
@@ -356,7 +356,7 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
 
         # Create domain
         cur.execute(
-            "INSERT INTO domains2 (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
+            "INSERT INTO domains (domain_name, creator_fk, closed) VALUES (%s, %s, 0)",
             ('Cascade Test Domain', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
@@ -367,7 +367,7 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
         task_ids = {}
         for i in range(2):
             cur.execute(
-                "INSERT INTO areas2 (area_name, domain_fk, creator_fk, closed) "
+                "INSERT INTO areas (area_name, domain_fk, creator_fk, closed) "
                 "VALUES (%s, %s, %s, 0)",
                 (f'Cascade Test Area {i}', domain_id, test_creator)
             )
@@ -377,7 +377,7 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
 
             # Create task under area
             cur.execute(
-                "INSERT INTO tasks2 (priority, done, description, area_fk, creator_fk) "
+                "INSERT INTO tasks (priority, done, description, area_fk, creator_fk) "
                 "VALUES (%s, %s, %s, %s, %s)",
                 (0, 0, f'Cascade Test Task {i}', area_id, test_creator)
             )
@@ -385,19 +385,19 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
             task_ids[i] = cur.fetchone()['id']
 
         # Delete only area 0
-        cur.execute("DELETE FROM areas2 WHERE id = %s", (area_ids[0],))
+        cur.execute("DELETE FROM areas WHERE id = %s", (area_ids[0],))
 
         # Verify area 0 and its task are gone, but area 1 and its task survive
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_ids[0],))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_ids[0],))
         assert cur.fetchone() is None
 
-        cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_ids[0],))
+        cur.execute("SELECT id FROM tasks WHERE id = %s", (task_ids[0],))
         assert cur.fetchone() is None
 
-        cur.execute("SELECT id FROM areas2 WHERE id = %s", (area_ids[1],))
+        cur.execute("SELECT id FROM areas WHERE id = %s", (area_ids[1],))
         assert cur.fetchone() is not None
 
-        cur.execute("SELECT id FROM tasks2 WHERE id = %s", (task_ids[1],))
+        cur.execute("SELECT id FROM tasks WHERE id = %s", (task_ids[1],))
         assert cur.fetchone() is not None
 
     db_connection.rollback()

@@ -3,4 +3,3 @@
 -- instead of localStorage. Default 'priority' matches existing behavior.
 
 ALTER TABLE areas ADD COLUMN sort_mode VARCHAR(8) NOT NULL DEFAULT 'priority';
-ALTER TABLE areas2 ADD COLUMN sort_mode VARCHAR(8) NOT NULL DEFAULT 'priority';
