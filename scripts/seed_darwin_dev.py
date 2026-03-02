@@ -3,7 +3,8 @@
 Create and seed the darwin_dev test database.
 
 Creates the darwin_dev database with production-identical table names,
-grants read-only access to claude_ro, and seeds the E2E test user profile.
+grants read-only access to claude_ro, and seeds the E2E test user profile
+plus 8 parallel E2E worker profiles.
 
 GUARDRAILS:
 1. Hardcoded database: creates/uses 'darwin_dev' only
@@ -37,6 +38,18 @@ E2E_TEST_PROFILE = {
     'region': 'us-west-1',
     'userPoolId': 'us-west-1_jqN0WLASK',
 }
+
+# Parallel E2E worker profiles — one per dev server port (3000-3007)
+E2E_WORKERS = [
+    {'id': '0807ca6e-2f48-45b0-a9c4-15177859735b', 'name': 'E2E Worker 1', 'email': 'e2e-worker-1@test.invalid', 'userName': 'e2e-worker-1'},
+    {'id': 'c0479250-4db9-4586-ad2f-5662deafdcd9', 'name': 'E2E Worker 2', 'email': 'e2e-worker-2@test.invalid', 'userName': 'e2e-worker-2'},
+    {'id': 'de2018a8-964e-437d-8191-ca5b6f9cb8ac', 'name': 'E2E Worker 3', 'email': 'e2e-worker-3@test.invalid', 'userName': 'e2e-worker-3'},
+    {'id': '3e2a706e-9f79-4a74-9ca5-f783296b6f33', 'name': 'E2E Worker 4', 'email': 'e2e-worker-4@test.invalid', 'userName': 'e2e-worker-4'},
+    {'id': '2766f048-530d-40dd-8066-d8daf96ef0d9', 'name': 'E2E Worker 5', 'email': 'e2e-worker-5@test.invalid', 'userName': 'e2e-worker-5'},
+    {'id': '0e724beb-3a62-422f-923b-57633bfafc7f', 'name': 'E2E Worker 6', 'email': 'e2e-worker-6@test.invalid', 'userName': 'e2e-worker-6'},
+    {'id': 'cc5a9202-e1f0-4973-aa88-0caaba7a7140', 'name': 'E2E Worker 7', 'email': 'e2e-worker-7@test.invalid', 'userName': 'e2e-worker-7'},
+    {'id': '3857b0d2-1b9b-4f64-8660-6a5b8db29c33', 'name': 'E2E Worker 8', 'email': 'e2e-worker-8@test.invalid', 'userName': 'e2e-worker-8'},
+]
 
 
 def get_admin_connection():
@@ -174,6 +187,25 @@ def seed_e2e_user(conn):
         )
         if cur.rowcount:
             print("Seeded 'Personal' domain for E2E test user.")
+
+    # Seed worker profiles
+    seeded = 0
+    with conn.cursor() as cur:
+        cur.execute(f"USE {TARGET_DATABASE}")
+        for w in E2E_WORKERS:
+            cur.execute(
+                "INSERT IGNORE INTO profiles (id, name, email, subject, userName, region, userPoolId) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (w['id'], w['name'], w['email'], w['id'], w['userName'], 'us-west-1', 'us-west-1_jqN0WLASK'),
+            )
+            if cur.rowcount:
+                seeded += 1
+            cur.execute(
+                "INSERT IGNORE INTO domains (domain_name, creator_fk, closed) "
+                "VALUES ('Personal', %s, 0)",
+                (w['id'],),
+            )
+        print(f"E2E workers: {seeded} new, {len(E2E_WORKERS) - seeded} already existed.")
 
 
 def main():
