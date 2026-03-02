@@ -262,14 +262,15 @@ def test_tasks_columns(db_connection):
 
 
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains exactly 4 tables.
-
-    Expected tables: profiles, domains, areas, tasks
-    """
+    """Verify darwin_dev database contains expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
 
-    expected_tables = {'profiles', 'domains', 'areas', 'tasks'}
+    expected_tables = {
+        'profiles', 'domains', 'areas', 'tasks',
+        'projects', 'categories', 'priorities', 'priority_sessions',
+        'swarm_sessions', 'dev_servers',
+    }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
