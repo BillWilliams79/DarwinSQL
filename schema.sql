@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     userName        VARCHAR(256)    NOT NULL,
     region          VARCHAR(128)    NOT NULL,
     userPoolId      VARCHAR(128)    NOT NULL,
+    timezone        VARCHAR(64)     NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
 );

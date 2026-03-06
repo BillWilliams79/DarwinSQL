@@ -17,6 +17,7 @@ def test_profiles_columns(db_connection):
     - userName: VARCHAR(256), NOT NULL
     - region: VARCHAR(128), NOT NULL
     - userPoolId: VARCHAR(128), NOT NULL
+    - timezone: VARCHAR(64), NULL
     - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
@@ -27,7 +28,7 @@ def test_profiles_columns(db_connection):
     # Verify all expected columns exist
     expected_fields = [
         'id', 'name', 'email', 'subject', 'userName', 'region', 'userPoolId',
-        'create_ts', 'update_ts'
+        'timezone', 'create_ts', 'update_ts'
     ]
     assert set(columns.keys()) == set(expected_fields), \
         f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
@@ -60,6 +61,10 @@ def test_profiles_columns(db_connection):
     # userPoolId: VARCHAR(128), NOT NULL
     assert columns['userPoolId']['Type'] == 'varchar(128)'
     assert columns['userPoolId']['Null'] == 'NO'
+
+    # timezone: VARCHAR(64), NULL
+    assert columns['timezone']['Type'] == 'varchar(64)'
+    assert columns['timezone']['Null'] == 'YES'
 
     # create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     assert 'timestamp' in columns['create_ts']['Type']
