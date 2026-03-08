@@ -53,6 +53,20 @@ CLEANUP_PATTERNS = [
     ('pytest-%', 'Lambda-Rest test data'),
 ]
 
+# E2E test worker creator_fk UUIDs (exact match, not LIKE patterns)
+# Port 3000 → worker 1, 3001 → worker 2, ..., 3007 → worker 8
+E2E_WORKER_CREATOR_FKS = [
+    ('0807ca6e-2f48-45b0-a9c4-15177859735b', 'E2E worker 1 (port 3000)'),
+    ('c0479250-4db9-4586-ad2f-5662deafdcd9', 'E2E worker 2 (port 3001)'),
+    ('de2018a8-964e-437d-8191-ca5b6f9cb8ac', 'E2E worker 3 (port 3002)'),
+    ('3e2a706e-9f79-4a74-9ca5-f783296b6f33', 'E2E worker 4 (port 3003)'),
+    ('2766f048-530d-40dd-8066-d8daf96ef0d9', 'E2E worker 5 (port 3004)'),
+    ('0e724beb-3a62-422f-923b-57633bfafc7f', 'E2E worker 6 (port 3005)'),
+    ('cc5a9202-e1f0-4973-aa88-0caaba7a7140', 'E2E worker 7 (port 3006)'),
+    ('3857b0d2-1b9b-4f64-8660-6a5b8db29c33', 'E2E worker 8 (port 3007)'),
+    ('42145f1d-e6dc-4d83-ad1c-1adac53fcbc9', 'E2E original test user'),
+]
+
 
 def get_connection():
     """Connect to darwin_dev with hardcoded database name."""
@@ -79,7 +93,7 @@ def verify_database(conn):
 
 
 def find_orphaned_data(conn):
-    """Identify orphaned test data by pattern matching."""
+    """Identify orphaned test data by pattern matching and exact creator_fk."""
     orphans = {}
 
     for pattern, description in CLEANUP_PATTERNS:
@@ -126,6 +140,27 @@ def find_orphaned_data(conn):
                 'tables': pattern_orphans,
             }
 
+    # E2E worker data uses exact creator_fk match (not LIKE)
+    for creator_fk, description in E2E_WORKER_CREATOR_FKS:
+        worker_orphans = {}
+
+        with conn.cursor() as cur:
+            for table in ('tasks', 'areas', 'domains'):
+                cur.execute(
+                    f"SELECT COUNT(*) AS cnt FROM {table} WHERE creator_fk = %s",
+                    (creator_fk,),
+                )
+                count = cur.fetchone()['cnt']
+                if count > 0:
+                    worker_orphans[table] = count
+
+        if worker_orphans:
+            orphans[creator_fk] = {
+                'description': description,
+                'tables': worker_orphans,
+                'exact_match': True,
+            }
+
     return orphans
 
 
@@ -148,7 +183,9 @@ def delete_orphaned_data(conn, dry_run=True):
     print(f"{'=' * 60}\n")
 
     for pattern, info in orphans.items():
-        print(f"  Pattern: {pattern} ({info['description']})")
+        is_exact = info.get('exact_match', False)
+        match_type = '=' if is_exact else 'LIKE'
+        print(f"  {'Creator' if is_exact else 'Pattern'}: {pattern} ({info['description']})")
         tables = info['tables']
 
         # Delete in FK-safe order: tasks → areas → domains → profiles
@@ -165,11 +202,12 @@ def delete_orphaned_data(conn, dry_run=True):
             column = 'id' if table == 'profiles' else 'creator_fk'
 
             if dry_run:
-                print(f"    WOULD DELETE {count} rows from {table} WHERE {column} LIKE '{pattern}'")
+                print(f"    WOULD DELETE {count} rows from {table} WHERE {column} {match_type} '{pattern}'")
             else:
                 with conn.cursor() as cur:
+                    op = '=' if is_exact else 'LIKE'
                     deleted = cur.execute(
-                        f"DELETE FROM {table} WHERE {column} LIKE %s",
+                        f"DELETE FROM {table} WHERE {column} {op} %s",
                         (pattern,),
                     )
                     print(f"    DELETED {deleted} rows from {table}")
