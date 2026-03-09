@@ -1,10 +1,15 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all tables after all migrations.
+-- This file reflects the final state of all 11 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
+-- Table order respects FK dependencies.
 
 CREATE DATABASE IF NOT EXISTS darwin;
 USE darwin;
+
+-- ============================================================================
+-- Core domain model: profiles → domains → areas → tasks
+-- ============================================================================
 
 CREATE TABLE IF NOT EXISTS profiles (
     id              VARCHAR(64)     NOT NULL PRIMARY KEY,
@@ -20,6 +25,7 @@ CREATE TABLE IF NOT EXISTS domains (
     domain_name     VARCHAR(32)     NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     closed          TINYINT         NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_fk)
@@ -64,6 +70,107 @@ CREATE TABLE IF NOT EXISTS tasks (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- ============================================================================
+-- Roadmap / priority tracking (darwin-mcp)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS projects (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    project_name    VARCHAR(128)    NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    sort_order      SMALLINT        NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    category_name   VARCHAR(128)    NOT NULL,
+    project_fk      INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    sort_order      SMALLINT        NULL,
+    sort_mode       VARCHAR(8)      NOT NULL DEFAULT 'priority',
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_fk)
+        REFERENCES projects (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS priorities (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    in_progress     TINYINT(1)      NOT NULL DEFAULT 0,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    started_at      TIMESTAMP       NULL,
+    completed_at    TIMESTAMP       NULL,
+    project_fk      INT             NULL,
+    category_fk     INT             NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    scheduled       TINYINT         NOT NULL DEFAULT 0,
+    FOREIGN KEY (project_fk)
+        REFERENCES projects (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    FOREIGN KEY (category_fk)
+        REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Swarm session management
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS swarm_sessions (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    branch          VARCHAR(128)    NULL,
+    task_name       VARCHAR(128)    NULL,
+    source_type     VARCHAR(16)     NULL,
+    source_ref      VARCHAR(64)     NULL,
+    title           VARCHAR(256)    NULL,
+    pr_url          VARCHAR(512)    NULL,
+    swarm_status    VARCHAR(16)     NOT NULL DEFAULT 'starting',
+    worktree_path   VARCHAR(512)    NULL,
+    started_at      TIMESTAMP       NULL,
+    completed_at    TIMESTAMP       NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS priority_sessions (
+    priority_fk     INT             NOT NULL,
+    session_fk      INT             NOT NULL,
+    PRIMARY KEY (priority_fk, session_fk),
+    FOREIGN KEY (priority_fk)
+        REFERENCES priorities (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (session_fk)
+        REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Dev server port coordination
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS dev_servers (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     port            SMALLINT        NOT NULL,
@@ -75,6 +182,22 @@ CREATE TABLE IF NOT EXISTS dev_servers (
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_port (port),
-    FOREIGN KEY (creator_fk) REFERENCES profiles (id) ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id) ON UPDATE CASCADE ON DELETE SET NULL
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (session_fk)
+        REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+-- ============================================================================
+-- Priority card hand-sort order
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS priority_card_order (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    domain_id       INT             NOT NULL,
+    task_id         INT             NOT NULL,
+    sort_order      SMALLINT        NOT NULL,
+    UNIQUE KEY uq_domain_task (domain_id, task_id)
 );

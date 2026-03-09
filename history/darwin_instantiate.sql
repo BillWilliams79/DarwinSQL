@@ -1,3 +1,9 @@
+-- ==========================================================================
+-- DEPRECATED — Historical reference only.
+-- This file is superseded by schema.sql (current state) + migrations/.
+-- Retained for archaeological value showing the original table evolution.
+-- ==========================================================================
+
 /*CREATE DATABASE IF NOT EXISTS darwin;*/
 USE darwin;
 

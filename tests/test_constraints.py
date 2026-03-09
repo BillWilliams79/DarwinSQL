@@ -121,10 +121,9 @@ def test_profile_name_not_null(db_connection):
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                ('test-profile-id', None, 'test@test.com', 'test-subject',
-                 'testuser', 'us-west-1', 'test-pool')
+                "INSERT INTO profiles (id, name, email) "
+                "VALUES (%s, %s, %s)",
+                ('test-profile-id', None, 'test@test.com')
             )
     db_connection.rollback()
 
@@ -322,19 +321,17 @@ def test_profile_pk_duplicate(db_connection):
     with db_connection.cursor() as cur:
         # Insert first profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_id, 'Test Profile 1', 'test1@test.com', 'subject1',
-             'testuser1', 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_id, 'Test Profile 1', 'test1@test.com')
         )
 
         # Attempt to insert duplicate
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (test_id, 'Test Profile 2', 'test2@test.com', 'subject2',
-                 'testuser2', 'us-west-1', 'test-pool')
+                "INSERT INTO profiles (id, name, email) "
+                "VALUES (%s, %s, %s)",
+                (test_id, 'Test Profile 2', 'test2@test.com')
             )
 
     db_connection.rollback()
@@ -361,5 +358,170 @@ def test_domain_pk_auto_unique(db_connection, test_creator_fk):
 
         assert id1 != id2
         assert id1 > 0 and id2 > 0
+
+    db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Roadmap table FK constraint tests
+# ---------------------------------------------------------------------------
+
+def test_project_fk_invalid_creator(db_connection):
+    """INSERT project with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO projects (project_name, creator_fk) "
+                "VALUES (%s, %s)",
+                ('orphan project', 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+def test_category_fk_invalid_project(db_connection, test_creator_fk):
+    """INSERT category with non-existent project_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO categories (category_name, project_fk, creator_fk) "
+                "VALUES (%s, %s, %s)",
+                ('orphan category', 999999, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_priority_fk_invalid_creator(db_connection):
+    """INSERT priority with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO priorities (title, creator_fk) "
+                "VALUES (%s, %s)",
+                ('orphan priority', 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+def test_priority_session_fk_invalid_priority(db_connection):
+    """INSERT priority_session with non-existent priority_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO priority_sessions (priority_fk, session_fk) "
+                "VALUES (%s, %s)",
+                (999999, 999999)
+            )
+    db_connection.rollback()
+
+
+def test_swarm_session_fk_invalid_creator(db_connection):
+    """INSERT swarm_session with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO swarm_sessions (swarm_status, creator_fk) "
+                "VALUES (%s, %s)",
+                ('starting', 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Roadmap table NOT NULL tests
+# ---------------------------------------------------------------------------
+
+def test_project_name_not_null(db_connection, test_creator_fk):
+    """INSERT project with project_name=NULL → error"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO projects (project_name, creator_fk) "
+                "VALUES (%s, %s)",
+                (None, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_category_name_not_null(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT category with category_name=NULL → error"""
+    with db_connection.cursor() as cur:
+        # Create project first
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Test Project', test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO categories (category_name, project_fk, creator_fk) "
+                "VALUES (%s, %s, %s)",
+                (None, project_id, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_priority_title_not_null(db_connection, test_creator_fk):
+    """INSERT priority with title=NULL → error"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO priorities (title, creator_fk) "
+                "VALUES (%s, %s)",
+                (None, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_swarm_status_not_null(db_connection, test_creator_fk):
+    """INSERT swarm_session with swarm_status=NULL → error"""
+    with db_connection.cursor() as cur:
+        with pytest.raises((pymysql.IntegrityError, pymysql.OperationalError)):
+            cur.execute(
+                "INSERT INTO swarm_sessions (swarm_status, creator_fk) "
+                "VALUES (%s, %s)",
+                (None, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Roadmap table default value tests
+# ---------------------------------------------------------------------------
+
+def test_priority_closed_default(db_connection, test_creator_fk):
+    """INSERT priority without closed → defaults to 0"""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
+            ('test priority default', test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        priority_id = cur.fetchone()['id']
+
+        cur.execute("SELECT closed, in_progress, scheduled FROM priorities WHERE id = %s",
+                    (priority_id,))
+        row = cur.fetchone()
+        assert row['closed'] == 0
+        assert row['in_progress'] == 0
+        assert row['scheduled'] == 0
+
+    db_connection.rollback()
+
+
+def test_swarm_status_default(db_connection, test_creator_fk):
+    """INSERT swarm_session without status → defaults to 'starting'"""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO swarm_sessions (creator_fk) VALUES (%s)",
+            (test_creator_fk,)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute("SELECT swarm_status FROM swarm_sessions WHERE id = %s", (session_id,))
+        row = cur.fetchone()
+        assert row['swarm_status'] == 'starting'
 
     db_connection.rollback()

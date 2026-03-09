@@ -1,45 +1,57 @@
 # DarwinSQL Scripts
 
-## cleanup_darwin2.py
+## Script Inventory
 
-Removes orphaned test data from the `darwin2` test database after test runs.
+| Script | Purpose |
+|--------|---------|
+| `cleanup_darwin_dev.py` | Remove orphaned test data from darwin_dev |
+| `cleanup_e2e.py` | Comprehensive E2E test data cleanup (darwin or darwin_dev) |
+| `seed_darwin_dev.py` | Create darwin_dev database, all 11 tables, and seed E2E test users |
+| `seed_e2e_workers.py` | Seed 8 parallel E2E worker profiles |
+| `recreate_darwin_dev.sql` | Drop and recreate all 11 darwin_dev tables from scratch |
 
-### Guardrails
+## Guardrails
 
-The script has 5 safety layers preventing any operation on production:
+All cleanup and seed scripts share 5 safety layers:
 
-1. **Hardcoded database**: Connects to `darwin2` only (literal string)
-2. **Runtime verification**: `SELECT DATABASE()` check before any DELETE
-3. **Table suffix validation**: Only operates on `*2` tables
-4. **Dry-run default**: `--execute` flag required for actual deletes
-5. **No DDL**: Only `DELETE FROM ... WHERE` — never DROP or TRUNCATE
+1. **Hardcoded database**: Connects to `darwin_dev` only (literal string, not env var)
+2. **Runtime verification**: `SELECT DATABASE()` check before any mutation
+3. **Table validation**: Only operates on known tables
+4. **Dry-run default**: `--execute` flag required for actual deletes (cleanup scripts)
+5. **No DDL in cleanup**: Only `DELETE FROM ... WHERE` — never DROP or TRUNCATE
 
-### Cleanup Patterns
+## Cleanup Patterns
 
 | Pattern | Source | Column |
 |---------|--------|--------|
-| `cognito-test-%` | Lambda-Cognito tests | profiles2.id, *.creator_fk |
-| `pytest-%` | Lambda-Rest tests | profiles2.id, *.creator_fk |
+| `cognito-test-%` | Lambda-Cognito tests | profiles.id, *.creator_fk |
+| `pytest-%` | Lambda-Rest tests | profiles.id, *.creator_fk |
+| `schema-test-%` | DarwinSQL schema tests | profiles.id, *.creator_fk |
+| 9 exact UUIDs | E2E test workers | *.creator_fk |
 
-Deletion order respects foreign keys: tasks2 → areas2 → domains2 → profiles2.
+Deletion order respects foreign keys: priority_sessions → priorities → swarm_sessions → categories → projects → tasks → areas → domains → profiles.
 
-### Usage
+## Usage
 
 ```bash
 # Source credentials (from any Lambda directory)
 cd Lambda-Rest && . exports.sh
 
 # Dry run — see what would be deleted
-python3 ../DarwinSQL/scripts/cleanup_darwin2.py
+python3 ../DarwinSQL/scripts/cleanup_darwin_dev.py
 
 # Execute cleanup
-python3 ../DarwinSQL/scripts/cleanup_darwin2.py --execute
+python3 ../DarwinSQL/scripts/cleanup_darwin_dev.py --execute
 
-# Chain after test run
-pytest tests/ -v && python3 ../DarwinSQL/scripts/cleanup_darwin2.py --execute
+# Seed darwin_dev from scratch
+python3 ../DarwinSQL/scripts/seed_darwin_dev.py
+
+# Seed worker profiles
+python3 ../DarwinSQL/scripts/seed_e2e_workers.py
+python3 ../DarwinSQL/scripts/seed_e2e_workers.py --database darwin
 ```
 
-### Prerequisites
+## Prerequisites
 
 Environment variables (from `exports.sh`):
 - `endpoint` — RDS MySQL hostname
