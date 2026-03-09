@@ -10,10 +10,6 @@ CREATE TABLE IF NOT EXISTS profiles (
     id              VARCHAR(64)     NOT NULL PRIMARY KEY,
     name            VARCHAR(256)    NOT NULL,
     email           VARCHAR(256)    NOT NULL,
-    subject         VARCHAR(64)     NOT NULL,
-    userName        VARCHAR(256)    NOT NULL,
-    region          VARCHAR(128)    NOT NULL,
-    userPoolId      VARCHAR(128)    NOT NULL,
     timezone        VARCHAR(64)     NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
