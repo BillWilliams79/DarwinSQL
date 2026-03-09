@@ -28,66 +28,15 @@ import pymysql
 
 # Worker profiles: Cognito sub UUIDs from admin-create-user
 WORKERS = [
-    {
-        'id': '0807ca6e-2f48-45b0-a9c4-15177859735b',
-        'name': 'E2E Worker 1',
-        'email': 'e2e-worker-1@test.invalid',
-        'userName': 'e2e-worker-1',
-        'port': 3000,
-    },
-    {
-        'id': 'c0479250-4db9-4586-ad2f-5662deafdcd9',
-        'name': 'E2E Worker 2',
-        'email': 'e2e-worker-2@test.invalid',
-        'userName': 'e2e-worker-2',
-        'port': 3001,
-    },
-    {
-        'id': 'de2018a8-964e-437d-8191-ca5b6f9cb8ac',
-        'name': 'E2E Worker 3',
-        'email': 'e2e-worker-3@test.invalid',
-        'userName': 'e2e-worker-3',
-        'port': 3002,
-    },
-    {
-        'id': '3e2a706e-9f79-4a74-9ca5-f783296b6f33',
-        'name': 'E2E Worker 4',
-        'email': 'e2e-worker-4@test.invalid',
-        'userName': 'e2e-worker-4',
-        'port': 3003,
-    },
-    {
-        'id': '2766f048-530d-40dd-8066-d8daf96ef0d9',
-        'name': 'E2E Worker 5',
-        'email': 'e2e-worker-5@test.invalid',
-        'userName': 'e2e-worker-5',
-        'port': 3004,
-    },
-    {
-        'id': '0e724beb-3a62-422f-923b-57633bfafc7f',
-        'name': 'E2E Worker 6',
-        'email': 'e2e-worker-6@test.invalid',
-        'userName': 'e2e-worker-6',
-        'port': 3005,
-    },
-    {
-        'id': 'cc5a9202-e1f0-4973-aa88-0caaba7a7140',
-        'name': 'E2E Worker 7',
-        'email': 'e2e-worker-7@test.invalid',
-        'userName': 'e2e-worker-7',
-        'port': 3006,
-    },
-    {
-        'id': '3857b0d2-1b9b-4f64-8660-6a5b8db29c33',
-        'name': 'E2E Worker 8',
-        'email': 'e2e-worker-8@test.invalid',
-        'userName': 'e2e-worker-8',
-        'port': 3007,
-    },
+    {'id': '0807ca6e-2f48-45b0-a9c4-15177859735b', 'name': 'E2E Worker 1', 'email': 'e2e-worker-1@test.invalid', 'port': 3000},
+    {'id': 'c0479250-4db9-4586-ad2f-5662deafdcd9', 'name': 'E2E Worker 2', 'email': 'e2e-worker-2@test.invalid', 'port': 3001},
+    {'id': 'de2018a8-964e-437d-8191-ca5b6f9cb8ac', 'name': 'E2E Worker 3', 'email': 'e2e-worker-3@test.invalid', 'port': 3002},
+    {'id': '3e2a706e-9f79-4a74-9ca5-f783296b6f33', 'name': 'E2E Worker 4', 'email': 'e2e-worker-4@test.invalid', 'port': 3003},
+    {'id': '2766f048-530d-40dd-8066-d8daf96ef0d9', 'name': 'E2E Worker 5', 'email': 'e2e-worker-5@test.invalid', 'port': 3004},
+    {'id': '0e724beb-3a62-422f-923b-57633bfafc7f', 'name': 'E2E Worker 6', 'email': 'e2e-worker-6@test.invalid', 'port': 3005},
+    {'id': 'cc5a9202-e1f0-4973-aa88-0caaba7a7140', 'name': 'E2E Worker 7', 'email': 'e2e-worker-7@test.invalid', 'port': 3006},
+    {'id': '3857b0d2-1b9b-4f64-8660-6a5b8db29c33', 'name': 'E2E Worker 8', 'email': 'e2e-worker-8@test.invalid', 'port': 3007},
 ]
-
-REGION = 'us-west-1'
-USER_POOL_ID = 'us-west-1_jqN0WLASK'
 
 
 def get_connection(database):
@@ -115,9 +64,9 @@ def seed_workers(conn, database):
         seeded = 0
         for w in WORKERS:
             cur.execute(
-                "INSERT IGNORE INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (w['id'], w['name'], w['email'], w['id'], w['userName'], REGION, USER_POOL_ID),
+                "INSERT IGNORE INTO profiles (id, name, email) "
+                "VALUES (%s, %s, %s)",
+                (w['id'], w['name'], w['email']),
             )
             if cur.rowcount:
                 seeded += 1

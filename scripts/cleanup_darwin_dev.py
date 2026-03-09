@@ -42,7 +42,9 @@ TARGET_DATABASE = 'darwin_dev'
 # ============================================================================
 # GUARDRAIL 3: Only known tables
 # ============================================================================
-VALID_TABLES = ('profiles', 'domains', 'areas', 'tasks')
+VALID_TABLES = ('profiles', 'domains', 'areas', 'tasks', 'projects', 'categories',
+                'priorities', 'priority_sessions', 'swarm_sessions', 'dev_servers',
+                'priority_card_order')
 
 # Test data identification patterns
 # These match the creator_fk/id patterns used by each test suite

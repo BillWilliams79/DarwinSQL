@@ -33,22 +33,18 @@ E2E_TEST_PROFILE = {
     'id': E2E_TEST_SUB,
     'name': 'E2E Test User',
     'email': 'e2e-test@test.invalid',
-    'subject': E2E_TEST_SUB,
-    'userName': 'e2e-test-user',
-    'region': 'us-west-1',
-    'userPoolId': 'us-west-1_jqN0WLASK',
 }
 
 # Parallel E2E worker profiles — one per dev server port (3000-3007)
 E2E_WORKERS = [
-    {'id': '0807ca6e-2f48-45b0-a9c4-15177859735b', 'name': 'E2E Worker 1', 'email': 'e2e-worker-1@test.invalid', 'userName': 'e2e-worker-1'},
-    {'id': 'c0479250-4db9-4586-ad2f-5662deafdcd9', 'name': 'E2E Worker 2', 'email': 'e2e-worker-2@test.invalid', 'userName': 'e2e-worker-2'},
-    {'id': 'de2018a8-964e-437d-8191-ca5b6f9cb8ac', 'name': 'E2E Worker 3', 'email': 'e2e-worker-3@test.invalid', 'userName': 'e2e-worker-3'},
-    {'id': '3e2a706e-9f79-4a74-9ca5-f783296b6f33', 'name': 'E2E Worker 4', 'email': 'e2e-worker-4@test.invalid', 'userName': 'e2e-worker-4'},
-    {'id': '2766f048-530d-40dd-8066-d8daf96ef0d9', 'name': 'E2E Worker 5', 'email': 'e2e-worker-5@test.invalid', 'userName': 'e2e-worker-5'},
-    {'id': '0e724beb-3a62-422f-923b-57633bfafc7f', 'name': 'E2E Worker 6', 'email': 'e2e-worker-6@test.invalid', 'userName': 'e2e-worker-6'},
-    {'id': 'cc5a9202-e1f0-4973-aa88-0caaba7a7140', 'name': 'E2E Worker 7', 'email': 'e2e-worker-7@test.invalid', 'userName': 'e2e-worker-7'},
-    {'id': '3857b0d2-1b9b-4f64-8660-6a5b8db29c33', 'name': 'E2E Worker 8', 'email': 'e2e-worker-8@test.invalid', 'userName': 'e2e-worker-8'},
+    {'id': '0807ca6e-2f48-45b0-a9c4-15177859735b', 'name': 'E2E Worker 1', 'email': 'e2e-worker-1@test.invalid'},
+    {'id': 'c0479250-4db9-4586-ad2f-5662deafdcd9', 'name': 'E2E Worker 2', 'email': 'e2e-worker-2@test.invalid'},
+    {'id': 'de2018a8-964e-437d-8191-ca5b6f9cb8ac', 'name': 'E2E Worker 3', 'email': 'e2e-worker-3@test.invalid'},
+    {'id': '3e2a706e-9f79-4a74-9ca5-f783296b6f33', 'name': 'E2E Worker 4', 'email': 'e2e-worker-4@test.invalid'},
+    {'id': '2766f048-530d-40dd-8066-d8daf96ef0d9', 'name': 'E2E Worker 5', 'email': 'e2e-worker-5@test.invalid'},
+    {'id': '0e724beb-3a62-422f-923b-57633bfafc7f', 'name': 'E2E Worker 6', 'email': 'e2e-worker-6@test.invalid'},
+    {'id': 'cc5a9202-e1f0-4973-aa88-0caaba7a7140', 'name': 'E2E Worker 7', 'email': 'e2e-worker-7@test.invalid'},
+    {'id': '3857b0d2-1b9b-4f64-8660-6a5b8db29c33', 'name': 'E2E Worker 8', 'email': 'e2e-worker-8@test.invalid'},
 ]
 
 
@@ -88,10 +84,7 @@ def create_tables(conn):
                 id              VARCHAR(64)     NOT NULL PRIMARY KEY,
                 name            VARCHAR(256)    NOT NULL,
                 email           VARCHAR(256)    NOT NULL,
-                subject         VARCHAR(64)     NOT NULL,
-                userName        VARCHAR(256)    NOT NULL,
-                region          VARCHAR(128)    NOT NULL,
-                userPoolId      VARCHAR(128)    NOT NULL,
+                timezone        VARCHAR(64)     NULL,
                 create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
                 update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
             )
@@ -153,7 +146,146 @@ def create_tables(conn):
             )
         """)
 
-        print("Tables created: profiles, domains, areas, tasks")
+        # Roadmap / priority tracking tables
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                project_name    VARCHAR(128)    NOT NULL,
+                creator_fk      VARCHAR(64)     NOT NULL,
+                sort_order      SMALLINT        NULL,
+                closed          TINYINT(1)      NOT NULL DEFAULT 0,
+                create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+                update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (creator_fk)
+                    REFERENCES profiles (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                category_name   VARCHAR(128)    NOT NULL,
+                project_fk      INT             NOT NULL,
+                creator_fk      VARCHAR(64)     NOT NULL,
+                sort_order      SMALLINT        NULL,
+                sort_mode       VARCHAR(8)      NOT NULL DEFAULT 'priority',
+                closed          TINYINT(1)      NOT NULL DEFAULT 0,
+                create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+                update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (project_fk)
+                    REFERENCES projects (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE,
+                FOREIGN KEY (creator_fk)
+                    REFERENCES profiles (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS priorities (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                title           VARCHAR(256)    NOT NULL,
+                description     TEXT            NULL,
+                in_progress     TINYINT(1)      NOT NULL DEFAULT 0,
+                closed          TINYINT(1)      NOT NULL DEFAULT 0,
+                started_at      TIMESTAMP       NULL,
+                completed_at    TIMESTAMP       NULL,
+                project_fk      INT             NULL,
+                category_fk     INT             NULL,
+                creator_fk      VARCHAR(64)     NOT NULL,
+                sort_order      SMALLINT        NULL,
+                create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+                update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+                scheduled       TINYINT         NOT NULL DEFAULT 0,
+                FOREIGN KEY (project_fk)
+                    REFERENCES projects (id)
+                    ON UPDATE CASCADE ON DELETE SET NULL,
+                FOREIGN KEY (category_fk)
+                    REFERENCES categories (id)
+                    ON UPDATE CASCADE ON DELETE SET NULL,
+                FOREIGN KEY (creator_fk)
+                    REFERENCES profiles (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+
+        # Swarm session management
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS swarm_sessions (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                branch          VARCHAR(128)    NULL,
+                task_name       VARCHAR(128)    NULL,
+                source_type     VARCHAR(16)     NULL,
+                source_ref      VARCHAR(64)     NULL,
+                title           VARCHAR(256)    NULL,
+                pr_url          VARCHAR(512)    NULL,
+                swarm_status    VARCHAR(16)     NOT NULL DEFAULT 'starting',
+                worktree_path   VARCHAR(512)    NULL,
+                started_at      TIMESTAMP       NULL,
+                completed_at    TIMESTAMP       NULL,
+                creator_fk      VARCHAR(64)     NOT NULL,
+                create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+                update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (creator_fk)
+                    REFERENCES profiles (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS priority_sessions (
+                priority_fk     INT             NOT NULL,
+                session_fk      INT             NOT NULL,
+                PRIMARY KEY (priority_fk, session_fk),
+                FOREIGN KEY (priority_fk)
+                    REFERENCES priorities (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE,
+                FOREIGN KEY (session_fk)
+                    REFERENCES swarm_sessions (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+
+        # Dev server port coordination
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dev_servers (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                port            SMALLINT        NOT NULL,
+                pid             INT             NOT NULL,
+                workspace_path  VARCHAR(512)    NOT NULL,
+                session_fk      INT             NULL,
+                creator_fk      VARCHAR(64)     NOT NULL,
+                started_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+                update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_port (port),
+                FOREIGN KEY (creator_fk)
+                    REFERENCES profiles (id)
+                    ON UPDATE CASCADE ON DELETE CASCADE,
+                FOREIGN KEY (session_fk)
+                    REFERENCES swarm_sessions (id)
+                    ON UPDATE CASCADE ON DELETE SET NULL
+            )
+        """)
+
+        # Priority card hand-sort order
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS priority_card_order (
+                id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                domain_id       INT             NOT NULL,
+                task_id         INT             NOT NULL,
+                sort_order      SMALLINT        NOT NULL,
+                UNIQUE KEY uq_domain_task (domain_id, task_id)
+            )
+        """)
+
+        print("Tables created: profiles, domains, areas, tasks, projects, categories, "
+              "priorities, swarm_sessions, priority_sessions, dev_servers, priority_card_order")
 
 
 def grant_claude_ro(conn):
@@ -170,9 +302,9 @@ def seed_e2e_user(conn):
         cur.execute(f"USE {TARGET_DATABASE}")
         p = E2E_TEST_PROFILE
         cur.execute(
-            "INSERT IGNORE INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (p['id'], p['name'], p['email'], p['subject'], p['userName'], p['region'], p['userPoolId']),
+            "INSERT IGNORE INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (p['id'], p['name'], p['email']),
         )
         if cur.rowcount:
             print(f"Seeded E2E test user: {p['id']}")
@@ -194,9 +326,9 @@ def seed_e2e_user(conn):
         cur.execute(f"USE {TARGET_DATABASE}")
         for w in E2E_WORKERS:
             cur.execute(
-                "INSERT IGNORE INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (w['id'], w['name'], w['email'], w['id'], w['userName'], 'us-west-1', 'us-west-1_jqN0WLASK'),
+                "INSERT IGNORE INTO profiles (id, name, email) "
+                "VALUES (%s, %s, %s)",
+                (w['id'], w['name'], w['email']),
             )
             if cur.rowcount:
                 seeded += 1

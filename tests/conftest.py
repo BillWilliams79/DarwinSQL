@@ -52,10 +52,9 @@ def seed_test_profile(db_connection, test_creator_fk):
     with db_connection.cursor() as cur:
         # Profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator_fk, 'Schema Test', 'schema@test.com',
-             test_creator_fk, test_creator_fk, 'us-west-1', 'test-pool'),
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator_fk, 'Schema Test', 'schema@test.com'),
         )
         # Domain
         cur.execute(
@@ -78,8 +77,15 @@ def seed_test_profile(db_connection, test_creator_fk):
 
     yield ids
 
-    # Cleanup
+    # Cleanup — FK-safe order (leaves first, roots last)
     with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM priority_sessions WHERE priority_fk IN "
+                    "(SELECT id FROM priorities WHERE creator_fk = %s)", (test_creator_fk,))
+        cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM priorities WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM areas WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM domains WHERE creator_fk = %s", (test_creator_fk,))

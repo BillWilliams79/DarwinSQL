@@ -18,10 +18,9 @@ def test_delete_profile_cascades_to_domains(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain under profile
@@ -49,10 +48,9 @@ def test_delete_domain_cascades_to_areas(db_connection):
     with db_connection.cursor() as cur:
         # Create profile (to satisfy domain FK)
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain
@@ -89,10 +87,9 @@ def test_delete_area_cascades_to_tasks(db_connection):
     with db_connection.cursor() as cur:
         # Create profile (to satisfy FKs)
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain
@@ -142,10 +139,9 @@ def test_delete_profile_cascades_full_hierarchy(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain
@@ -195,10 +191,9 @@ def test_delete_domain_cascades_full_subtree(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain
@@ -300,10 +295,9 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
         # Create two profiles
         for creator in [creator1, creator2]:
             cur.execute(
-                "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (creator, f'Profile {creator}', f'{creator}@test.com',
-                 creator, creator, 'us-west-1', 'test-pool')
+                "INSERT INTO profiles (id, name, email) "
+                "VALUES (%s, %s, %s)",
+                (creator, f'Profile {creator}', f'{creator}@test.com')
             )
 
         # Create two domains (one per creator)
@@ -340,6 +334,227 @@ def test_delete_domain_does_not_cascade_cross_creator(db_connection):
     db_connection.rollback()
 
 
+# ---------------------------------------------------------------------------
+# Cascade Delete Tests — Roadmap Tables
+# ---------------------------------------------------------------------------
+
+def test_delete_project_cascades_to_categories(db_connection):
+    """DELETE project → all categories with that project_fk are deleted"""
+    test_creator = 'cascade-test-project-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Project', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO categories (category_name, project_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Cascade Test Category', project_id, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        category_id = cur.fetchone()['id']
+
+        # Delete project
+        cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+
+        # Verify category is gone
+        cur.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
+        assert cur.fetchone() is None
+
+    db_connection.rollback()
+
+
+def test_delete_category_sets_priority_fk_null(db_connection):
+    """DELETE category → priorities.category_fk set to NULL (ON DELETE SET NULL)"""
+    test_creator = 'cascade-test-category-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Project', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO categories (category_name, project_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Cascade Test Category', project_id, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        category_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO priorities (title, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Cascade Test Priority', category_id, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        priority_id = cur.fetchone()['id']
+
+        # Delete category
+        cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+
+        # Priority survives but category_fk is NULL
+        cur.execute("SELECT category_fk FROM priorities WHERE id = %s", (priority_id,))
+        row = cur.fetchone()
+        assert row is not None
+        assert row['category_fk'] is None
+
+    db_connection.rollback()
+
+
+def test_delete_priority_cascades_to_priority_sessions(db_connection):
+    """DELETE priority → associated priority_sessions rows are deleted"""
+    test_creator = 'cascade-test-priority-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Priority', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        priority_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO priority_sessions (priority_fk, session_fk) VALUES (%s, %s)",
+            (priority_id, session_id)
+        )
+
+        # Delete priority
+        cur.execute("DELETE FROM priorities WHERE id = %s", (priority_id,))
+
+        # Verify priority_session link is gone
+        cur.execute(
+            "SELECT * FROM priority_sessions WHERE priority_fk = %s AND session_fk = %s",
+            (priority_id, session_id)
+        )
+        assert cur.fetchone() is None
+
+    db_connection.rollback()
+
+
+def test_delete_swarm_session_cascades_to_priority_sessions(db_connection):
+    """DELETE swarm_session → associated priority_sessions rows are deleted,
+    dev_servers.session_fk set to NULL"""
+    test_creator = 'cascade-test-session-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Priority', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        priority_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO priority_sessions (priority_fk, session_fk) VALUES (%s, %s)",
+            (priority_id, session_id)
+        )
+
+        # Delete swarm session
+        cur.execute("DELETE FROM swarm_sessions WHERE id = %s", (session_id,))
+
+        # Verify priority_session link is gone
+        cur.execute(
+            "SELECT * FROM priority_sessions WHERE session_fk = %s",
+            (session_id,)
+        )
+        assert cur.fetchone() is None
+
+        # Priority itself survives
+        cur.execute("SELECT id FROM priorities WHERE id = %s", (priority_id,))
+        assert cur.fetchone() is not None
+
+    db_connection.rollback()
+
+
+def test_delete_profile_cascades_to_roadmap_tables(db_connection):
+    """DELETE profile → cascades through projects→categories, priorities, swarm_sessions"""
+    test_creator = 'cascade-test-roadmap-full'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Project', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Priority', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        priority_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        # Delete profile — should cascade to all owned records
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
+
+        cur.execute("SELECT id FROM projects WHERE id = %s", (project_id,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM priorities WHERE id = %s", (priority_id,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM swarm_sessions WHERE id = %s", (session_id,))
+        assert cur.fetchone() is None
+
+    db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Cascade Isolation Tests (Verify Cascades Don't Delete Unrelated Records)
+# ---------------------------------------------------------------------------
+
 def test_delete_area_does_not_affect_sibling_areas(db_connection):
     """DELETE area → only cascades to tasks under that area,
     not to tasks under sibling areas"""
@@ -348,10 +563,9 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
     with db_connection.cursor() as cur:
         # Create profile
         cur.execute(
-            "INSERT INTO profiles (id, name, email, subject, userName, region, userPoolId) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (test_creator, 'Cascade Test Profile', 'cascade@test.com',
-             test_creator, test_creator, 'us-west-1', 'test-pool')
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
 
         # Create domain
