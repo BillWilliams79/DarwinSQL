@@ -6,9 +6,10 @@
 |--------|---------|
 | `cleanup_darwin_dev.py` | Remove orphaned test data from darwin_dev |
 | `cleanup_e2e.py` | Comprehensive E2E test data cleanup (darwin or darwin_dev) |
-| `seed_darwin_dev.py` | Create darwin_dev database, all 11 tables, and seed E2E test users |
+| `seed_darwin_dev.py` | Create darwin_dev database, all 12 tables, and seed E2E test users |
 | `seed_e2e_workers.py` | Seed 8 parallel E2E worker profiles |
-| `recreate_darwin_dev.sql` | Drop and recreate all 11 darwin_dev tables from scratch |
+| `recreate_darwin_dev.sql` | Drop and recreate all 12 darwin_dev tables from scratch |
+| `add-api-route.sh` | Add a new /darwin/{table} route to Darwin API Gateway (ANY + OPTIONS, CORS, Lambda policy, deploy) |
 
 ## Guardrails
 
@@ -49,6 +50,25 @@ python3 ../DarwinSQL/scripts/seed_darwin_dev.py
 # Seed worker profiles
 python3 ../DarwinSQL/scripts/seed_e2e_workers.py
 python3 ../DarwinSQL/scripts/seed_e2e_workers.py --database darwin
+```
+
+## add-api-route.sh
+
+Adds a new `/darwin/{table_name}` resource to the Darwin REST API (API ID `k5j0ftr527`).
+Requires darwinroot AWS credentials (`~/.darwin-credentials/aws_credentials.sh`).
+
+```bash
+# Load darwinroot credentials first
+. ~/.darwin-credentials/aws_credentials.sh
+
+# Dry run — print commands without executing
+./DarwinSQL/scripts/add-api-route.sh --dry-run <table_name>
+
+# Create route (ANY + OPTIONS methods, Lambda policy, deploy to eng)
+./DarwinSQL/scripts/add-api-route.sh <table_name>
+
+# List existing resources
+./DarwinSQL/scripts/add-api-route.sh --list
 ```
 
 ## Prerequisites

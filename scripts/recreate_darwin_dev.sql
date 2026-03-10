@@ -1,14 +1,14 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 11 tables in FK-dependency order
+-- All 12 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS priority_card_order, dev_servers, priority_sessions,
     priorities, swarm_sessions, categories, projects,
-    tasks, areas, domains, profiles;
+    tasks, recurring_tasks, areas, domains, profiles;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- Core domain model
@@ -53,6 +53,28 @@ CREATE TABLE areas (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+CREATE TABLE recurring_tasks (
+    id               INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    description      VARCHAR(1024)   NOT NULL,
+    recurrence       VARCHAR(16)     NOT NULL,
+    anchor_date      DATE            NOT NULL,
+    area_fk          INT             NOT NULL,
+    priority         TINYINT(1)      NOT NULL DEFAULT 0,
+    accumulate       TINYINT(1)      NOT NULL DEFAULT 1,
+    insert_position  VARCHAR(8)      NOT NULL DEFAULT 'bottom',
+    active           TINYINT(1)      NOT NULL DEFAULT 1,
+    last_generated   DATE            NULL,
+    creator_fk       VARCHAR(64)     NOT NULL,
+    create_ts        TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts        TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_fk)
+        REFERENCES areas (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE TABLE tasks (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     priority        BOOLEAN         NOT NULL,
@@ -64,12 +86,16 @@ CREATE TABLE tasks (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     done_ts         TIMESTAMP       NULL,
     sort_order      SMALLINT        NULL,
+    recurring_task_fk INT           NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (area_fk)
         REFERENCES areas (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (recurring_task_fk)
+        REFERENCES recurring_tasks (id)
+        ON DELETE SET NULL
 );
 
 -- Roadmap / priority tracking

@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 11 tables after all migrations.
+-- This file reflects the final state of all 12 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -51,6 +51,28 @@ CREATE TABLE IF NOT EXISTS areas (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS recurring_tasks (
+    id               INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    description      VARCHAR(1024)   NOT NULL,
+    recurrence       VARCHAR(16)     NOT NULL,
+    anchor_date      DATE            NOT NULL,
+    area_fk          INT             NOT NULL,
+    priority         TINYINT(1)      NOT NULL DEFAULT 0,
+    accumulate       TINYINT(1)      NOT NULL DEFAULT 1,
+    insert_position  VARCHAR(8)      NOT NULL DEFAULT 'bottom',
+    active           TINYINT(1)      NOT NULL DEFAULT 1,
+    last_generated   DATE            NULL,
+    creator_fk       VARCHAR(64)     NOT NULL,
+    create_ts        TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts        TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (area_fk)
+        REFERENCES areas (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     priority        BOOLEAN         NOT NULL,
@@ -62,12 +84,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     done_ts         TIMESTAMP       NULL,
     sort_order      SMALLINT        NULL,
+    recurring_task_fk INT           NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (area_fk)
         REFERENCES areas (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (recurring_task_fk)
+        REFERENCES recurring_tasks (id)
+        ON DELETE SET NULL
 );
 
 -- ============================================================================

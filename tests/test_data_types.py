@@ -194,7 +194,7 @@ def test_tasks_columns(db_connection):
 
     expected_fields = [
         'id', 'priority', 'done', 'description', 'area_fk', 'creator_fk',
-        'create_ts', 'update_ts', 'done_ts', 'sort_order'
+        'create_ts', 'update_ts', 'done_ts', 'sort_order', 'recurring_task_fk'
     ]
     assert set(columns.keys()) == set(expected_fields)
 
@@ -241,6 +241,11 @@ def test_tasks_columns(db_connection):
     # sort_order: SMALLINT, NULL
     assert columns['sort_order']['Type'] == 'smallint'
     assert columns['sort_order']['Null'] == 'YES'
+
+    # recurring_task_fk: INT, NULL, MUL
+    assert columns['recurring_task_fk']['Type'] == 'int'
+    assert columns['recurring_task_fk']['Null'] == 'YES'
+    assert columns['recurring_task_fk']['Key'] == 'MUL'
 
 
 def test_projects_columns(db_connection):
@@ -573,14 +578,107 @@ def test_priority_card_order_columns(db_connection):
     assert columns['sort_order']['Null'] == 'NO'
 
 
+def test_recurring_tasks_columns(db_connection):
+    """Verify recurring_tasks column definitions match schema.sql.
+
+    Expected columns (migration 017):
+    - id: INT, PRI, AUTO_INCREMENT
+    - description: VARCHAR(1024), NOT NULL
+    - recurrence: VARCHAR(16), NOT NULL
+    - anchor_date: DATE, NOT NULL
+    - area_fk: INT, NOT NULL, MUL
+    - priority: TINYINT(1), NOT NULL, DEFAULT 0
+    - accumulate: TINYINT(1), NOT NULL, DEFAULT 1
+    - insert_position: VARCHAR(8), NOT NULL, DEFAULT 'bottom'
+    - active: TINYINT(1), NOT NULL, DEFAULT 1
+    - last_generated: DATE, NULL
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
+    - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE recurring_tasks")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = [
+        'id', 'description', 'recurrence', 'anchor_date', 'area_fk',
+        'priority', 'accumulate', 'insert_position', 'active',
+        'last_generated', 'creator_fk', 'create_ts', 'update_ts'
+    ]
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    # id: INT, PRI, AUTO_INCREMENT
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Null'] == 'NO'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    # description: VARCHAR(1024), NOT NULL
+    assert columns['description']['Type'] == 'varchar(1024)'
+    assert columns['description']['Null'] == 'NO'
+
+    # recurrence: VARCHAR(16), NOT NULL
+    assert columns['recurrence']['Type'] == 'varchar(16)'
+    assert columns['recurrence']['Null'] == 'NO'
+
+    # anchor_date: DATE, NOT NULL
+    assert columns['anchor_date']['Type'] == 'date'
+    assert columns['anchor_date']['Null'] == 'NO'
+
+    # area_fk: INT, NOT NULL, MUL
+    assert columns['area_fk']['Type'] == 'int'
+    assert columns['area_fk']['Null'] == 'NO'
+    assert columns['area_fk']['Key'] == 'MUL'
+
+    # priority: TINYINT(1), NOT NULL, DEFAULT 0
+    assert 'tinyint' in columns['priority']['Type'].lower()
+    assert columns['priority']['Null'] == 'NO'
+    assert columns['priority']['Default'] == '0'
+
+    # accumulate: TINYINT(1), NOT NULL, DEFAULT 1
+    assert 'tinyint' in columns['accumulate']['Type'].lower()
+    assert columns['accumulate']['Null'] == 'NO'
+    assert columns['accumulate']['Default'] == '1'
+
+    # insert_position: VARCHAR(8), NOT NULL, DEFAULT 'bottom'
+    assert columns['insert_position']['Type'] == 'varchar(8)'
+    assert columns['insert_position']['Null'] == 'NO'
+    assert columns['insert_position']['Default'] == 'bottom'
+
+    # active: TINYINT(1), NOT NULL, DEFAULT 1
+    assert 'tinyint' in columns['active']['Type'].lower()
+    assert columns['active']['Null'] == 'NO'
+    assert columns['active']['Default'] == '1'
+
+    # last_generated: DATE, NULL
+    assert columns['last_generated']['Type'] == 'date'
+    assert columns['last_generated']['Null'] == 'YES'
+
+    # creator_fk: VARCHAR(64), NOT NULL, MUL
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+    # create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
+    assert 'timestamp' in columns['create_ts']['Type']
+    assert columns['create_ts']['Null'] == 'YES'
+    assert columns['create_ts']['Default'] == 'CURRENT_TIMESTAMP'
+
+    # update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
+    assert 'timestamp' in columns['update_ts']['Type']
+    assert columns['update_ts']['Null'] == 'YES'
+    assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
+
+
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 11 expected tables."""
+    """Verify darwin_dev database contains all 12 expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
 
     expected_tables = {
-        'profiles', 'domains', 'areas', 'tasks',
+        'profiles', 'domains', 'areas', 'recurring_tasks', 'tasks',
         'projects', 'categories', 'priorities', 'priority_sessions',
         'swarm_sessions', 'dev_servers', 'priority_card_order',
     }

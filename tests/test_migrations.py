@@ -54,11 +54,13 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     sql = sql_content
 
     # Replace table names with prefixed versions (longest first to avoid partial matches)
+    # 'recurring_tasks' must appear before 'tasks' to prevent partial substitution
     table_names = [
         'priority_card_order',
         'priority_sessions',
         'swarm_sessions',
         'dev_servers',
+        'recurring_tasks',
         'categories',
         'priorities',
         'profiles',
@@ -141,10 +143,11 @@ def _get_dependency_ordered_migrations():
 # ---------------------------------------------------------------------------
 
 # All table types in FK-safe drop order (leaves first, roots last)
+# recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 ALL_TABLE_SUFFIXES = [
     'priority_card_order', 'dev_servers', 'priority_sessions',
     'priorities', 'swarm_sessions', 'categories', 'projects',
-    'tasks', 'areas', 'domains', 'profiles',
+    'tasks', 'recurring_tasks', 'areas', 'domains', 'profiles',
 ]
 
 
