@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS recurring_tasks (
     anchor_date      DATE            NOT NULL,
     area_fk          INT             NOT NULL,
     priority         TINYINT(1)      NOT NULL DEFAULT 0,
-    accumulate       TINYINT(1)      NOT NULL DEFAULT 1,
+    accumulate       TINYINT(1)      NOT NULL DEFAULT 0,
     insert_position  VARCHAR(8)      NOT NULL DEFAULT 'bottom',
     active           TINYINT(1)      NOT NULL DEFAULT 1,
     last_generated   DATE            NULL,
