@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     name            VARCHAR(256)    NOT NULL,
     email           VARCHAR(256)    NOT NULL,
     timezone        VARCHAR(64)     NULL,
+    theme_mode      VARCHAR(8)      NOT NULL DEFAULT 'light',
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
 );
