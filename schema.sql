@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS profiles (
     email           VARCHAR(256)    NOT NULL,
     timezone        VARCHAR(64)     NULL,
     theme_mode      VARCHAR(8)      NOT NULL DEFAULT 'light',
+    app_tasks       TINYINT(1)      NOT NULL DEFAULT 1,
+    app_maps        TINYINT(1)      NOT NULL DEFAULT 1,
+    app_swarm       TINYINT(1)      NOT NULL DEFAULT 0,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
 );
@@ -121,6 +124,7 @@ CREATE TABLE IF NOT EXISTS categories (
     creator_fk      VARCHAR(64)     NOT NULL,
     sort_order      SMALLINT        NULL,
     sort_mode       VARCHAR(8)      NOT NULL DEFAULT 'hand',
+    color           VARCHAR(9)      NULL,
     closed          TINYINT(1)      NOT NULL DEFAULT 0,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,

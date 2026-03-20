@@ -296,11 +296,15 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
 def test_migration_final_schema_matches_profiles(db_connection, migration_test_prefix):
     """After all migrations, profiles table schema matches schema.sql.
 
-    Expected final state (post migration 015 slim-down):
+    Expected final state (post migration 026):
     - id: VARCHAR(64), PRI
     - name: VARCHAR(256), NOT NULL
     - email: VARCHAR(256), NOT NULL
     - timezone: VARCHAR(64), NULL
+    - theme_mode: VARCHAR(8), NOT NULL, DEFAULT 'light'
+    - app_tasks: TINYINT(1), NOT NULL, DEFAULT 1
+    - app_maps: TINYINT(1), NOT NULL, DEFAULT 1
+    - app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     """
@@ -316,8 +320,9 @@ def test_migration_final_schema_matches_profiles(db_connection, migration_test_p
         cur.execute(f"DESCRIBE {table_name}")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    # Verify schema — 6 columns after slim-down
-    expected_fields = {'id', 'name', 'email', 'timezone', 'create_ts', 'update_ts'}
+    # Verify schema — 10 columns after migration 026
+    expected_fields = {'id', 'name', 'email', 'timezone', 'theme_mode',
+                       'app_tasks', 'app_maps', 'app_swarm', 'create_ts', 'update_ts'}
     assert set(columns.keys()) == expected_fields, \
         f"Unexpected columns: {set(columns.keys()) - expected_fields}"
 
@@ -332,6 +337,22 @@ def test_migration_final_schema_matches_profiles(db_connection, migration_test_p
 
     assert columns['timezone']['Type'] == 'varchar(64)'
     assert columns['timezone']['Null'] == 'YES'
+
+    assert columns['theme_mode']['Type'] == 'varchar(8)'
+    assert columns['theme_mode']['Null'] == 'NO'
+    assert columns['theme_mode']['Default'] == 'light'
+
+    assert 'tinyint' in columns['app_tasks']['Type']
+    assert columns['app_tasks']['Null'] == 'NO'
+    assert columns['app_tasks']['Default'] == '1'
+
+    assert 'tinyint' in columns['app_maps']['Type']
+    assert columns['app_maps']['Null'] == 'NO'
+    assert columns['app_maps']['Default'] == '1'
+
+    assert 'tinyint' in columns['app_swarm']['Type']
+    assert columns['app_swarm']['Null'] == 'NO'
+    assert columns['app_swarm']['Default'] == '0'
 
     assert 'timestamp' in columns['create_ts']['Type']
     assert columns['create_ts']['Null'] == 'YES'
