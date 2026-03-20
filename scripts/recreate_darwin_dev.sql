@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 12 tables in FK-dependency order
+-- All 15 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS priority_card_order, dev_servers, priority_sessions,
+DROP TABLE IF EXISTS map_coordinates, map_runs, map_routes,
+    priority_card_order, dev_servers, priority_sessions,
     priorities, swarm_sessions, categories, projects,
     tasks, recurring_tasks, areas, domains, profiles;
 SET FOREIGN_KEY_CHECKS = 1;
@@ -220,4 +221,58 @@ CREATE TABLE priority_card_order (
     task_id         INT             NOT NULL,
     sort_order      SMALLINT        NOT NULL,
     UNIQUE KEY uq_domain_task (domain_id, task_id)
+);
+
+-- Maps — Cyclemeter ride/hike data
+
+CREATE TABLE map_routes (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    route_id        INT             NOT NULL,
+    name            VARCHAR(256)    NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE map_runs (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    run_id          INT             NOT NULL,
+    map_route_fk    INT             NULL,
+    activity_id     INT             NOT NULL,
+    activity_name   VARCHAR(16)     NOT NULL,
+    start_time      DATETIME        NOT NULL,
+    run_time_sec    INT             NOT NULL,
+    stopped_time_sec INT            NOT NULL DEFAULT 0,
+    distance_mi     DECIMAL(6,1)    NOT NULL,
+    ascent_ft       INT             NULL,
+    descent_ft      INT             NULL,
+    calories        INT             NULL,
+    max_speed_mph   DECIMAL(5,1)    NULL,
+    avg_speed_mph   DECIMAL(5,2)    NULL,
+    notes           TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (map_route_fk)
+        REFERENCES map_routes (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE map_coordinates (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    map_run_fk      INT             NOT NULL,
+    seq             INT             NOT NULL,
+    latitude        DECIMAL(10,7)   NOT NULL,
+    longitude       DECIMAL(10,7)   NOT NULL,
+    altitude        DECIMAL(7,1)    NULL,
+    FOREIGN KEY (map_run_fk)
+        REFERENCES map_runs (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    INDEX idx_map_coordinates_run (map_run_fk)
 );

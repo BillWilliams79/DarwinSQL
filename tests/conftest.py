@@ -79,6 +79,10 @@ def seed_test_profile(db_connection, test_creator_fk):
 
     # Cleanup — FK-safe order (leaves first, roots last)
     with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM map_coordinates WHERE map_run_fk IN "
+                    "(SELECT id FROM map_runs WHERE creator_fk = %s)", (test_creator_fk,))
+        cur.execute("DELETE FROM map_runs WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM map_routes WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM priority_sessions WHERE priority_fk IN "
                     "(SELECT id FROM priorities WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))

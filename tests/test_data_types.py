@@ -671,8 +671,174 @@ def test_recurring_tasks_columns(db_connection):
     assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
 
 
+def test_map_routes_columns(db_connection):
+    """Verify map_routes column definitions match schema.sql.
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - route_id: INT, NOT NULL
+    - name: VARCHAR(256), NOT NULL
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
+    - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_routes")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'route_id', 'name', 'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['route_id']['Type'] == 'int'
+    assert columns['route_id']['Null'] == 'NO'
+
+    assert columns['name']['Type'] == 'varchar(256)'
+    assert columns['name']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+    assert 'timestamp' in columns['create_ts']['Type']
+    assert columns['create_ts']['Default'] == 'CURRENT_TIMESTAMP'
+
+    assert 'timestamp' in columns['update_ts']['Type']
+    assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
+
+
+def test_map_runs_columns(db_connection):
+    """Verify map_runs column definitions match schema.sql.
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - run_id: INT, NOT NULL
+    - map_route_fk: INT, NULL, MUL
+    - activity_id: INT, NOT NULL
+    - activity_name: VARCHAR(16), NOT NULL
+    - start_time: DATETIME, NOT NULL
+    - run_time_sec: INT, NOT NULL
+    - stopped_time_sec: INT, NOT NULL, DEFAULT 0
+    - distance_mi: DECIMAL(6,1), NOT NULL
+    - ascent_ft: INT, NULL
+    - descent_ft: INT, NULL
+    - calories: INT, NULL
+    - max_speed_mph: DECIMAL(5,1), NULL
+    - avg_speed_mph: DECIMAL(5,2), NULL
+    - notes: TEXT, NULL
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts: TIMESTAMP, NULL
+    - update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_runs")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = [
+        'id', 'run_id', 'map_route_fk', 'activity_id', 'activity_name',
+        'start_time', 'run_time_sec', 'stopped_time_sec', 'distance_mi',
+        'ascent_ft', 'descent_ft', 'calories', 'max_speed_mph', 'avg_speed_mph',
+        'notes', 'creator_fk', 'create_ts', 'update_ts'
+    ]
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['run_id']['Type'] == 'int'
+    assert columns['run_id']['Null'] == 'NO'
+
+    assert columns['map_route_fk']['Type'] == 'int'
+    assert columns['map_route_fk']['Null'] == 'YES'
+    assert columns['map_route_fk']['Key'] == 'MUL'
+
+    assert columns['activity_id']['Type'] == 'int'
+    assert columns['activity_id']['Null'] == 'NO'
+
+    assert columns['activity_name']['Type'] == 'varchar(16)'
+    assert columns['activity_name']['Null'] == 'NO'
+
+    assert columns['start_time']['Type'] == 'datetime'
+    assert columns['start_time']['Null'] == 'NO'
+
+    assert columns['run_time_sec']['Type'] == 'int'
+    assert columns['run_time_sec']['Null'] == 'NO'
+
+    assert columns['stopped_time_sec']['Type'] == 'int'
+    assert columns['stopped_time_sec']['Null'] == 'NO'
+    assert columns['stopped_time_sec']['Default'] == '0'
+
+    assert columns['distance_mi']['Type'] == 'decimal(6,1)'
+    assert columns['distance_mi']['Null'] == 'NO'
+
+    assert columns['ascent_ft']['Type'] == 'int'
+    assert columns['ascent_ft']['Null'] == 'YES'
+
+    assert columns['descent_ft']['Type'] == 'int'
+    assert columns['descent_ft']['Null'] == 'YES'
+
+    assert columns['calories']['Type'] == 'int'
+    assert columns['calories']['Null'] == 'YES'
+
+    assert columns['max_speed_mph']['Type'] == 'decimal(5,1)'
+    assert columns['max_speed_mph']['Null'] == 'YES'
+
+    assert columns['avg_speed_mph']['Type'] == 'decimal(5,2)'
+    assert columns['avg_speed_mph']['Null'] == 'YES'
+
+    assert columns['notes']['Type'] == 'text'
+    assert columns['notes']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+
+def test_map_coordinates_columns(db_connection):
+    """Verify map_coordinates column definitions match schema.sql.
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - map_run_fk: INT, NOT NULL, MUL
+    - seq: INT, NOT NULL
+    - latitude: DECIMAL(10,7), NOT NULL
+    - longitude: DECIMAL(10,7), NOT NULL
+    - altitude: DECIMAL(7,1), NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_coordinates")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'map_run_fk', 'seq', 'latitude', 'longitude', 'altitude']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['map_run_fk']['Type'] == 'int'
+    assert columns['map_run_fk']['Null'] == 'NO'
+    assert columns['map_run_fk']['Key'] == 'MUL'
+
+    assert columns['seq']['Type'] == 'int'
+    assert columns['seq']['Null'] == 'NO'
+
+    assert columns['latitude']['Type'] == 'decimal(10,7)'
+    assert columns['latitude']['Null'] == 'NO'
+
+    assert columns['longitude']['Type'] == 'decimal(10,7)'
+    assert columns['longitude']['Null'] == 'NO'
+
+    assert columns['altitude']['Type'] == 'decimal(7,1)'
+    assert columns['altitude']['Null'] == 'YES'
+
+
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 12 expected tables."""
+    """Verify darwin_dev database contains all 15 expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
@@ -681,6 +847,7 @@ def test_table_count(db_connection):
         'profiles', 'domains', 'areas', 'recurring_tasks', 'tasks',
         'projects', 'categories', 'priorities', 'priority_sessions',
         'swarm_sessions', 'dev_servers', 'priority_card_order',
+        'map_routes', 'map_runs', 'map_coordinates',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

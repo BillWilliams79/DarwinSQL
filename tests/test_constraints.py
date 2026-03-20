@@ -525,3 +525,156 @@ def test_swarm_status_default(db_connection, test_creator_fk):
         assert row['swarm_status'] == 'starting'
 
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Map table FK constraint tests
+# ---------------------------------------------------------------------------
+
+def test_map_route_fk_invalid_creator(db_connection):
+    """INSERT map_route with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_routes (route_id, name, creator_fk) "
+                "VALUES (%s, %s, %s)",
+                (1, 'Test Route', 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+def test_map_run_fk_invalid_creator(db_connection):
+    """INSERT map_run with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_runs (run_id, activity_id, activity_name, start_time, "
+                "run_time_sec, distance_mi, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (1, 4, 'Ride', '2025-01-01 00:00:00', 3600, 10.0, 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+def test_map_run_fk_invalid_route(db_connection, test_creator_fk):
+    """INSERT map_run with non-existent map_route_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_runs (run_id, map_route_fk, activity_id, activity_name, "
+                "start_time, run_time_sec, distance_mi, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (1, 999999, 4, 'Ride', '2025-01-01 00:00:00', 3600, 10.0, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_map_coordinate_fk_invalid_run(db_connection):
+    """INSERT map_coordinate with non-existent map_run_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_coordinates (map_run_fk, seq, latitude, longitude) "
+                "VALUES (%s, %s, %s, %s)",
+                (999999, 0, 37.7749295, -122.4194155)
+            )
+    db_connection.rollback()
+
+
+def test_map_run_cascade_delete_coordinates(db_connection, test_creator_fk):
+    """DELETE map_run → CASCADE deletes its coordinates"""
+    with db_connection.cursor() as cur:
+        # Create route
+        cur.execute(
+            "INSERT INTO map_routes (route_id, name, creator_fk) VALUES (%s, %s, %s)",
+            (99, 'Cascade Test Route', test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        route_id = cur.fetchone()['id']
+
+        # Create run
+        cur.execute(
+            "INSERT INTO map_runs (run_id, map_route_fk, activity_id, activity_name, "
+            "start_time, run_time_sec, distance_mi, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (99, route_id, 4, 'Ride', '2025-01-01 00:00:00', 3600, 10.0, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+
+        # Create coordinates
+        cur.execute(
+            "INSERT INTO map_coordinates (map_run_fk, seq, latitude, longitude, altitude) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (run_id, 0, 37.7749295, -122.4194155, 10.0)
+        )
+        cur.execute(
+            "INSERT INTO map_coordinates (map_run_fk, seq, latitude, longitude, altitude) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (run_id, 1, 37.7750000, -122.4195000, 11.0)
+        )
+
+        # Verify coordinates exist
+        cur.execute("SELECT COUNT(*) AS cnt FROM map_coordinates WHERE map_run_fk = %s", (run_id,))
+        assert cur.fetchone()['cnt'] == 2
+
+        # Delete run → should cascade
+        cur.execute("DELETE FROM map_runs WHERE id = %s", (run_id,))
+
+        # Verify coordinates are gone
+        cur.execute("SELECT COUNT(*) AS cnt FROM map_coordinates WHERE map_run_fk = %s", (run_id,))
+        assert cur.fetchone()['cnt'] == 0
+
+    db_connection.rollback()
+
+
+def test_map_route_delete_sets_run_fk_null(db_connection, test_creator_fk):
+    """DELETE map_route → ON DELETE SET NULL on map_runs.map_route_fk"""
+    with db_connection.cursor() as cur:
+        # Create route
+        cur.execute(
+            "INSERT INTO map_routes (route_id, name, creator_fk) VALUES (%s, %s, %s)",
+            (98, 'SetNull Test Route', test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        route_id = cur.fetchone()['id']
+
+        # Create run linked to route
+        cur.execute(
+            "INSERT INTO map_runs (run_id, map_route_fk, activity_id, activity_name, "
+            "start_time, run_time_sec, distance_mi, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (98, route_id, 4, 'Ride', '2025-01-01 00:00:00', 3600, 10.0, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+
+        # Delete route → should SET NULL on run's map_route_fk
+        cur.execute("DELETE FROM map_routes WHERE id = %s", (route_id,))
+
+        # Verify run still exists but map_route_fk is NULL
+        cur.execute("SELECT map_route_fk FROM map_runs WHERE id = %s", (run_id,))
+        row = cur.fetchone()
+        assert row is not None
+        assert row['map_route_fk'] is None
+
+    db_connection.rollback()
+
+
+def test_map_run_stopped_time_default(db_connection, test_creator_fk):
+    """INSERT map_run without stopped_time_sec → defaults to 0"""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO map_runs (run_id, activity_id, activity_name, "
+            "start_time, run_time_sec, distance_mi, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (97, 4, 'Ride', '2025-01-01 00:00:00', 3600, 10.0, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+
+        cur.execute("SELECT stopped_time_sec FROM map_runs WHERE id = %s", (run_id,))
+        row = cur.fetchone()
+        assert row['stopped_time_sec'] == 0
+
+    db_connection.rollback()
