@@ -9,11 +9,15 @@ definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 def test_profiles_columns(db_connection):
     """Verify profiles column definitions match schema.sql.
 
-    Expected columns (post migration 015 slim-down):
+    Expected columns (post migration 026):
     - id: VARCHAR(64), PRI, NOT NULL
     - name: VARCHAR(256), NOT NULL
     - email: VARCHAR(256), NOT NULL
     - timezone: VARCHAR(64), NULL
+    - theme_mode: VARCHAR(8), NOT NULL, DEFAULT 'light'
+    - app_tasks: TINYINT(1), NOT NULL, DEFAULT 1
+    - app_maps: TINYINT(1), NOT NULL, DEFAULT 1
+    - app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
     - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
@@ -22,7 +26,8 @@ def test_profiles_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     # Verify all expected columns exist
-    expected_fields = ['id', 'name', 'email', 'timezone', 'create_ts', 'update_ts']
+    expected_fields = ['id', 'name', 'email', 'timezone', 'theme_mode',
+                       'app_tasks', 'app_maps', 'app_swarm', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields), \
         f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
 
@@ -42,6 +47,26 @@ def test_profiles_columns(db_connection):
     # timezone: VARCHAR(64), NULL
     assert columns['timezone']['Type'] == 'varchar(64)'
     assert columns['timezone']['Null'] == 'YES'
+
+    # theme_mode: VARCHAR(8), NOT NULL, DEFAULT 'light'
+    assert columns['theme_mode']['Type'] == 'varchar(8)'
+    assert columns['theme_mode']['Null'] == 'NO'
+    assert columns['theme_mode']['Default'] == 'light'
+
+    # app_tasks: TINYINT(1), NOT NULL, DEFAULT 1
+    assert 'tinyint' in columns['app_tasks']['Type']
+    assert columns['app_tasks']['Null'] == 'NO'
+    assert columns['app_tasks']['Default'] == '1'
+
+    # app_maps: TINYINT(1), NOT NULL, DEFAULT 1
+    assert 'tinyint' in columns['app_maps']['Type']
+    assert columns['app_maps']['Null'] == 'NO'
+    assert columns['app_maps']['Default'] == '1'
+
+    # app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
+    assert 'tinyint' in columns['app_swarm']['Type']
+    assert columns['app_swarm']['Null'] == 'NO'
+    assert columns['app_swarm']['Default'] == '0'
 
     # create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     assert 'timestamp' in columns['create_ts']['Type']
@@ -303,6 +328,7 @@ def test_categories_columns(db_connection):
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - sort_order: SMALLINT, NULL
     - sort_mode: VARCHAR(8), NOT NULL, DEFAULT 'priority'
+    - color: VARCHAR(9), NULL
     - closed: TINYINT(1), NOT NULL, DEFAULT 0
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
@@ -312,7 +338,7 @@ def test_categories_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = ['id', 'category_name', 'project_fk', 'creator_fk',
-                       'sort_order', 'sort_mode', 'closed', 'create_ts', 'update_ts']
+                       'sort_order', 'sort_mode', 'color', 'closed', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -336,6 +362,9 @@ def test_categories_columns(db_connection):
     assert columns['sort_mode']['Type'] == 'varchar(8)'
     assert columns['sort_mode']['Null'] == 'NO'
     assert columns['sort_mode']['Default'] == 'priority'
+
+    assert columns['color']['Type'] == 'varchar(9)'
+    assert columns['color']['Null'] == 'YES'
 
     assert 'tinyint' in columns['closed']['Type']
     assert columns['closed']['Null'] == 'NO'
