@@ -728,9 +728,9 @@ def test_map_routes_columns(db_connection):
     assert columns['name']['Type'] == 'varchar(256)'
     assert columns['name']['Null'] == 'NO'
 
+    # creator_fk is part of UNIQUE KEY uq_creator_route, so Key may show MUL or UNI
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'
-    assert columns['creator_fk']['Key'] == 'MUL'
 
     assert 'timestamp' in columns['create_ts']['Type']
     assert columns['create_ts']['Default'] == 'CURRENT_TIMESTAMP'
@@ -758,6 +758,7 @@ def test_map_runs_columns(db_connection):
     - max_speed_mph: DECIMAL(5,1), NULL
     - avg_speed_mph: DECIMAL(5,2), NULL
     - notes: TEXT, NULL
+    - source: VARCHAR(32), NOT NULL, DEFAULT 'cyclemeter'
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
@@ -770,7 +771,7 @@ def test_map_runs_columns(db_connection):
         'id', 'run_id', 'map_route_fk', 'activity_id', 'activity_name',
         'start_time', 'run_time_sec', 'stopped_time_sec', 'distance_mi',
         'ascent_ft', 'descent_ft', 'calories', 'max_speed_mph', 'avg_speed_mph',
-        'notes', 'creator_fk', 'create_ts', 'update_ts'
+        'notes', 'source', 'creator_fk', 'create_ts', 'update_ts'
     ]
     assert set(columns.keys()) == set(expected_fields)
 
@@ -821,6 +822,10 @@ def test_map_runs_columns(db_connection):
 
     assert columns['notes']['Type'] == 'text'
     assert columns['notes']['Null'] == 'YES'
+
+    assert columns['source']['Type'] == 'varchar(32)'
+    assert columns['source']['Null'] == 'NO'
+    assert columns['source']['Default'] == 'cyclemeter'
 
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'

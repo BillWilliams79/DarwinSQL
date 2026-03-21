@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS map_routes (
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_creator_route (creator_fk, route_id),
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
@@ -265,9 +266,11 @@ CREATE TABLE IF NOT EXISTS map_runs (
     max_speed_mph   DECIMAL(5,1)    NULL,
     avg_speed_mph   DECIMAL(5,2)    NULL,
     notes           TEXT            NULL,
+    source          VARCHAR(32)     NOT NULL DEFAULT 'cyclemeter',
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_creator_run (creator_fk, run_id),
     FOREIGN KEY (map_route_fk)
         REFERENCES map_routes (id)
         ON UPDATE CASCADE ON DELETE SET NULL,

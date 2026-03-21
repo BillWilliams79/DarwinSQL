@@ -661,6 +661,40 @@ def test_map_route_delete_sets_run_fk_null(db_connection, test_creator_fk):
     db_connection.rollback()
 
 
+def test_map_routes_unique_creator_route(db_connection, test_creator_fk):
+    """INSERT duplicate (creator_fk, route_id) into map_routes → IntegrityError"""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO map_routes (route_id, name, creator_fk) VALUES (%s, %s, %s)",
+            (500, 'Unique Test Route', test_creator_fk)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_routes (route_id, name, creator_fk) VALUES (%s, %s, %s)",
+                (500, 'Duplicate Route', test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_map_runs_unique_creator_run(db_connection, test_creator_fk):
+    """INSERT duplicate (creator_fk, run_id) into map_runs → IntegrityError"""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO map_runs (run_id, activity_id, activity_name, start_time, "
+            "run_time_sec, distance_mi, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (500, 4, 'Ride', '2025-06-01 10:00:00', 3600, 10.0, test_creator_fk)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO map_runs (run_id, activity_id, activity_name, start_time, "
+                "run_time_sec, distance_mi, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (500, 4, 'Ride', '2025-06-02 10:00:00', 1800, 5.0, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
 def test_map_run_stopped_time_default(db_connection, test_creator_fk):
     """INSERT map_run without stopped_time_sec → defaults to 0"""
     with db_connection.cursor() as cur:
