@@ -327,7 +327,7 @@ def test_categories_columns(db_connection):
     - project_fk: INT, NOT NULL, MUL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - sort_order: SMALLINT, NULL
-    - sort_mode: VARCHAR(8), NOT NULL, DEFAULT 'priority'
+    - sort_mode: VARCHAR(8), NOT NULL, DEFAULT 'hand'
     - color: VARCHAR(9), NULL
     - closed: TINYINT(1), NOT NULL, DEFAULT 0
     - create_ts: TIMESTAMP, NULL
@@ -361,7 +361,7 @@ def test_categories_columns(db_connection):
 
     assert columns['sort_mode']['Type'] == 'varchar(8)'
     assert columns['sort_mode']['Null'] == 'NO'
-    assert columns['sort_mode']['Default'] == 'priority'
+    assert columns['sort_mode']['Default'] == 'hand'
 
     assert columns['color']['Type'] == 'varchar(9)'
     assert columns['color']['Null'] == 'YES'
@@ -617,7 +617,7 @@ def test_recurring_tasks_columns(db_connection):
     - anchor_date: DATE, NOT NULL
     - area_fk: INT, NOT NULL, MUL
     - priority: TINYINT(1), NOT NULL, DEFAULT 0
-    - accumulate: TINYINT(1), NOT NULL, DEFAULT 1
+    - accumulate: TINYINT(1), NOT NULL, DEFAULT 0
     - insert_position: VARCHAR(8), NOT NULL, DEFAULT 'bottom'
     - active: TINYINT(1), NOT NULL, DEFAULT 1
     - last_generated: DATE, NULL
@@ -665,10 +665,10 @@ def test_recurring_tasks_columns(db_connection):
     assert columns['priority']['Null'] == 'NO'
     assert columns['priority']['Default'] == '0'
 
-    # accumulate: TINYINT(1), NOT NULL, DEFAULT 1
+    # accumulate: TINYINT(1), NOT NULL, DEFAULT 0
     assert 'tinyint' in columns['accumulate']['Type'].lower()
     assert columns['accumulate']['Null'] == 'NO'
-    assert columns['accumulate']['Default'] == '1'
+    assert columns['accumulate']['Default'] == '0'
 
     # insert_position: VARCHAR(8), NOT NULL, DEFAULT 'bottom'
     assert columns['insert_position']['Type'] == 'varchar(8)'
