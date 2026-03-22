@@ -4,8 +4,13 @@ Cross-table referential integrity tests.
 Verifies FK relationships work correctly across the full hierarchy:
 profiles → domains → areas → tasks.
 
+Also verifies cross-repo alignment: Lambda-Rest auth_utils.py CREATOR_FK_TABLES
+must match the set of darwin_dev tables that actually have a creator_fk column.
+
 All tests use darwin_dev. Rollback after each test.
 """
+import ast
+import os
 import pymysql
 import pytest
 
@@ -189,3 +194,71 @@ def test_update_ts_auto_populated_on_update(db_connection, test_creator_fk, seed
         row = cur.fetchone()
         assert row['update_ts'] is not None
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Cross-repo alignment: auth_utils.py ↔ database schema
+# ---------------------------------------------------------------------------
+
+def _parse_creator_fk_tables_from_auth_utils():
+    """Parse CREATOR_FK_TABLES from Lambda-Rest/auth_utils.py.
+
+    Uses AST parsing to extract the frozenset literal — no imports needed.
+    Returns a set of table name strings.
+    """
+    # Navigate from DarwinSQL/tests/ → Lambda-Rest/auth_utils.py
+    test_dir = os.path.dirname(__file__)
+    darwinsql_root = os.path.dirname(test_dir)
+    workspace_root = os.path.dirname(darwinsql_root)
+    auth_utils_path = os.path.join(workspace_root, 'Lambda-Rest', 'auth_utils.py')
+
+    with open(auth_utils_path, 'r') as f:
+        tree = ast.parse(f.read())
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == 'CREATOR_FK_TABLES':
+                    # frozenset({...}) — the arg is a Set literal inside a Call
+                    call = node.value
+                    if isinstance(call, ast.Call) and len(call.args) == 1:
+                        set_node = call.args[0]
+                        if isinstance(set_node, ast.Set):
+                            return {elt.value for elt in set_node.elts
+                                    if isinstance(elt, ast.Constant)}
+    raise RuntimeError("Could not parse CREATOR_FK_TABLES from auth_utils.py")
+
+
+def test_creator_fk_tables_match_auth_utils(db_connection):
+    """Every darwin_dev table with a creator_fk column must be in Lambda-Rest CREATOR_FK_TABLES.
+
+    This catches the case where a new table with creator_fk is added to the schema
+    but not registered in auth_utils.py — which would silently skip auth scoping
+    and expose data across users.
+
+    profiles is excluded because it uses id-based auth (PROFILE_TABLE), not creator_fk.
+    """
+    # Get tables with creator_fk from the live database (exclude mig_ temp tables)
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = 'darwin_dev' AND COLUMN_NAME = 'creator_fk' "
+            "AND TABLE_NAME NOT LIKE 'mig\\_%'"
+        )
+        db_tables_with_creator_fk = {row['TABLE_NAME'] for row in cur.fetchall()}
+
+    # Get CREATOR_FK_TABLES from auth_utils.py
+    auth_utils_tables = _parse_creator_fk_tables_from_auth_utils()
+
+    # These should match exactly
+    missing_from_auth_utils = db_tables_with_creator_fk - auth_utils_tables
+    extra_in_auth_utils = auth_utils_tables - db_tables_with_creator_fk
+
+    assert not missing_from_auth_utils, (
+        f"Tables with creator_fk in darwin_dev but NOT in auth_utils.py CREATOR_FK_TABLES: "
+        f"{missing_from_auth_utils}. Add them to Lambda-Rest/auth_utils.py."
+    )
+    assert not extra_in_auth_utils, (
+        f"Tables in auth_utils.py CREATOR_FK_TABLES but NOT in darwin_dev with creator_fk: "
+        f"{extra_in_auth_utils}. Remove them or add the column."
+    )
