@@ -457,6 +457,9 @@ def test_swarm_sessions_columns(db_connection):
     - worktree_path: VARCHAR(512), NULL
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
+    - start_summary: TEXT, NULL
+    - complete_summary: TEXT, NULL
+    - telemetry: TEXT, NULL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
@@ -467,7 +470,9 @@ def test_swarm_sessions_columns(db_connection):
 
     expected_fields = ['id', 'branch', 'task_name', 'source_type', 'source_ref',
                        'title', 'pr_url', 'swarm_status', 'worktree_path',
-                       'started_at', 'completed_at', 'creator_fk', 'create_ts', 'update_ts']
+                       'started_at', 'completed_at',
+                       'start_summary', 'complete_summary', 'telemetry',
+                       'creator_fk', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -498,6 +503,15 @@ def test_swarm_sessions_columns(db_connection):
 
     assert columns['worktree_path']['Type'] == 'varchar(512)'
     assert columns['worktree_path']['Null'] == 'YES'
+
+    assert columns['start_summary']['Type'] == 'text'
+    assert columns['start_summary']['Null'] == 'YES'
+
+    assert columns['complete_summary']['Type'] == 'text'
+    assert columns['complete_summary']['Null'] == 'YES'
+
+    assert columns['telemetry']['Type'] == 'text'
+    assert columns['telemetry']['Null'] == 'YES'
 
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'
