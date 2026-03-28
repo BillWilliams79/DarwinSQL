@@ -378,10 +378,10 @@ def test_priorities_columns(db_connection):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
-    - in_progress: TINYINT(1), NOT NULL, DEFAULT 0
-    - closed: TINYINT(1), NOT NULL, DEFAULT 0
+    - priority_status: VARCHAR(16), NOT NULL, DEFAULT 'idle'
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
+    - deferred_at: TIMESTAMP, NULL
     - project_fk: INT, NULL, MUL
     - category_fk: INT, NULL, MUL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
@@ -394,8 +394,8 @@ def test_priorities_columns(db_connection):
         cur.execute("DESCRIBE priorities")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['id', 'title', 'description', 'in_progress', 'closed',
-                       'started_at', 'completed_at', 'project_fk', 'category_fk',
+    expected_fields = ['id', 'title', 'description', 'priority_status',
+                       'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
                        'creator_fk', 'sort_order', 'create_ts', 'update_ts', 'scheduled']
     assert set(columns.keys()) == set(expected_fields)
 
@@ -409,13 +409,12 @@ def test_priorities_columns(db_connection):
     assert columns['description']['Type'] == 'text'
     assert columns['description']['Null'] == 'YES'
 
-    assert 'tinyint' in columns['in_progress']['Type']
-    assert columns['in_progress']['Null'] == 'NO'
-    assert columns['in_progress']['Default'] == '0'
+    assert columns['priority_status']['Type'] == 'varchar(16)'
+    assert columns['priority_status']['Null'] == 'NO'
+    assert columns['priority_status']['Default'] == 'idle'
 
-    assert 'tinyint' in columns['closed']['Type']
-    assert columns['closed']['Null'] == 'NO'
-    assert columns['closed']['Default'] == '0'
+    assert 'timestamp' in columns['deferred_at']['Type']
+    assert columns['deferred_at']['Null'] == 'YES'
 
     assert 'timestamp' in columns['started_at']['Type']
     assert columns['started_at']['Null'] == 'YES'
