@@ -180,6 +180,7 @@ CREATE TABLE swarm_sessions (
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
+    plan            TEXT            NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
