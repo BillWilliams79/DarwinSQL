@@ -884,8 +884,39 @@ def test_map_coordinates_columns(db_connection):
     assert columns['altitude']['Null'] == 'YES'
 
 
+def test_map_views_columns(db_connection):
+    """Verify map_views column definitions match schema.sql."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_views")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'name', 'criteria', 'sort_order',
+                       'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['name']['Type'] == 'varchar(10)'
+    assert columns['name']['Null'] == 'NO'
+
+    assert columns['criteria']['Type'] == 'json'
+    assert columns['criteria']['Null'] == 'NO'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+    assert 'timestamp' in columns['create_ts']['Type']
+    assert 'timestamp' in columns['update_ts']['Type']
+
+
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 15 expected tables."""
+    """Verify darwin_dev database contains all 16 expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
@@ -894,7 +925,7 @@ def test_table_count(db_connection):
         'profiles', 'domains', 'areas', 'recurring_tasks', 'tasks',
         'projects', 'categories', 'priorities', 'priority_sessions',
         'swarm_sessions', 'dev_servers', 'priority_card_order',
-        'map_routes', 'map_runs', 'map_coordinates',
+        'map_routes', 'map_runs', 'map_coordinates', 'map_views',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
