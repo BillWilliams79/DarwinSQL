@@ -164,7 +164,7 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
-    'map_coordinates', 'map_runs', 'map_routes',
+    'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers', 'priority_sessions',
     'priorities', 'swarm_sessions', 'categories', 'projects',
     'tasks', 'recurring_tasks', 'areas', 'domains', 'profiles',
@@ -175,7 +175,7 @@ ALL_TABLE_SUFFIXES = [
 def cleanup_migration_test_tables(db_connection, migration_test_prefix):
     """Cleanup temporary migration tables before and after each test.
 
-    Ensures each test starts with a clean slate. Drops all 15 table types.
+    Ensures each test starts with a clean slate. Drops all 16 table types.
     """
     def _cleanup():
         with db_connection.cursor() as cur:
@@ -280,7 +280,7 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
     017+ (recurring_tasks, map tables, etc.).
     Tolerant mode handles migration 012 (DROP COLUMN worker_count) which
     targets a column absent from 016's current-state DDL.
-    Expects all 15 tables after completion.
+    Expects all 16 tables after completion.
     """
     ordered_files = _get_dependency_ordered_migrations()
 
@@ -306,6 +306,7 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'dev_servers', 'priority_card_order',
             'recurring_tasks',
             'map_routes', 'map_runs', 'map_coordinates',
+            'map_views',
         ]
     }
     assert tables == expected_tables, \
