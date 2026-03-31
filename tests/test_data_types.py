@@ -919,8 +919,56 @@ def test_map_views_columns(db_connection):
     assert 'timestamp' in columns['update_ts']['Type']
 
 
+def test_map_partners_columns(db_connection):
+    """Verify map_partners column definitions match schema.sql."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_partners")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'name', 'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['name']['Type'] == 'varchar(64)'
+    assert columns['name']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+
+    assert 'timestamp' in columns['create_ts']['Type']
+    assert 'timestamp' in columns['update_ts']['Type']
+    assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
+
+
+def test_map_run_partners_columns(db_connection):
+    """Verify map_run_partners column definitions match schema.sql."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE map_run_partners")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'map_run_fk', 'map_partner_fk', 'create_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['map_run_fk']['Type'] == 'int'
+    assert columns['map_run_fk']['Null'] == 'NO'
+    assert columns['map_run_fk']['Key'] == 'MUL'
+
+    assert columns['map_partner_fk']['Type'] == 'int'
+    assert columns['map_partner_fk']['Null'] == 'NO'
+    assert columns['map_partner_fk']['Key'] == 'MUL'
+
+    assert 'timestamp' in columns['create_ts']['Type']
+
+
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 16 expected tables."""
+    """Verify darwin_dev database contains all 18 expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
@@ -930,6 +978,7 @@ def test_table_count(db_connection):
         'projects', 'categories', 'priorities', 'priority_sessions',
         'swarm_sessions', 'dev_servers', 'priority_card_order',
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
+        'map_partners', 'map_run_partners',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
