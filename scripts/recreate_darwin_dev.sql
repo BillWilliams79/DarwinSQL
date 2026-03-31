@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 16 tables in FK-dependency order
+-- All 18 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS map_views, map_coordinates, map_runs, map_routes,
+DROP TABLE IF EXISTS map_run_partners, map_partners,
+    map_views, map_coordinates, map_runs, map_routes,
     priority_card_order, dev_servers, priority_sessions,
     priorities, swarm_sessions, categories, projects,
     tasks, recurring_tasks, areas, domains, profiles;
@@ -299,5 +300,31 @@ CREATE TABLE map_views (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE map_partners (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name            VARCHAR(64)     NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_creator_partner (creator_fk, name),
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE map_run_partners (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    map_run_fk      INT             NOT NULL,
+    map_partner_fk  INT             NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_run_partner (map_run_fk, map_partner_fk),
+    FOREIGN KEY (map_run_fk)
+        REFERENCES map_runs (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (map_partner_fk)
+        REFERENCES map_partners (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
