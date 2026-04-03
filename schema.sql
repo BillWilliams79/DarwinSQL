@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS priority_card_order (
 
 CREATE TABLE IF NOT EXISTS map_routes (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    route_id        INT             NOT NULL,
+    route_id        BIGINT          NOT NULL,
     name            VARCHAR(256)    NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS map_routes (
 
 CREATE TABLE IF NOT EXISTS map_runs (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    run_id          INT             NOT NULL,
+    run_id          BIGINT          NOT NULL,
     map_route_fk    INT             NULL,
     activity_id     INT             NOT NULL,
     activity_name   VARCHAR(16)     NOT NULL,

@@ -739,7 +739,7 @@ def test_map_routes_columns(db_connection):
     assert columns['id']['Key'] == 'PRI'
     assert columns['id']['Extra'] == 'auto_increment'
 
-    assert columns['route_id']['Type'] == 'int'
+    assert columns['route_id']['Type'] == 'bigint'
     assert columns['route_id']['Null'] == 'NO'
 
     assert columns['name']['Type'] == 'varchar(256)'
@@ -796,7 +796,7 @@ def test_map_runs_columns(db_connection):
     assert columns['id']['Key'] == 'PRI'
     assert columns['id']['Extra'] == 'auto_increment'
 
-    assert columns['run_id']['Type'] == 'int'
+    assert columns['run_id']['Type'] == 'bigint'
     assert columns['run_id']['Null'] == 'NO'
 
     assert columns['map_route_fk']['Type'] == 'int'
