@@ -373,8 +373,8 @@ def test_delete_project_cascades_to_categories(db_connection):
     db_connection.rollback()
 
 
-def test_delete_category_sets_priority_fk_null(db_connection):
-    """DELETE category → priorities.category_fk set to NULL (ON DELETE SET NULL)"""
+def test_delete_category_sets_requirement_fk_null(db_connection):
+    """DELETE category → requirements.category_fk set to NULL (ON DELETE SET NULL)"""
     test_creator = 'cascade-test-category-1'
 
     with db_connection.cursor() as cur:
@@ -399,18 +399,18 @@ def test_delete_category_sets_priority_fk_null(db_connection):
         category_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO priorities (title, category_fk, creator_fk) "
+            "INSERT INTO requirements (title, category_fk, creator_fk) "
             "VALUES (%s, %s, %s)",
-            ('Cascade Test Priority', category_id, test_creator)
+            ('Cascade Test Requirement', category_id, test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        priority_id = cur.fetchone()['id']
+        requirement_id = cur.fetchone()['id']
 
         # Delete category
         cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
 
-        # Priority survives but category_fk is NULL
-        cur.execute("SELECT category_fk FROM priorities WHERE id = %s", (priority_id,))
+        # Requirement survives but category_fk is NULL
+        cur.execute("SELECT category_fk FROM requirements WHERE id = %s", (requirement_id,))
         row = cur.fetchone()
         assert row is not None
         assert row['category_fk'] is None
@@ -418,9 +418,9 @@ def test_delete_category_sets_priority_fk_null(db_connection):
     db_connection.rollback()
 
 
-def test_delete_priority_cascades_to_priority_sessions(db_connection):
-    """DELETE priority → associated priority_sessions rows are deleted"""
-    test_creator = 'cascade-test-priority-1'
+def test_delete_requirement_cascades_to_requirement_sessions(db_connection):
+    """DELETE requirement → associated requirement_sessions rows are deleted"""
+    test_creator = 'cascade-test-requirement-1'
 
     with db_connection.cursor() as cur:
         cur.execute(
@@ -429,11 +429,11 @@ def test_delete_priority_cascades_to_priority_sessions(db_connection):
             (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
         cur.execute(
-            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Priority', test_creator)
+            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Requirement', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        priority_id = cur.fetchone()['id']
+        requirement_id = cur.fetchone()['id']
 
         cur.execute(
             "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
@@ -443,25 +443,25 @@ def test_delete_priority_cascades_to_priority_sessions(db_connection):
         session_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO priority_sessions (priority_fk, session_fk) VALUES (%s, %s)",
-            (priority_id, session_id)
+            "INSERT INTO requirement_sessions (requirement_fk, session_fk) VALUES (%s, %s)",
+            (requirement_id, session_id)
         )
 
-        # Delete priority
-        cur.execute("DELETE FROM priorities WHERE id = %s", (priority_id,))
+        # Delete requirement
+        cur.execute("DELETE FROM requirements WHERE id = %s", (requirement_id,))
 
-        # Verify priority_session link is gone
+        # Verify requirement_session link is gone
         cur.execute(
-            "SELECT * FROM priority_sessions WHERE priority_fk = %s AND session_fk = %s",
-            (priority_id, session_id)
+            "SELECT * FROM requirement_sessions WHERE requirement_fk = %s AND session_fk = %s",
+            (requirement_id, session_id)
         )
         assert cur.fetchone() is None
 
     db_connection.rollback()
 
 
-def test_delete_swarm_session_cascades_to_priority_sessions(db_connection):
-    """DELETE swarm_session → associated priority_sessions rows are deleted,
+def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection):
+    """DELETE swarm_session → associated requirement_sessions rows are deleted,
     dev_servers.session_fk set to NULL"""
     test_creator = 'cascade-test-session-1'
 
@@ -479,36 +479,36 @@ def test_delete_swarm_session_cascades_to_priority_sessions(db_connection):
         session_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Priority', test_creator)
+            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Requirement', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        priority_id = cur.fetchone()['id']
+        requirement_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO priority_sessions (priority_fk, session_fk) VALUES (%s, %s)",
-            (priority_id, session_id)
+            "INSERT INTO requirement_sessions (requirement_fk, session_fk) VALUES (%s, %s)",
+            (requirement_id, session_id)
         )
 
         # Delete swarm session
         cur.execute("DELETE FROM swarm_sessions WHERE id = %s", (session_id,))
 
-        # Verify priority_session link is gone
+        # Verify requirement_session link is gone
         cur.execute(
-            "SELECT * FROM priority_sessions WHERE session_fk = %s",
+            "SELECT * FROM requirement_sessions WHERE session_fk = %s",
             (session_id,)
         )
         assert cur.fetchone() is None
 
-        # Priority itself survives
-        cur.execute("SELECT id FROM priorities WHERE id = %s", (priority_id,))
+        # Requirement itself survives
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (requirement_id,))
         assert cur.fetchone() is not None
 
     db_connection.rollback()
 
 
 def test_delete_profile_cascades_to_roadmap_tables(db_connection):
-    """DELETE profile → cascades through projects→categories, priorities, swarm_sessions"""
+    """DELETE profile → cascades through projects→categories, requirements, swarm_sessions"""
     test_creator = 'cascade-test-roadmap-full'
 
     with db_connection.cursor() as cur:
@@ -525,11 +525,11 @@ def test_delete_profile_cascades_to_roadmap_tables(db_connection):
         project_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Priority', test_creator)
+            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Requirement', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        priority_id = cur.fetchone()['id']
+        requirement_id = cur.fetchone()['id']
 
         cur.execute(
             "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
@@ -543,7 +543,7 @@ def test_delete_profile_cascades_to_roadmap_tables(db_connection):
 
         cur.execute("SELECT id FROM projects WHERE id = %s", (project_id,))
         assert cur.fetchone() is None
-        cur.execute("SELECT id FROM priorities WHERE id = %s", (priority_id,))
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (requirement_id,))
         assert cur.fetchone() is None
         cur.execute("SELECT id FROM swarm_sessions WHERE id = %s", (session_id,))
         assert cur.fetchone() is None

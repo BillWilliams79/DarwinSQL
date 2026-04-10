@@ -86,10 +86,10 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM map_runs WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM map_runs WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM map_routes WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM priority_sessions WHERE priority_fk IN "
-                    "(SELECT id FROM priorities WHERE creator_fk = %s)", (test_creator_fk,))
+        cur.execute("DELETE FROM requirement_sessions WHERE requirement_fk IN "
+                    "(SELECT id FROM requirements WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM priorities WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))

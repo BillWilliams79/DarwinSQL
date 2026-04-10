@@ -146,7 +146,7 @@ def create_tables(conn):
             )
         """)
 
-        # Roadmap / priority tracking tables
+        # Roadmap / requirement tracking tables
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS projects (
@@ -184,7 +184,7 @@ def create_tables(conn):
         """)
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS priorities (
+            CREATE TABLE IF NOT EXISTS requirements (
                 id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
                 title           VARCHAR(256)    NOT NULL,
                 description     TEXT            NULL,
@@ -236,12 +236,12 @@ def create_tables(conn):
         """)
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS priority_sessions (
-                priority_fk     INT             NOT NULL,
+            CREATE TABLE IF NOT EXISTS requirement_sessions (
+                requirement_fk  INT             NOT NULL,
                 session_fk      INT             NOT NULL,
-                PRIMARY KEY (priority_fk, session_fk),
-                FOREIGN KEY (priority_fk)
-                    REFERENCES priorities (id)
+                PRIMARY KEY (requirement_fk, session_fk),
+                FOREIGN KEY (requirement_fk)
+                    REFERENCES requirements (id)
                     ON UPDATE CASCADE ON DELETE CASCADE,
                 FOREIGN KEY (session_fk)
                     REFERENCES swarm_sessions (id)
@@ -285,7 +285,7 @@ def create_tables(conn):
         """)
 
         print("Tables created: profiles, domains, areas, tasks, projects, categories, "
-              "priorities, swarm_sessions, priority_sessions, dev_servers, priority_card_order")
+              "requirements, swarm_sessions, requirement_sessions, dev_servers, priority_card_order")
 
 
 def grant_claude_ro(conn):

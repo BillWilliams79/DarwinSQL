@@ -371,14 +371,14 @@ def test_categories_columns(db_connection):
     assert columns['closed']['Default'] == '0'
 
 
-def test_priorities_columns(db_connection):
-    """Verify priorities column definitions match schema.sql.
+def test_requirements_columns(db_connection):
+    """Verify requirements column definitions match schema.sql.
 
     Expected columns:
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
-    - priority_status: VARCHAR(16), NOT NULL, DEFAULT 'idle'
+    - requirement_status: VARCHAR(16), NOT NULL, DEFAULT 'idle'
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
     - deferred_at: TIMESTAMP, NULL
@@ -391,10 +391,10 @@ def test_priorities_columns(db_connection):
     - scheduled: TINYINT, NOT NULL, DEFAULT 0
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE priorities")
+        cur.execute("DESCRIBE requirements")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['id', 'title', 'description', 'priority_status',
+    expected_fields = ['id', 'title', 'description', 'requirement_status',
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
                        'creator_fk', 'sort_order', 'create_ts', 'update_ts', 'scheduled']
     assert set(columns.keys()) == set(expected_fields)
@@ -409,9 +409,9 @@ def test_priorities_columns(db_connection):
     assert columns['description']['Type'] == 'text'
     assert columns['description']['Null'] == 'YES'
 
-    assert columns['priority_status']['Type'] == 'varchar(16)'
-    assert columns['priority_status']['Null'] == 'NO'
-    assert columns['priority_status']['Default'] == 'idle'
+    assert columns['requirement_status']['Type'] == 'varchar(16)'
+    assert columns['requirement_status']['Null'] == 'NO'
+    assert columns['requirement_status']['Default'] == 'idle'
 
     assert 'timestamp' in columns['deferred_at']['Type']
     assert columns['deferred_at']['Null'] == 'YES'
@@ -522,23 +522,23 @@ def test_swarm_sessions_columns(db_connection):
     assert columns['creator_fk']['Key'] == 'MUL'
 
 
-def test_priority_sessions_columns(db_connection):
-    """Verify priority_sessions column definitions match schema.sql.
+def test_requirement_sessions_columns(db_connection):
+    """Verify requirement_sessions column definitions match schema.sql.
 
     Expected columns:
-    - priority_fk: INT, PRI, NOT NULL
+    - requirement_fk: INT, PRI, NOT NULL
     - session_fk: INT, PRI, NOT NULL
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE priority_sessions")
+        cur.execute("DESCRIBE requirement_sessions")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['priority_fk', 'session_fk']
+    expected_fields = ['requirement_fk', 'session_fk']
     assert set(columns.keys()) == set(expected_fields)
 
-    assert columns['priority_fk']['Type'] == 'int'
-    assert columns['priority_fk']['Null'] == 'NO'
-    assert columns['priority_fk']['Key'] == 'PRI'
+    assert columns['requirement_fk']['Type'] == 'int'
+    assert columns['requirement_fk']['Null'] == 'NO'
+    assert columns['requirement_fk']['Key'] == 'PRI'
 
     assert columns['session_fk']['Type'] == 'int'
     assert columns['session_fk']['Null'] == 'NO'
@@ -975,7 +975,7 @@ def test_table_count(db_connection):
 
     expected_tables = {
         'profiles', 'domains', 'areas', 'recurring_tasks', 'tasks',
-        'projects', 'categories', 'priorities', 'priority_sessions',
+        'projects', 'categories', 'requirements', 'requirement_sessions',
         'swarm_sessions', 'dev_servers', 'priority_card_order',
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
         'map_partners', 'map_run_partners',

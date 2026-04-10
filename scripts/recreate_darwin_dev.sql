@@ -8,8 +8,8 @@ USE darwin_dev;
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
-    priority_card_order, dev_servers, priority_sessions,
-    priorities, swarm_sessions, categories, projects,
+    priority_card_order, dev_servers, requirement_sessions,
+    requirements, swarm_sessions, categories, projects,
     tasks, recurring_tasks, areas, domains, profiles;
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -104,7 +104,7 @@ CREATE TABLE tasks (
         ON DELETE SET NULL
 );
 
--- Roadmap / priority tracking
+-- Roadmap / requirement tracking
 
 CREATE TABLE projects (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -138,7 +138,7 @@ CREATE TABLE categories (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE priorities (
+CREATE TABLE requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
@@ -190,12 +190,12 @@ CREATE TABLE swarm_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE priority_sessions (
-    priority_fk     INT             NOT NULL,
+CREATE TABLE requirement_sessions (
+    requirement_fk  INT             NOT NULL,
     session_fk      INT             NOT NULL,
-    PRIMARY KEY (priority_fk, session_fk),
-    FOREIGN KEY (priority_fk)
-        REFERENCES priorities (id)
+    PRIMARY KEY (requirement_fk, session_fk),
+    FOREIGN KEY (requirement_fk)
+        REFERENCES requirements (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)
