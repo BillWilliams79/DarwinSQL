@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 -- ============================================================================
--- Roadmap / priority tracking (darwin-mcp)
+-- Roadmap / requirement tracking (darwin-mcp)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -136,11 +136,11 @@ CREATE TABLE IF NOT EXISTS categories (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS priorities (
+CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
-    priority_status VARCHAR(16)     NOT NULL DEFAULT 'idle',
+    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'idle',
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     deferred_at     TIMESTAMP       NULL,
@@ -190,12 +190,12 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS priority_sessions (
-    priority_fk     INT             NOT NULL,
+CREATE TABLE IF NOT EXISTS requirement_sessions (
+    requirement_fk  INT             NOT NULL,
     session_fk      INT             NOT NULL,
-    PRIMARY KEY (priority_fk, session_fk),
-    FOREIGN KEY (priority_fk)
-        REFERENCES priorities (id)
+    PRIMARY KEY (requirement_fk, session_fk),
+    FOREIGN KEY (requirement_fk)
+        REFERENCES requirements (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)

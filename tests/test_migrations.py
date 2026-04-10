@@ -12,7 +12,7 @@ Test workflow:
 4. DROP temporary tables after test cleanup
 
 Dependency note: Migrations 009-015 modify tables (projects, categories,
-swarm_sessions, priorities) that were originally created ad-hoc on production.
+swarm_sessions, requirements) that were originally created ad-hoc on production.
 Migration 016 retroactively tracks those table definitions. Tests must apply
 016 before 009-015 to satisfy FK dependencies.
 """
@@ -59,15 +59,21 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        'user_integrations',
+        'requirement_sessions',
+        'priority_sessions',     # pre-038 name (for RENAME TABLE in migration 038)
         'priority_card_order',
-        'priority_sessions',
-        'swarm_sessions',
+        'map_run_partners',
         'map_coordinates',
+        'swarm_sessions',
         'recurring_tasks',
+        'map_partners',
         'dev_servers',
+        'requirements',
+        'priorities',            # pre-038 name (for RENAME TABLE in migration 038)
         'categories',
         'map_routes',
-        'priorities',
+        'map_views',
         'map_runs',
         'profiles',
         'projects',
@@ -164,9 +170,12 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
-    'priority_card_order', 'dev_servers', 'priority_sessions',
-    'priorities', 'swarm_sessions', 'categories', 'projects',
+    'priority_card_order', 'dev_servers',
+    'requirement_sessions', 'priority_sessions',  # pre-038 name
+    'requirements', 'priorities',                  # pre-038 name
+    'swarm_sessions', 'categories', 'projects',
     'tasks', 'recurring_tasks', 'areas', 'domains', 'profiles',
 ]
 
@@ -235,6 +244,7 @@ def test_migration_016_creates_roadmap_tables(db_connection, migration_test_pref
     016 requires profiles.id as VARCHAR(64) (from migration 004) for FK
     compatibility with creator_fk columns.
     Creates: projects, categories, swarm_sessions, priorities, priority_sessions
+    (016 uses original names; migration 038 renames them to requirements/requirement_sessions)
     """
     migrations_dir = _get_migrations_dir()
     # Apply core migrations 001-008 first (004 converts profiles.id INT→VARCHAR(64))
@@ -254,6 +264,8 @@ def test_migration_016_creates_roadmap_tables(db_connection, migration_test_pref
         )
         tables = {row['TABLE_NAME'] for row in cur.fetchall()}
 
+    # 016 creates tables with original names (priorities, priority_sessions)
+    # Migration 038 renames them later in the full sequence
     expected_tables = {
         f"{migration_test_prefix}_profiles",
         f"{migration_test_prefix}_domains",
@@ -301,12 +313,13 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
         f"{migration_test_prefix}_{suffix}"
         for suffix in [
             'profiles', 'domains', 'areas', 'tasks',
-            'projects', 'categories', 'priorities',
-            'swarm_sessions', 'priority_sessions',
+            'projects', 'categories', 'requirements',
+            'swarm_sessions', 'requirement_sessions',
             'dev_servers', 'priority_card_order',
             'recurring_tasks',
             'map_routes', 'map_runs', 'map_coordinates',
-            'map_views',
+            'map_views', 'map_partners', 'map_run_partners',
+            'user_integrations',
         ]
     }
     assert tables == expected_tables, \

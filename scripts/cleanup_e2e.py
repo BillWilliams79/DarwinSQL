@@ -2,8 +2,8 @@
 """
 Cleanup orphaned E2E test data from darwin_dev or darwin database.
 
-E2E tests create domains, areas, tasks, projects, categories, priorities,
-swarm_sessions, and priority_sessions. When tests are interrupted (Ctrl+C,
+E2E tests create domains, areas, tasks, projects, categories, requirements,
+swarm_sessions, and requirement_sessions. When tests are interrupted (Ctrl+C,
 timeout, crash), afterAll cleanup never runs and stale data accumulates.
 
 This script targets all 9 E2E test user creator_fk UUIDs (8 workers + original).
@@ -56,19 +56,19 @@ E2E_CREATOR_FKS = [
 # ============================================================================
 # GUARDRAIL 3: Only known tables, in FK-safe deletion order
 # ============================================================================
-# priority_sessions → swarm_sessions → priorities → categories → projects → domains
-# (areas/tasks cascade from domains; priorities cascade from categories)
+# requirement_sessions → swarm_sessions → requirements → categories → projects → domains
+# (areas/tasks cascade from domains; requirements cascade from categories)
 CLEANUP_TABLES = [
-    'priority_sessions',
+    'requirement_sessions',
     'swarm_sessions',
-    'priorities',
+    'requirements',
     'categories',
     'projects',
     'domains',
 ]
 
 # Tables that use session_fk instead of creator_fk
-SESSION_FK_TABLES = {'priority_sessions'}
+SESSION_FK_TABLES = {'requirement_sessions'}
 
 
 def get_connection(database):
@@ -104,7 +104,7 @@ def find_e2e_data(conn):
 
         for table in CLEANUP_TABLES:
             if table in SESSION_FK_TABLES:
-                continue  # priority_sessions counted via session lookup
+                continue  # requirement_sessions counted via session lookup
 
             with conn.cursor() as cur:
                 try:
@@ -146,7 +146,7 @@ def delete_e2e_data(conn, dry_run=True):
         print(f"  {info['label']} ({creator_fk})")
         tables = info['tables']
 
-        # First handle priority_sessions via swarm_sessions for this creator
+        # First handle requirement_sessions via swarm_sessions for this creator
         if 'swarm_sessions' in tables:
             with conn.cursor() as cur:
                 try:
@@ -159,20 +159,20 @@ def delete_e2e_data(conn, dry_run=True):
                     if session_ids:
                         placeholders = ','.join(['%s'] * len(session_ids))
                         cur.execute(
-                            f"SELECT COUNT(*) AS cnt FROM priority_sessions WHERE session_fk IN ({placeholders})",
+                            f"SELECT COUNT(*) AS cnt FROM requirement_sessions WHERE session_fk IN ({placeholders})",
                             session_ids,
                         )
                         ps_count = cur.fetchone()['cnt']
 
                         if ps_count > 0:
                             if dry_run:
-                                print(f"    WOULD DELETE {ps_count} rows from priority_sessions")
+                                print(f"    WOULD DELETE {ps_count} rows from requirement_sessions")
                             else:
                                 deleted = cur.execute(
-                                    f"DELETE FROM priority_sessions WHERE session_fk IN ({placeholders})",
+                                    f"DELETE FROM requirement_sessions WHERE session_fk IN ({placeholders})",
                                     session_ids,
                                 )
-                                print(f"    DELETED {deleted} rows from priority_sessions")
+                                print(f"    DELETED {deleted} rows from requirement_sessions")
                                 total_deleted += deleted
                 except pymysql.err.ProgrammingError:
                     pass  # Table doesn't exist

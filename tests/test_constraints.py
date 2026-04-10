@@ -390,24 +390,24 @@ def test_category_fk_invalid_project(db_connection, test_creator_fk):
     db_connection.rollback()
 
 
-def test_priority_fk_invalid_creator(db_connection):
-    """INSERT priority with non-existent creator_fk → IntegrityError"""
+def test_requirement_fk_invalid_creator(db_connection):
+    """INSERT requirement with non-existent creator_fk → IntegrityError"""
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO priorities (title, creator_fk) "
+                "INSERT INTO requirements (title, creator_fk) "
                 "VALUES (%s, %s)",
-                ('orphan priority', 'nonexistent-profile-id')
+                ('orphan requirement', 'nonexistent-profile-id')
             )
     db_connection.rollback()
 
 
-def test_priority_session_fk_invalid_priority(db_connection):
-    """INSERT priority_session with non-existent priority_fk → IntegrityError"""
+def test_requirement_session_fk_invalid_requirement(db_connection):
+    """INSERT requirement_session with non-existent requirement_fk → IntegrityError"""
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO priority_sessions (priority_fk, session_fk) "
+                "INSERT INTO requirement_sessions (requirement_fk, session_fk) "
                 "VALUES (%s, %s)",
                 (999999, 999999)
             )
@@ -462,12 +462,12 @@ def test_category_name_not_null(db_connection, test_creator_fk, seed_test_profil
     db_connection.rollback()
 
 
-def test_priority_title_not_null(db_connection, test_creator_fk):
-    """INSERT priority with title=NULL → error"""
+def test_requirement_title_not_null(db_connection, test_creator_fk):
+    """INSERT requirement with title=NULL → error"""
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO priorities (title, creator_fk) "
+                "INSERT INTO requirements (title, creator_fk) "
                 "VALUES (%s, %s)",
                 (None, test_creator_fk)
             )
@@ -490,21 +490,20 @@ def test_swarm_status_not_null(db_connection, test_creator_fk):
 # Roadmap table default value tests
 # ---------------------------------------------------------------------------
 
-def test_priority_closed_default(db_connection, test_creator_fk):
-    """INSERT priority without closed → defaults to 0"""
+def test_requirement_status_default(db_connection, test_creator_fk):
+    """INSERT requirement without requirement_status → defaults to 'idle'"""
     with db_connection.cursor() as cur:
         cur.execute(
-            "INSERT INTO priorities (title, creator_fk) VALUES (%s, %s)",
-            ('test priority default', test_creator_fk)
+            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
+            ('test requirement default', test_creator_fk)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        priority_id = cur.fetchone()['id']
+        requirement_id = cur.fetchone()['id']
 
-        cur.execute("SELECT closed, in_progress, scheduled FROM priorities WHERE id = %s",
-                    (priority_id,))
+        cur.execute("SELECT requirement_status, scheduled FROM requirements WHERE id = %s",
+                    (requirement_id,))
         row = cur.fetchone()
-        assert row['closed'] == 0
-        assert row['in_progress'] == 0
+        assert row['requirement_status'] == 'idle'
         assert row['scheduled'] == 0
 
     db_connection.rollback()
