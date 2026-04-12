@@ -491,7 +491,7 @@ def test_swarm_status_not_null(db_connection, test_creator_fk):
 # ---------------------------------------------------------------------------
 
 def test_requirement_status_default(db_connection, test_creator_fk):
-    """INSERT requirement without requirement_status → defaults to 'idle'"""
+    """INSERT requirement without requirement_status → defaults to 'authoring' (migration 039)"""
     with db_connection.cursor() as cur:
         cur.execute(
             "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
@@ -503,7 +503,7 @@ def test_requirement_status_default(db_connection, test_creator_fk):
         cur.execute("SELECT requirement_status, scheduled FROM requirements WHERE id = %s",
                     (requirement_id,))
         row = cur.fetchone()
-        assert row['requirement_status'] == 'idle'
+        assert row['requirement_status'] == 'authoring'
         assert row['scheduled'] == 0
 
     db_connection.rollback()
