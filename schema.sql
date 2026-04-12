@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
-    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'idle',
+    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
+                                            -- authoring | approved | swarm_ready | development | met | deferred
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     deferred_at     TIMESTAMP       NULL,
@@ -151,6 +152,9 @@ CREATE TABLE IF NOT EXISTS requirements (
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     scheduled       TINYINT         NOT NULL DEFAULT 0,
+                                            -- 0=not scheduled | 1=manual | 2=auto-start
+    coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
+                                            -- planned | implemented | deployed (default: implemented)
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,

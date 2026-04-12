@@ -608,3 +608,93 @@ def test_migration_001_idempotent(db_connection, migration_test_prefix):
         f"{migration_test_prefix}_tasks",
     }
     assert tables == expected_tables
+
+
+# ---------------------------------------------------------------------------
+# Test: Migration 039 — requirement data types overhaul data mapping
+# ---------------------------------------------------------------------------
+
+def test_migration_039_data_mapping(db_connection, migration_test_prefix):
+    """Verify migration 039 correctly remaps old requirement_status values and
+    maps scheduled>=1 rows to swarm_ready + planned.
+
+    Test cases:
+      idle + scheduled=0        → authoring + 'implemented' (new default)
+      idle + scheduled=1        → swarm_ready + planned
+      idle + scheduled=2        → swarm_ready + planned
+      in_progress + scheduled=0 → development + 'implemented'
+      completed + scheduled=0   → met + 'implemented'
+      deferred + scheduled=0    → deferred + 'implemented'
+    """
+    table_name = f"{migration_test_prefix}_requirements_m039"
+
+    with db_connection.cursor() as cur:
+        # Create a pre-039 style table (no coordination_type column)
+        cur.execute(f"""
+            CREATE TABLE {table_name} (
+                id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                title VARCHAR(256) NOT NULL,
+                requirement_status VARCHAR(16) NOT NULL DEFAULT 'idle',
+                scheduled TINYINT NOT NULL DEFAULT 0
+            )
+        """)
+        db_connection.commit()
+
+        # Seed with all test case combinations
+        test_cases = [
+            ('T1 idle sched=0',      'idle',        0),
+            ('T2 idle sched=1',      'idle',        1),
+            ('T3 idle sched=2',      'idle',        2),
+            ('T4 in_progress',       'in_progress', 0),
+            ('T5 completed',         'completed',   0),
+            ('T6 deferred',          'deferred',    0),
+        ]
+        for title, status, sched in test_cases:
+            cur.execute(
+                f"INSERT INTO {table_name} (title, requirement_status, scheduled) VALUES (%s, %s, %s)",
+                (title, status, sched)
+            )
+        db_connection.commit()
+
+        # Apply migration 039 SQL against the test table
+        cur.execute(f"ALTER TABLE {table_name} ADD COLUMN coordination_type VARCHAR(16) NULL DEFAULT 'implemented' AFTER scheduled")
+        cur.execute(f"UPDATE {table_name} SET requirement_status = 'swarm_ready', coordination_type = 'planned' WHERE requirement_status = 'idle' AND scheduled >= 1")
+        cur.execute(f"UPDATE {table_name} SET requirement_status = 'authoring'   WHERE requirement_status = 'idle'")
+        cur.execute(f"UPDATE {table_name} SET requirement_status = 'development' WHERE requirement_status = 'in_progress'")
+        cur.execute(f"UPDATE {table_name} SET requirement_status = 'met'         WHERE requirement_status = 'completed'")
+        cur.execute(f"ALTER TABLE {table_name} ALTER COLUMN requirement_status SET DEFAULT 'authoring'")
+        db_connection.commit()
+
+        # Verify each row transitioned as expected
+        cur.execute(f"SELECT title, requirement_status, scheduled, coordination_type FROM {table_name} ORDER BY id")
+        rows = {r['title']: r for r in cur.fetchall()}
+
+        assert rows['T1 idle sched=0']['requirement_status'] == 'authoring'
+        assert rows['T1 idle sched=0']['coordination_type'] == 'implemented'
+
+        assert rows['T2 idle sched=1']['requirement_status'] == 'swarm_ready'
+        assert rows['T2 idle sched=1']['coordination_type'] == 'planned'
+
+        assert rows['T3 idle sched=2']['requirement_status'] == 'swarm_ready'
+        assert rows['T3 idle sched=2']['coordination_type'] == 'planned'
+
+        assert rows['T4 in_progress']['requirement_status'] == 'development'
+        assert rows['T4 in_progress']['coordination_type'] == 'implemented'
+
+        assert rows['T5 completed']['requirement_status'] == 'met'
+        assert rows['T5 completed']['coordination_type'] == 'implemented'
+
+        assert rows['T6 deferred']['requirement_status'] == 'deferred'
+        assert rows['T6 deferred']['coordination_type'] == 'implemented'
+
+        # Verify new default applies to an inserted row
+        cur.execute(f"INSERT INTO {table_name} (title) VALUES ('T7 default')")
+        db_connection.commit()
+        cur.execute(f"SELECT requirement_status, coordination_type FROM {table_name} WHERE title = 'T7 default'")
+        row = cur.fetchone()
+        assert row['requirement_status'] == 'authoring'
+        assert row['coordination_type'] == 'implemented'
+
+        # Cleanup
+        cur.execute(f"DROP TABLE {table_name}")
+        db_connection.commit()

@@ -374,11 +374,11 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns:
+    Expected columns (post migration 039):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
-    - requirement_status: VARCHAR(16), NOT NULL, DEFAULT 'idle'
+    - requirement_status: VARCHAR(16), NOT NULL, DEFAULT 'authoring'
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
     - deferred_at: TIMESTAMP, NULL
@@ -389,6 +389,7 @@ def test_requirements_columns(db_connection):
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     - scheduled: TINYINT, NOT NULL, DEFAULT 0
+    - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
     """
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirements")
@@ -396,7 +397,8 @@ def test_requirements_columns(db_connection):
 
     expected_fields = ['id', 'title', 'description', 'requirement_status',
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
-                       'creator_fk', 'sort_order', 'create_ts', 'update_ts', 'scheduled']
+                       'creator_fk', 'sort_order', 'create_ts', 'update_ts', 'scheduled',
+                       'coordination_type']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -411,7 +413,7 @@ def test_requirements_columns(db_connection):
 
     assert columns['requirement_status']['Type'] == 'varchar(16)'
     assert columns['requirement_status']['Null'] == 'NO'
-    assert columns['requirement_status']['Default'] == 'idle'
+    assert columns['requirement_status']['Default'] == 'authoring'
 
     assert 'timestamp' in columns['deferred_at']['Type']
     assert columns['deferred_at']['Null'] == 'YES'
@@ -440,6 +442,10 @@ def test_requirements_columns(db_connection):
     assert 'tinyint' in columns['scheduled']['Type']
     assert columns['scheduled']['Null'] == 'NO'
     assert columns['scheduled']['Default'] == '0'
+
+    assert columns['coordination_type']['Type'] == 'varchar(16)'
+    assert columns['coordination_type']['Null'] == 'YES'
+    assert columns['coordination_type']['Default'] == 'implemented'
 
 
 def test_swarm_sessions_columns(db_connection):
