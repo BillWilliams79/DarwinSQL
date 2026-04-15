@@ -152,7 +152,6 @@ CREATE TABLE requirements (
     sort_order      SMALLINT        NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    scheduled       TINYINT         NOT NULL DEFAULT 0,
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,

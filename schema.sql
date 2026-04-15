@@ -151,8 +151,6 @@ CREATE TABLE IF NOT EXISTS requirements (
     sort_order      SMALLINT        NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    scheduled       TINYINT         NOT NULL DEFAULT 0,
-                                            -- 0=not scheduled | 1=manual | 2=auto-start
     coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
                                             -- planned | implemented | deployed (default: implemented)
     FOREIGN KEY (project_fk)

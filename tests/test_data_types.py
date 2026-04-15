@@ -388,7 +388,6 @@ def test_requirements_columns(db_connection):
     - sort_order: SMALLINT, NULL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
-    - scheduled: TINYINT, NOT NULL, DEFAULT 0
     - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
     """
     with db_connection.cursor() as cur:
@@ -397,7 +396,7 @@ def test_requirements_columns(db_connection):
 
     expected_fields = ['id', 'title', 'description', 'requirement_status',
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
-                       'creator_fk', 'sort_order', 'create_ts', 'update_ts', 'scheduled',
+                       'creator_fk', 'sort_order', 'create_ts', 'update_ts',
                        'coordination_type']
     assert set(columns.keys()) == set(expected_fields)
 
@@ -438,10 +437,6 @@ def test_requirements_columns(db_connection):
 
     assert columns['sort_order']['Type'] == 'smallint'
     assert columns['sort_order']['Null'] == 'YES'
-
-    assert 'tinyint' in columns['scheduled']['Type']
-    assert columns['scheduled']['Null'] == 'NO'
-    assert columns['scheduled']['Default'] == '0'
 
     assert columns['coordination_type']['Type'] == 'varchar(16)'
     assert columns['coordination_type']['Null'] == 'YES'

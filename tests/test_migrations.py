@@ -698,3 +698,77 @@ def test_migration_039_data_mapping(db_connection, migration_test_prefix):
         # Cleanup
         cur.execute(f"DROP TABLE {table_name}")
         db_connection.commit()
+
+
+# ---------------------------------------------------------------------------
+# Test: Migration 040 — drop requirements.scheduled column
+# ---------------------------------------------------------------------------
+
+def test_migration_040_drops_scheduled_column(db_connection, migration_test_prefix):
+    """Verify migration 040 drops the scheduled column cleanly.
+
+    Creates a pre-040 shape table (with scheduled), seeds rows, runs the
+    ALTER TABLE DROP COLUMN from migration 040, then asserts:
+      - scheduled column is gone
+      - row count is unchanged
+      - existing data (title, requirement_status) is preserved
+    """
+    table_name = f"{migration_test_prefix}_requirements_m040"
+
+    with db_connection.cursor() as cur:
+        # Create a pre-040 style table (with scheduled + coordination_type)
+        cur.execute(f"""
+            CREATE TABLE {table_name} (
+                id INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                title VARCHAR(256) NOT NULL,
+                requirement_status VARCHAR(16) NOT NULL DEFAULT 'authoring',
+                scheduled TINYINT NOT NULL DEFAULT 0,
+                coordination_type VARCHAR(16) NULL DEFAULT 'implemented'
+            )
+        """)
+        db_connection.commit()
+
+        # Seed with rows that cover the interesting states
+        seed_rows = [
+            ('M040 T1', 'swarm_ready', 2, 'planned'),
+            ('M040 T2', 'swarm_ready', 1, 'implemented'),
+            ('M040 T3', 'authoring',   0, None),
+            ('M040 T4', 'development', 0, 'deployed'),
+        ]
+        for title, status, sched, coord in seed_rows:
+            cur.execute(
+                f"INSERT INTO {table_name} (title, requirement_status, scheduled, coordination_type) VALUES (%s, %s, %s, %s)",
+                (title, status, sched, coord)
+            )
+        db_connection.commit()
+
+        pre_count = cur.execute(f"SELECT COUNT(*) AS n FROM {table_name}")
+        row = cur.fetchone()
+        assert row['n'] == len(seed_rows)
+
+        # Apply migration 040 against the test table (rewrite target table name)
+        cur.execute(f"ALTER TABLE {table_name} DROP COLUMN scheduled")
+        db_connection.commit()
+
+        # Column is gone
+        cur.execute(f"DESCRIBE {table_name}")
+        columns = {r['Field'] for r in cur.fetchall()}
+        assert 'scheduled' not in columns
+        assert 'coordination_type' in columns  # sanity: didn't drop the wrong column
+
+        # Row count unchanged
+        cur.execute(f"SELECT COUNT(*) AS n FROM {table_name}")
+        row = cur.fetchone()
+        assert row['n'] == len(seed_rows)
+
+        # Data preserved
+        cur.execute(f"SELECT title, requirement_status, coordination_type FROM {table_name} ORDER BY id")
+        rows = {r['title']: r for r in cur.fetchall()}
+        assert rows['M040 T1']['requirement_status'] == 'swarm_ready'
+        assert rows['M040 T1']['coordination_type'] == 'planned'
+        assert rows['M040 T4']['requirement_status'] == 'development'
+        assert rows['M040 T4']['coordination_type'] == 'deployed'
+
+        # Cleanup
+        cur.execute(f"DROP TABLE {table_name}")
+        db_connection.commit()

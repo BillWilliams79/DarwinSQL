@@ -500,11 +500,10 @@ def test_requirement_status_default(db_connection, test_creator_fk):
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         requirement_id = cur.fetchone()['id']
 
-        cur.execute("SELECT requirement_status, scheduled FROM requirements WHERE id = %s",
+        cur.execute("SELECT requirement_status FROM requirements WHERE id = %s",
                     (requirement_id,))
         row = cur.fetchone()
         assert row['requirement_status'] == 'authoring'
-        assert row['scheduled'] == 0
 
     db_connection.rollback()
 
