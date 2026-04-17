@@ -147,7 +147,7 @@ CREATE TABLE requirements (
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     project_fk      INT             NULL,
-    category_fk     INT             NULL,
+    category_fk     INT             NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     sort_order      SMALLINT        NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
@@ -155,9 +155,10 @@ CREATE TABLE requirements (
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
-    FOREIGN KEY (category_fk)
+    CONSTRAINT fk_requirements_category
+        FOREIGN KEY (category_fk)
         REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
+        ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE

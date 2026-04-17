@@ -101,6 +101,35 @@ def seed_test_profile(db_connection, test_creator_fk):
 
 
 # ---------------------------------------------------------------------------
+# Shared project/category fixtures for requirement tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def test_category_id(db_connection, test_creator_fk, seed_test_profile):
+    """Session-scoped project + category so requirement tests have a valid category_fk.
+
+    Cleanup happens in seed_test_profile teardown (DELETE FROM categories, projects).
+    """
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Schema Test Project', test_creator_fk),
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO categories (category_name, project_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Schema Test Category', project_id, test_creator_fk),
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        category_id = cur.fetchone()['id']
+    db_connection.commit()
+    return category_id
+
+
+# ---------------------------------------------------------------------------
 # Migration test helpers
 # ---------------------------------------------------------------------------
 
