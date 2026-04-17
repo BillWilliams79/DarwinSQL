@@ -390,14 +390,14 @@ def test_category_fk_invalid_project(db_connection, test_creator_fk):
     db_connection.rollback()
 
 
-def test_requirement_fk_invalid_creator(db_connection):
+def test_requirement_fk_invalid_creator(db_connection, test_category_id):
     """INSERT requirement with non-existent creator_fk → IntegrityError"""
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
-                "INSERT INTO requirements (title, creator_fk) "
-                "VALUES (%s, %s)",
-                ('orphan requirement', 'nonexistent-profile-id')
+                "INSERT INTO requirements (title, creator_fk, category_fk) "
+                "VALUES (%s, %s, %s)",
+                ('orphan requirement', 'nonexistent-profile-id', test_category_id)
             )
     db_connection.rollback()
 
@@ -462,14 +462,26 @@ def test_category_name_not_null(db_connection, test_creator_fk, seed_test_profil
     db_connection.rollback()
 
 
-def test_requirement_title_not_null(db_connection, test_creator_fk):
+def test_requirement_title_not_null(db_connection, test_creator_fk, test_category_id):
     """INSERT requirement with title=NULL → error"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO requirements (title, creator_fk, category_fk) "
+                "VALUES (%s, %s, %s)",
+                (None, test_creator_fk, test_category_id)
+            )
+    db_connection.rollback()
+
+
+def test_requirement_category_fk_not_null(db_connection, test_creator_fk):
+    """INSERT requirement without category_fk → pymysql.IntegrityError (req #2217)"""
     with db_connection.cursor() as cur:
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
                 "INSERT INTO requirements (title, creator_fk) "
                 "VALUES (%s, %s)",
-                (None, test_creator_fk)
+                ('no-category', test_creator_fk),
             )
     db_connection.rollback()
 
@@ -490,12 +502,12 @@ def test_swarm_status_not_null(db_connection, test_creator_fk):
 # Roadmap table default value tests
 # ---------------------------------------------------------------------------
 
-def test_requirement_status_default(db_connection, test_creator_fk):
+def test_requirement_status_default(db_connection, test_creator_fk, test_category_id):
     """INSERT requirement without requirement_status → defaults to 'authoring' (migration 039)"""
     with db_connection.cursor() as cur:
         cur.execute(
-            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
-            ('test requirement default', test_creator_fk)
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('test requirement default', test_creator_fk, test_category_id)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         requirement_id = cur.fetchone()['id']

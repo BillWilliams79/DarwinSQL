@@ -5,6 +5,8 @@ Verifies that deleting parent records automatically cascades to children
 as defined in the schema (profiles→domains→areas→tasks).
 Each test uses transactions with rollback to keep darwin_dev test DB clean.
 """
+import pymysql
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +375,13 @@ def test_delete_project_cascades_to_categories(db_connection):
     db_connection.rollback()
 
 
-def test_delete_category_sets_requirement_fk_null(db_connection):
-    """DELETE category → requirements.category_fk set to NULL (ON DELETE SET NULL)"""
+def test_delete_category_with_requirements_rejected(db_connection):
+    """DELETE category with live requirements → IntegrityError (ON DELETE RESTRICT, req #2217).
+
+    This replaces the old SET NULL semantics (pre-migration 041). Deleting a category
+    that still has requirements linked to it is now blocked — callers must move or
+    delete the requirements first.
+    """
     test_creator = 'cascade-test-category-1'
 
     with db_connection.cursor() as cur:
@@ -403,22 +410,47 @@ def test_delete_category_sets_requirement_fk_null(db_connection):
             "VALUES (%s, %s, %s)",
             ('Cascade Test Requirement', category_id, test_creator)
         )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        requirement_id = cur.fetchone()['id']
 
-        # Delete category
-        cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
-
-        # Requirement survives but category_fk is NULL
-        cur.execute("SELECT category_fk FROM requirements WHERE id = %s", (requirement_id,))
-        row = cur.fetchone()
-        assert row is not None
-        assert row['category_fk'] is None
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
 
     db_connection.rollback()
 
 
-def test_delete_requirement_cascades_to_requirement_sessions(db_connection):
+def test_delete_empty_category_succeeds(db_connection):
+    """DELETE empty category → succeeds (RESTRICT only blocks when requirements exist)."""
+    test_creator = 'cascade-test-category-empty'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+            ('Cascade Test Project', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        project_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO categories (category_name, project_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Empty Category', project_id, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        category_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+
+        cur.execute("SELECT id FROM categories WHERE id = %s", (category_id,))
+        assert cur.fetchone() is None
+
+    db_connection.rollback()
+
+
+def test_delete_requirement_cascades_to_requirement_sessions(db_connection, test_category_id):
     """DELETE requirement → associated requirement_sessions rows are deleted"""
     test_creator = 'cascade-test-requirement-1'
 
@@ -429,8 +461,8 @@ def test_delete_requirement_cascades_to_requirement_sessions(db_connection):
             (test_creator, 'Cascade Test Profile', 'cascade@test.com')
         )
         cur.execute(
-            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Requirement', test_creator)
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('Cascade Test Requirement', test_creator, test_category_id)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         requirement_id = cur.fetchone()['id']
@@ -460,7 +492,7 @@ def test_delete_requirement_cascades_to_requirement_sessions(db_connection):
     db_connection.rollback()
 
 
-def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection):
+def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection, test_category_id):
     """DELETE swarm_session → associated requirement_sessions rows are deleted,
     dev_servers.session_fk set to NULL"""
     test_creator = 'cascade-test-session-1'
@@ -479,8 +511,8 @@ def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection):
         session_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Requirement', test_creator)
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('Cascade Test Requirement', test_creator, test_category_id)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         requirement_id = cur.fetchone()['id']
@@ -507,8 +539,13 @@ def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection):
     db_connection.rollback()
 
 
-def test_delete_profile_cascades_to_roadmap_tables(db_connection):
-    """DELETE profile → cascades through projects→categories, requirements, swarm_sessions"""
+def test_delete_profile_cascades_to_roadmap_tables(db_connection, test_category_id):
+    """DELETE profile → cascades through projects→categories, requirements, swarm_sessions.
+
+    Requirement references a category owned by a different creator (the session
+    test_creator_fk), so the profile cascade deletes this profile's requirements
+    without tripping the RESTRICT FK on that other creator's category.
+    """
     test_creator = 'cascade-test-roadmap-full'
 
     with db_connection.cursor() as cur:
@@ -525,8 +562,8 @@ def test_delete_profile_cascades_to_roadmap_tables(db_connection):
         project_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO requirements (title, creator_fk) VALUES (%s, %s)",
-            ('Cascade Test Requirement', test_creator)
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('Cascade Test Requirement', test_creator, test_category_id)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         requirement_id = cur.fetchone()['id']
@@ -538,7 +575,9 @@ def test_delete_profile_cascades_to_roadmap_tables(db_connection):
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         session_id = cur.fetchone()['id']
 
-        # Delete profile — should cascade to all owned records
+        # Delete profile — should cascade to all owned records. The category
+        # referenced by the requirement is owned by a different creator, so
+        # the cascade here only touches this profile's rows.
         cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
 
         cur.execute("SELECT id FROM projects WHERE id = %s", (project_id,))

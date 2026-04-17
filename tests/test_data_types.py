@@ -428,7 +428,7 @@ def test_requirements_columns(db_connection):
     assert columns['project_fk']['Key'] == 'MUL'
 
     assert columns['category_fk']['Type'] == 'int'
-    assert columns['category_fk']['Null'] == 'YES'
+    assert columns['category_fk']['Null'] == 'NO'  # req #2217 / migration 041
     assert columns['category_fk']['Key'] == 'MUL'
 
     assert columns['creator_fk']['Type'] == 'varchar(64)'
