@@ -722,3 +722,300 @@ def test_map_run_stopped_time_default(db_connection, test_creator_fk):
         assert row['stopped_time_sec'] == 0
 
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044)
+# ---------------------------------------------------------------------------
+
+# FK invalid-parent rejection tests
+
+def test_feature_fk_invalid_category(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT feature with non-existent category_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO features (title, description, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                ('orphan feature', 'desc', 999999, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_feature_fk_invalid_creator(db_connection, test_category_id):
+    """INSERT feature with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO features (title, description, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                ('orphan', 'desc', test_category_id, 'nonexistent-profile-id')
+            )
+    db_connection.rollback()
+
+
+def test_test_case_fk_invalid_category(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT test_case with non-existent category_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                ('orphan case', '1. step', 'passes', 999999, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_test_plan_fk_invalid_category(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT test_plan with non-existent category_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_plans (title, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s)",
+                ('orphan plan', 999999, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_test_run_fk_invalid_plan(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT test_run with non-existent test_plan_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_runs (test_plan_fk, run_status, creator_fk) "
+                "VALUES (%s, %s, %s)",
+                (999999, 'in_progress', test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_test_result_fk_invalid_run(db_connection, test_creator_fk, seed_test_profile):
+    """INSERT test_result with non-existent test_run_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_results "
+                "(test_run_fk, test_case_fk, result_status, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                (999999, 999999, 'passed', test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+# NOT NULL constraint tests
+
+def test_feature_title_not_null(db_connection, test_creator_fk, test_category_id):
+    """INSERT feature with title=NULL → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO features (title, description, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                (None, 'desc', test_category_id, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_feature_description_not_null(db_connection, test_creator_fk, test_category_id):
+    """INSERT feature with description=NULL → IntegrityError (features.description is NOT NULL)."""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO features (title, description, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                ('title', None, test_category_id, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_test_case_steps_not_null(db_connection, test_creator_fk, test_category_id):
+    """INSERT test_case with steps=NULL → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                ('t', None, 'e', test_category_id, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+def test_test_case_expected_not_null(db_connection, test_creator_fk, test_category_id):
+    """INSERT test_case with expected=NULL → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                ('t', '1.step', None, test_category_id, test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+# Default value tests
+
+def test_feature_status_default(db_connection, test_creator_fk, test_category_id):
+    """INSERT feature without feature_status → defaults to 'draft'."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO features (title, description, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('default-status-check', 'desc', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        feature_id = cur.fetchone()['id']
+        cur.execute("SELECT feature_status FROM features WHERE id = %s", (feature_id,))
+        row = cur.fetchone()
+        assert row['feature_status'] == 'draft'
+    db_connection.rollback()
+
+
+def test_test_case_type_default(db_connection, test_creator_fk, test_category_id):
+    """INSERT test_case without test_type → defaults to 'manual'."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('type-default', '1.step', 'pass', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        tc_id = cur.fetchone()['id']
+        cur.execute("SELECT test_type FROM test_cases WHERE id = %s", (tc_id,))
+        assert cur.fetchone()['test_type'] == 'manual'
+    db_connection.rollback()
+
+
+def test_test_run_status_default(db_connection, test_creator_fk, test_category_id):
+    """INSERT test_run without run_status → defaults to 'in_progress'."""
+    with db_connection.cursor() as cur:
+        # Need a plan first
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan-for-run-default', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute("SELECT run_status, started_at FROM test_runs WHERE id = %s", (run_id,))
+        row = cur.fetchone()
+        assert row['run_status'] == 'in_progress'
+        assert row['started_at'] is not None  # NOT NULL DEFAULT CURRENT_TIMESTAMP
+    db_connection.rollback()
+
+
+def test_test_result_status_default(db_connection, test_creator_fk, test_category_id):
+    """INSERT test_result without result_status → defaults to 'not_run'."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan-for-result-default', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case-for-result', '1', 'ok', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_results (test_run_fk, test_case_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (run_id, case_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        result_id = cur.fetchone()['id']
+        cur.execute("SELECT result_status, executed_at FROM test_results WHERE id = %s",
+                    (result_id,))
+        row = cur.fetchone()
+        assert row['result_status'] == 'not_run'
+        assert row['executed_at'] is None  # nullable, not set until result recorded
+    db_connection.rollback()
+
+
+# UNIQUE (test_run_fk, test_case_fk) enforcement
+
+def test_test_results_unique_run_case(db_connection, test_creator_fk, test_category_id):
+    """Second INSERT test_result with same (test_run_fk, test_case_fk) → IntegrityError.
+
+    Enforces uq_run_case: a test_run has at most one test_result per test_case.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan-uq-check', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case-uq', '1', 'ok', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO test_results (test_run_fk, test_case_fk, result_status, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (run_id, case_id, 'passed', test_creator_fk)
+        )
+        # Second insert with same (run, case) must fail
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO test_results (test_run_fk, test_case_fk, result_status, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                (run_id, case_id, 'failed', test_creator_fk)
+            )
+    db_connection.rollback()
+
+
+# Junction-table composite PK uniqueness
+
+def test_feature_test_cases_composite_pk(db_connection, test_creator_fk, test_category_id):
+    """Second INSERT feature_test_cases with same (feature_fk, test_case_fk) → IntegrityError."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO features (title, description, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('f-dup', 'd', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        f_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('tc-dup', '1', 'ok', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        tc_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
+            (f_id, tc_id)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
+                (f_id, tc_id)
+            )
+    db_connection.rollback()

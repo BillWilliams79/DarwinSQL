@@ -1,15 +1,28 @@
 #!/bin/bash
-# add-api-route.sh — Add a new /darwin/{table_name} route to Darwin API Gateway
+# add-api-route.sh — Add a new /{database}/{table_name} route to Darwin API Gateway
 #
 # Usage:
-#   ./add-api-route.sh <table_name>           # create route
-#   ./add-api-route.sh --dry-run <table_name> # print commands without executing
-#   ./add-api-route.sh --list                 # list existing resources
+#   ./add-api-route.sh <table_name>                              # create /darwin route (prod)
+#   ./add-api-route.sh --database=darwin_dev <table_name>        # create /darwin_dev route (dev)
+#   ./add-api-route.sh --database=darwin --no-deploy <table>     # skip stage deployment
+#   ./add-api-route.sh --dry-run <table_name>                    # print commands without executing
+#   ./add-api-route.sh --list                                    # list existing resources
 #
 # Requires: darwinroot credentials loaded via . ~/.darwin-credentials/aws_credentials.sh
 #
-# Creates two methods: ANY (Cognito-authenticated) + OPTIONS (CORS preflight)
-# Adds Lambda resource policy and deploys to eng stage.
+# Creates two methods: ANY (Cognito-authenticated) + OPTIONS (CORS preflight).
+# Optionally adds Lambda resource policy and deploys to eng stage.
+#
+# Req #2380 changes (2026-04-21):
+#   - --database={darwin|darwin_dev}: select prod or dev parent resource.
+#     darwin_dev skips the Lambda resource policy step because the existing
+#     apigateway-darwin_dev-wildcard statement covers all /darwin_dev/* routes.
+#   - --no-deploy: suppress the per-route create-deployment. Used when batching
+#     many route creations so a single final deploy covers them all.
+#   - /darwin/ table routes no longer need per-table Lambda permission statements
+#     after req #2380 consolidated /darwin/* to a wildcard (Step 4 of req #2380).
+#     Step 9 is retained for operational completeness when the wildcard is absent,
+#     but add-permission will NO-OP safely via --no-skip-if-exists check below.
 
 set -eo pipefail
 
@@ -17,8 +30,9 @@ set -eo pipefail
 # Constants
 # ---------------------------------------------------------------------------
 API_ID="k5j0ftr527"
-PARENT_ID="6k3i3k"            # /darwin resource
-AUTHORIZER_ID="vd4o3k"        # DarwinAppAuthorizer (COGNITO_USER_POOLS)
+PARENT_ID_DARWIN="6k3i3k"           # /darwin resource
+PARENT_ID_DARWIN_DEV="l80osi"       # /darwin_dev resource
+AUTHORIZER_ID="vd4o3k"              # DarwinAppAuthorizer (COGNITO_USER_POOLS)
 LAMBDA_ARN="arn:aws:lambda:us-west-1:617853379785:function:RestApi-MySql-Lambda"
 ACCOUNT_ID="617853379785"
 REGION="us-west-1"
@@ -33,15 +47,29 @@ CORS_ALLOW_ORIGIN="'*'"
 # ---------------------------------------------------------------------------
 DRY_RUN=0
 LIST_MODE=0
+NO_DEPLOY=0
+DATABASE="darwin"       # default: prod
 TABLE_NAME=""
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run) DRY_RUN=1 ;;
         --list) LIST_MODE=1 ;;
+        --no-deploy) NO_DEPLOY=1 ;;
+        --database=*) DATABASE="${arg#--database=}" ;;
         *) TABLE_NAME="$arg" ;;
     esac
 done
+
+# Validate database selection + map to parent resource ID.
+case "$DATABASE" in
+    darwin)     PARENT_ID="$PARENT_ID_DARWIN" ;;
+    darwin_dev) PARENT_ID="$PARENT_ID_DARWIN_DEV" ;;
+    *)
+        echo "ERROR: --database must be 'darwin' or 'darwin_dev' (got '$DATABASE')" >&2
+        exit 2
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # List mode
@@ -55,7 +83,7 @@ if [ "$LIST_MODE" -eq 1 ]; then
 fi
 
 if [ -z "$TABLE_NAME" ]; then
-    echo "Usage: $0 [--dry-run] [--list] <table_name>"
+    echo "Usage: $0 [--dry-run] [--list] [--database=darwin|darwin_dev] [--no-deploy] <table_name>"
     exit 1
 fi
 
@@ -70,13 +98,14 @@ run() {
     fi
 }
 
-echo "==> Adding API Gateway route: /darwin/${TABLE_NAME}"
+echo "==> Adding API Gateway route: /${DATABASE}/${TABLE_NAME}"
 [ "$DRY_RUN" -eq 1 ] && echo "    (dry-run mode — no changes will be made)"
+[ "$NO_DEPLOY" -eq 1 ] && echo "    (--no-deploy: stage deployment will be skipped)"
 
 # ---------------------------------------------------------------------------
 # Step 1: Create resource
 # ---------------------------------------------------------------------------
-echo "Step 1: Creating resource /darwin/${TABLE_NAME}..."
+echo "Step 1: Creating resource /${DATABASE}/${TABLE_NAME}..."
 if [ "$DRY_RUN" -eq 0 ]; then
     RESOURCE_ID=$(aws apigateway create-resource \
         --rest-api-id "$API_ID" \
@@ -182,26 +211,56 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 9: Lambda resource policy
+#
+# Skipped for /darwin_dev/: apigateway-darwin_dev-wildcard already covers all
+# /darwin_dev/* source ARNs.
+#
+# For /darwin/: after req #2380 consolidated to apigateway-darwin-wildcard, a
+# per-table statement is redundant. We still attempt add-permission for
+# operational completeness (in case the wildcard is reverted), but we tolerate
+# the "already exists or covered" case by checking for ResourceConflictException.
 # ---------------------------------------------------------------------------
-echo "Step 9: Adding Lambda resource policy..."
-STATEMENT_ID="apigateway-darwin-${TABLE_NAME}"
-SOURCE_ARN="arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*/darwin/${TABLE_NAME}"
-run "aws lambda add-permission \
-    --function-name \"$LAMBDA_ARN\" \
-    --statement-id \"$STATEMENT_ID\" \
-    --action lambda:InvokeFunction \
-    --principal apigateway.amazonaws.com \
-    --source-arn \"$SOURCE_ARN\""
+if [ "$DATABASE" = "darwin_dev" ]; then
+    echo "Step 9: SKIP (darwin_dev covered by apigateway-darwin_dev-wildcard)."
+else
+    echo "Step 9: Adding Lambda resource policy (darwin per-table)..."
+    STATEMENT_ID="apigateway-${DATABASE}-${TABLE_NAME}"
+    SOURCE_ARN="arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*/${DATABASE}/${TABLE_NAME}"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "[DRY-RUN] aws lambda add-permission --statement-id $STATEMENT_ID --source-arn $SOURCE_ARN"
+    else
+        # Tolerate ResourceConflictException (wildcard already covers or statement
+        # exists from a prior run) — continue on that case only.
+        if ! aws lambda add-permission \
+            --function-name "$LAMBDA_ARN" \
+            --statement-id "$STATEMENT_ID" \
+            --action lambda:InvokeFunction \
+            --principal apigateway.amazonaws.com \
+            --source-arn "$SOURCE_ARN" 2>/tmp/add-permission-err; then
+            if grep -q 'ResourceConflictException' /tmp/add-permission-err 2>/dev/null; then
+                echo "    (existing statement or wildcard — ok, continuing)"
+            else
+                echo "    ERROR from add-permission:" >&2
+                cat /tmp/add-permission-err >&2
+                exit 1
+            fi
+        fi
+    fi
+fi
 
 # ---------------------------------------------------------------------------
-# Step 10: Deploy to eng stage
+# Step 10: Deploy to eng stage (skipped when --no-deploy)
 # ---------------------------------------------------------------------------
-echo "Step 10: Deploying to stage '${STAGE}'..."
-run "aws apigateway create-deployment \
-    --rest-api-id \"$API_ID\" \
-    --stage-name \"$STAGE\" \
-    --description \"Add /darwin/${TABLE_NAME} route\""
+if [ "$NO_DEPLOY" -eq 1 ]; then
+    echo "Step 10: SKIP (--no-deploy). Remember to run create-deployment after batching."
+else
+    echo "Step 10: Deploying to stage '${STAGE}'..."
+    run "aws apigateway create-deployment \
+        --rest-api-id \"$API_ID\" \
+        --stage-name \"$STAGE\" \
+        --description \"Add /${DATABASE}/${TABLE_NAME} route\""
+fi
 
 echo ""
-echo "==> Route /darwin/${TABLE_NAME} created successfully."
-echo "    URL: https://${API_ID}.execute-api.${REGION}.amazonaws.com/${STAGE}/darwin/${TABLE_NAME}"
+echo "==> Route /${DATABASE}/${TABLE_NAME} created successfully."
+echo "    URL: https://${API_ID}.execute-api.${REGION}.amazonaws.com/${STAGE}/${DATABASE}/${TABLE_NAME}"

@@ -59,6 +59,17 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        # Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044).
+        # Listed longest-first within this group to avoid partial matches
+        # (e.g., 'test_cases' inside 'feature_test_cases' is blocked by the
+        # regex lookbehind, but longest-first preserves future safety.)
+        'feature_test_cases',
+        'test_plan_cases',
+        'test_results',
+        'test_plans',
+        'test_cases',
+        'test_runs',
+        'features',
         'user_integrations',
         'requirement_sessions',
         'priority_sessions',     # pre-038 name (for RENAME TABLE in migration 038)
@@ -96,6 +107,31 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # (?=_ibfk|\b) = followed by _ibfk (FK name) or word boundary (standalone)
         pattern = r'(?<![a-zA-Z_])' + re.escape(name) + r'(?=_ibfk|\b)'
         sql = re.sub(pattern, f'{table_prefix}_{name}', sql)
+
+    # Prefix explicitly-named FK/UNIQUE constraint names (migration 041+ convention).
+    # MySQL 8.0+ enforces FK constraint-name uniqueness per schema, so prefix-test
+    # runs of migrations that name their constraints (e.g. 041's fk_requirements_category,
+    # 042's fk_features_category) need the constraint names to vary per test prefix.
+    # Pattern: any CONSTRAINT name matching fk_*_* or uq_*_* gets a prefix inserted.
+    # Simple str.replace is safe — the constraint names are unique tokens and never
+    # appear as column fragments inside other identifiers.
+    named_constraints = [
+        # Migration 041
+        'fk_requirements_category',
+        # Migration 042
+        'fk_features_category', 'fk_features_creator',
+        'fk_test_cases_category', 'fk_test_cases_creator',
+        'fk_ftc_feature', 'fk_ftc_case',
+        # Migration 043
+        'fk_test_plans_category', 'fk_test_plans_creator',
+        'fk_tpc_plan', 'fk_tpc_case',
+        # Migration 044
+        'fk_test_runs_plan', 'fk_test_runs_creator',
+        'fk_test_results_run', 'fk_test_results_case', 'fk_test_results_creator',
+        'uq_run_case',
+    ]
+    for cname in named_constraints:
+        sql = sql.replace(cname, f'{table_prefix}_{cname}')
 
     # Remove SQL comments (both -- and # style)
     lines = []
@@ -170,6 +206,13 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #2380 validation registry — FK-safe drop order (leaves first).
+    # test_results → test_runs CASCADE; test_runs → test_plans RESTRICT;
+    # feature_test_cases/test_plan_cases CASCADE from both sides;
+    # test_results → test_cases RESTRICT (so test_results must drop before test_cases).
+    'test_results', 'test_runs',
+    'test_plan_cases', 'feature_test_cases',
+    'test_plans', 'test_cases', 'features',
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers',
@@ -320,6 +363,10 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'map_routes', 'map_runs', 'map_coordinates',
             'map_views', 'map_partners', 'map_run_partners',
             'user_integrations',
+            # Req #2380 — Swarm Features & Test Cases registry
+            'features', 'test_cases', 'feature_test_cases',
+            'test_plans', 'test_plan_cases',
+            'test_runs', 'test_results',
         ]
     }
     assert tables == expected_tables, \
