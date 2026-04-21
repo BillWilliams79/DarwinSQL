@@ -654,3 +654,289 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
         assert cur.fetchone() is not None
 
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #2380 — Swarm Features & Test Cases registry CASCADE/RESTRICT
+# ---------------------------------------------------------------------------
+
+def _setup_validation_creator(cur, prefix):
+    """Create a dedicated profile + project + category for a cascade test scenario.
+
+    Returns (creator, project_id, category_id). Caller is responsible for
+    rollback (tests use the usual rollback pattern).
+    """
+    creator = f'{prefix}-{__import__("uuid").uuid4().hex[:6]}'
+    cur.execute(
+        "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+        (creator, 'Validation Cascade', f'{creator}@test.com')
+    )
+    cur.execute(
+        "INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+        ('validation cascade project', creator)
+    )
+    cur.execute("SELECT LAST_INSERT_ID() AS id")
+    project_id = cur.fetchone()['id']
+    cur.execute(
+        "INSERT INTO categories (category_name, project_fk, creator_fk) "
+        "VALUES (%s, %s, %s)",
+        ('validation cascade category', project_id, creator)
+    )
+    cur.execute("SELECT LAST_INSERT_ID() AS id")
+    category_id = cur.fetchone()['id']
+    return creator, project_id, category_id
+
+
+def test_delete_category_with_features_rejected(db_connection):
+    """DELETE category with live features → IntegrityError (ON DELETE RESTRICT)."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-feat-cat')
+        cur.execute(
+            "INSERT INTO features (title, description, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('blocker feature', 'd', category_id, creator)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+    db_connection.rollback()
+
+
+def test_delete_category_with_test_cases_rejected(db_connection):
+    """DELETE category with live test_cases → IntegrityError (ON DELETE RESTRICT)."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-tc-cat')
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('blocker case', '1', 'ok', category_id, creator)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+    db_connection.rollback()
+
+
+def test_delete_category_with_test_plans_rejected(db_connection):
+    """DELETE category with live test_plans → IntegrityError (ON DELETE RESTRICT)."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-plan-cat')
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('blocker plan', category_id, creator)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
+    db_connection.rollback()
+
+
+def test_delete_feature_cascades_to_feature_test_cases(db_connection):
+    """DELETE feature → CASCADE removes its feature_test_cases rows."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-feat-del')
+        cur.execute(
+            "INSERT INTO features (title, description, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('feat', 'd', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        feature_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
+            (feature_id, case_id)
+        )
+
+        cur.execute("DELETE FROM features WHERE id = %s", (feature_id,))
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM feature_test_cases "
+            "WHERE feature_fk = %s OR test_case_fk = %s",
+            (feature_id, case_id)
+        )
+        assert cur.fetchone()['c'] == 0  # CASCADE removed the junction row
+        # Test case itself is untouched
+        cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_delete_test_case_cascades_to_feature_test_cases(db_connection):
+    """DELETE test_case → CASCADE removes its feature_test_cases rows."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-case-del')
+        cur.execute(
+            "INSERT INTO features (title, description, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('feat', 'd', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        feature_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
+            (feature_id, case_id)
+        )
+
+        cur.execute("DELETE FROM test_cases WHERE id = %s", (case_id,))
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM feature_test_cases WHERE test_case_fk = %s",
+            (case_id,)
+        )
+        assert cur.fetchone()['c'] == 0
+        # Feature itself untouched
+        cur.execute("SELECT id FROM features WHERE id = %s", (feature_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_delete_test_plan_with_runs_rejected(db_connection):
+    """DELETE test_plan with live test_runs → IntegrityError (ON DELETE RESTRICT).
+
+    A plan with run history cannot be deleted; the caller must close or archive first.
+    """
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-plan-run')
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan with history', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, creator)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM test_plans WHERE id = %s", (plan_id,))
+    db_connection.rollback()
+
+
+def test_delete_test_run_cascades_to_results(db_connection):
+    """DELETE test_run → CASCADE removes its test_results rows."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-run-del')
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_results "
+            "(test_run_fk, test_case_fk, result_status, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (run_id, case_id, 'passed', creator)
+        )
+
+        cur.execute("DELETE FROM test_runs WHERE id = %s", (run_id,))
+
+        cur.execute("SELECT COUNT(*) AS c FROM test_results WHERE test_run_fk = %s", (run_id,))
+        assert cur.fetchone()['c'] == 0  # CASCADE removed results
+        # Case is untouched
+        cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_delete_test_case_with_results_rejected(db_connection):
+    """DELETE test_case with live test_results → IntegrityError (ON DELETE RESTRICT).
+
+    Protects historical run data: cannot remove a test_case that already has
+    recorded outcomes.
+    """
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-case-result')
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case with result', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_runs (test_plan_fk, creator_fk) VALUES (%s, %s)",
+            (plan_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_results "
+            "(test_run_fk, test_case_fk, result_status, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (run_id, case_id, 'failed', creator)
+        )
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM test_cases WHERE id = %s", (case_id,))
+    db_connection.rollback()
+
+
+def test_delete_test_plan_cascades_to_plan_cases(db_connection):
+    """DELETE test_plan (when no runs exist) → CASCADE removes its test_plan_cases rows."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-plan-cases')
+        cur.execute(
+            "INSERT INTO test_plans (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+            ('plan to delete', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        plan_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_plan_cases (test_plan_fk, test_case_fk, sort_order) "
+            "VALUES (%s, %s, 1)",
+            (plan_id, case_id)
+        )
+
+        cur.execute("DELETE FROM test_plans WHERE id = %s", (plan_id,))
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM test_plan_cases WHERE test_plan_fk = %s",
+            (plan_id,)
+        )
+        assert cur.fetchone()['c'] == 0  # CASCADE removed the junction row
+        # Case itself is untouched
+        cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()

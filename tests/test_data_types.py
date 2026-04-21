@@ -968,8 +968,247 @@ def test_map_run_partners_columns(db_connection):
     assert 'timestamp' in columns['create_ts']['Type']
 
 
+def test_features_columns(db_connection):
+    """Verify features column definitions match schema.sql (migration 042)."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE features")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'title', 'description', 'feature_status',
+                       'category_fk', 'creator_fk', 'closed', 'sort_order',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['title']['Type'] == 'varchar(256)'
+    assert columns['title']['Null'] == 'NO'
+
+    assert columns['description']['Type'] == 'text'
+    assert columns['description']['Null'] == 'NO'
+
+    assert columns['feature_status']['Type'] == 'varchar(16)'
+    assert columns['feature_status']['Null'] == 'NO'
+    assert columns['feature_status']['Default'] == 'draft'
+
+    assert columns['category_fk']['Type'] == 'int'
+    assert columns['category_fk']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+
+    assert 'tinyint' in columns['closed']['Type']
+    assert columns['closed']['Null'] == 'NO'
+    assert columns['closed']['Default'] == '0'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+    assert 'timestamp' in columns['create_ts']['Type']
+    assert columns['create_ts']['Default'] == 'CURRENT_TIMESTAMP'
+    assert 'timestamp' in columns['update_ts']['Type']
+    assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
+
+
+def test_test_cases_columns(db_connection):
+    """Verify test_cases column definitions match schema.sql (migration 042)."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE test_cases")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'title', 'preconditions', 'steps', 'expected',
+                       'test_type', 'tags', 'category_fk', 'creator_fk',
+                       'closed', 'sort_order', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['title']['Type'] == 'varchar(256)'
+    assert columns['title']['Null'] == 'NO'
+
+    assert columns['preconditions']['Type'] == 'text'
+    assert columns['preconditions']['Null'] == 'YES'  # optional (smoke tests may have none)
+
+    assert columns['steps']['Type'] == 'text'
+    assert columns['steps']['Null'] == 'NO'
+
+    assert columns['expected']['Type'] == 'text'
+    assert columns['expected']['Null'] == 'NO'
+
+    assert columns['test_type']['Type'] == 'varchar(16)'
+    assert columns['test_type']['Null'] == 'NO'
+    assert columns['test_type']['Default'] == 'manual'
+
+    assert columns['tags']['Type'] == 'varchar(512)'
+    assert columns['tags']['Null'] == 'YES'
+
+    assert columns['category_fk']['Type'] == 'int'
+    assert columns['category_fk']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+
+    assert 'tinyint' in columns['closed']['Type']
+    assert columns['closed']['Default'] == '0'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+
+def test_feature_test_cases_columns(db_connection):
+    """Verify feature_test_cases junction (migration 042) — composite PK, no id."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE feature_test_cases")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['feature_fk', 'test_case_fk']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    # Both FKs are primary key parts (composite PK)
+    assert columns['feature_fk']['Type'] == 'int'
+    assert columns['feature_fk']['Null'] == 'NO'
+    assert columns['feature_fk']['Key'] == 'PRI'
+
+    assert columns['test_case_fk']['Type'] == 'int'
+    assert columns['test_case_fk']['Null'] == 'NO'
+    # MySQL reports non-leading composite PK columns as 'MUL'
+    assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
+
+
+def test_test_plans_columns(db_connection):
+    """Verify test_plans column definitions match schema.sql (migration 043)."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE test_plans")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'title', 'description', 'category_fk',
+                       'creator_fk', 'closed', 'sort_order',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Extra'] == 'auto_increment'
+    assert columns['title']['Type'] == 'varchar(256)'
+    assert columns['title']['Null'] == 'NO'
+    assert columns['description']['Type'] == 'text'
+    assert columns['description']['Null'] == 'YES'  # nullable (distinct from features.description)
+    assert columns['category_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['closed']['Default'] == '0'
+    assert columns['sort_order']['Null'] == 'YES'
+
+
+def test_test_plan_cases_columns(db_connection):
+    """Verify test_plan_cases junction (migration 043) — composite PK + sort_order."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE test_plan_cases")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['test_plan_fk', 'test_case_fk', 'sort_order']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['test_plan_fk']['Null'] == 'NO'
+    assert columns['test_plan_fk']['Key'] == 'PRI'
+
+    assert columns['test_case_fk']['Null'] == 'NO'
+    assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+
+def test_test_runs_columns(db_connection):
+    """Verify test_runs column definitions match schema.sql (migration 044).
+
+    Execution table — has started_at/completed_at, NO closed, NO sort_order.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE test_runs")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'test_plan_fk', 'run_status', 'started_at',
+                       'completed_at', 'notes', 'creator_fk',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    assert 'closed' not in columns, "test_runs is an execution table; must NOT have a closed column"
+    assert 'sort_order' not in columns, "test_runs is chronological by started_at"
+
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['test_plan_fk']['Type'] == 'int'
+    assert columns['test_plan_fk']['Null'] == 'NO'
+
+    assert columns['run_status']['Type'] == 'varchar(16)'
+    assert columns['run_status']['Null'] == 'NO'
+    assert columns['run_status']['Default'] == 'in_progress'
+
+    assert 'timestamp' in columns['started_at']['Type']
+    assert columns['started_at']['Null'] == 'NO'
+    assert columns['started_at']['Default'] == 'CURRENT_TIMESTAMP'
+
+    assert 'timestamp' in columns['completed_at']['Type']
+    assert columns['completed_at']['Null'] == 'YES'
+
+    assert columns['notes']['Type'] == 'text'
+    assert columns['notes']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Null'] == 'NO'
+
+
+def test_test_results_columns(db_connection):
+    """Verify test_results column definitions match schema.sql (migration 044).
+
+    Execution table — has executed_at, NO closed, NO sort_order. UNIQUE (run, case).
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE test_results")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'test_run_fk', 'test_case_fk', 'result_status',
+                       'actual', 'notes', 'executed_at', 'creator_fk',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    assert 'closed' not in columns, "test_results is an execution table"
+    assert 'sort_order' not in columns
+
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['test_run_fk']['Type'] == 'int'
+    assert columns['test_run_fk']['Null'] == 'NO'
+
+    assert columns['test_case_fk']['Type'] == 'int'
+    assert columns['test_case_fk']['Null'] == 'NO'
+
+    assert columns['result_status']['Type'] == 'varchar(16)'
+    assert columns['result_status']['Null'] == 'NO'
+    assert columns['result_status']['Default'] == 'not_run'
+
+    assert columns['actual']['Type'] == 'text'
+    assert columns['actual']['Null'] == 'YES'
+
+    assert 'timestamp' in columns['executed_at']['Type']
+    assert columns['executed_at']['Null'] == 'YES'  # populated when recorded
+
+    # Verify UNIQUE constraint uq_run_case
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW INDEX FROM test_results WHERE Key_name = 'uq_run_case'")
+        rows = cur.fetchall()
+    columns_in_unique = {r['Column_name'] for r in rows}
+    assert columns_in_unique == {'test_run_fk', 'test_case_fk'}, \
+        f"uq_run_case UNIQUE should cover (test_run_fk, test_case_fk), got {columns_in_unique}"
+
+
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 18 expected tables."""
+    """Verify darwin_dev database contains all 25 expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
@@ -980,6 +1219,10 @@ def test_table_count(db_connection):
         'swarm_sessions', 'dev_servers', 'priority_card_order',
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
         'map_partners', 'map_run_partners',
+        # Req #2380 — Swarm Features & Test Cases registry
+        'features', 'test_cases', 'feature_test_cases',
+        'test_plans', 'test_plan_cases',
+        'test_runs', 'test_results',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

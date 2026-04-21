@@ -91,6 +91,18 @@ def seed_test_profile(db_connection, test_creator_fk):
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #2380: features/test_cases/test_plans RESTRICT on categories,
+        # so delete these BEFORE categories. test_results and test_runs also
+        # clean up explicitly to handle tests that commit mid-run.
+        cur.execute("DELETE FROM test_results WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM test_runs WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM test_plan_cases WHERE test_plan_fk IN "
+                    "(SELECT id FROM test_plans WHERE creator_fk = %s)", (test_creator_fk,))
+        cur.execute("DELETE FROM test_plans WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM feature_test_cases WHERE feature_fk IN "
+                    "(SELECT id FROM features WHERE creator_fk = %s)", (test_creator_fk,))
+        cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM features WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))

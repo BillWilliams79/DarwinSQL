@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 17 tables after all migrations.
+-- This file reflects the final state of all 25 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -336,4 +336,136 @@ CREATE TABLE IF NOT EXISTS map_run_partners (
     FOREIGN KEY (map_partner_fk)
         REFERENCES map_partners (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Swarm Features & Test Cases registry (req #2380 — migrations 042/043/044)
+-- Phase 1: features + test_cases + feature_test_cases
+-- Phase 2: test_plans + test_plan_cases
+-- Phase 3: test_runs + test_results
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS features (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NOT NULL,
+    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_features_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_features_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS test_cases (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    preconditions   TEXT            NULL,
+    steps           TEXT            NOT NULL,
+    expected        TEXT            NOT NULL,
+    test_type       VARCHAR(16)     NOT NULL DEFAULT 'manual',  -- manual|automated|hybrid
+    tags            VARCHAR(512)    NULL,
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_test_cases_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_test_cases_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS feature_test_cases (
+    feature_fk      INT             NOT NULL,
+    test_case_fk    INT             NOT NULL,
+    PRIMARY KEY (feature_fk, test_case_fk),
+    CONSTRAINT fk_ftc_feature
+        FOREIGN KEY (feature_fk) REFERENCES features (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_ftc_case
+        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS test_plans (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_test_plans_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_test_plans_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS test_plan_cases (
+    test_plan_fk    INT             NOT NULL,
+    test_case_fk    INT             NOT NULL,
+    sort_order      SMALLINT        NULL,
+    PRIMARY KEY (test_plan_fk, test_case_fk),
+    CONSTRAINT fk_tpc_plan
+        FOREIGN KEY (test_plan_fk) REFERENCES test_plans (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_tpc_case
+        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS test_runs (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    test_plan_fk    INT             NOT NULL,
+    run_status      VARCHAR(16)     NOT NULL DEFAULT 'in_progress', -- in_progress|completed|aborted
+    started_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at    TIMESTAMP       NULL,
+    notes           TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_test_runs_plan
+        FOREIGN KEY (test_plan_fk) REFERENCES test_plans (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_test_runs_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS test_results (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    test_run_fk     INT             NOT NULL,
+    test_case_fk    INT             NOT NULL,
+    result_status   VARCHAR(16)     NOT NULL DEFAULT 'not_run',     -- passed|failed|blocked|skipped|not_run
+    actual          TEXT            NULL,
+    notes           TEXT            NULL,
+    executed_at     TIMESTAMP       NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_test_results_run
+        FOREIGN KEY (test_run_fk) REFERENCES test_runs (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_test_results_case
+        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_test_results_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT uq_run_case UNIQUE KEY (test_run_fk, test_case_fk)
 );
