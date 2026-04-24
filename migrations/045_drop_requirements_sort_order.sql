@@ -1,0 +1,23 @@
+-- Drop the requirements.sort_order column.
+--
+-- The original swarm design let users drag-reorder requirements within a
+-- category card and addressed them by position (sort_order ASC) for
+-- /swarm-start. Subsequent UX work made requirement-# addressing the primary
+-- interaction, and position-based ordering became dead weight.
+--
+-- After this migration, all consumers that previously sorted requirements by
+-- sort_order sort by id ASC (requirement # / natural creation order):
+--   - darwin-mcp list_requirements   — ORDER BY id ASC
+--   - darwin-mcp get_swarm_launch_data — ORDER BY p.id ASC
+--   - Darwin UI processSort.js        — swarm_ready sorted by id
+--   - Darwin UI requirementSort.js    — siblingHandSort removed; id-tiebreak
+--   - scripts/swarm/sort-process.sh   — sort_key() uses id for swarm_ready
+--
+-- The categories.sort_order column (orders category CARDS) is a separate
+-- concept and is NOT touched by this migration.
+--
+-- Deploy sequence: Darwin frontend + darwin-mcp must deploy BEFORE this DDL
+-- runs on production. Stale callers sending `fields=...,sort_order,...` will
+-- get `Unknown column` errors otherwise. See req #2405 for full notes.
+
+ALTER TABLE requirements DROP COLUMN sort_order;

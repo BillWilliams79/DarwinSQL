@@ -374,7 +374,7 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns (post migration 039):
+    Expected columns (post migration 045 — sort_order dropped):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
@@ -385,7 +385,6 @@ def test_requirements_columns(db_connection):
     - project_fk: INT, NULL, MUL
     - category_fk: INT, NULL, MUL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
-    - sort_order: SMALLINT, NULL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
@@ -396,7 +395,7 @@ def test_requirements_columns(db_connection):
 
     expected_fields = ['id', 'title', 'description', 'requirement_status',
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
-                       'creator_fk', 'sort_order', 'create_ts', 'update_ts',
+                       'creator_fk', 'create_ts', 'update_ts',
                        'coordination_type']
     assert set(columns.keys()) == set(expected_fields)
 
@@ -434,9 +433,6 @@ def test_requirements_columns(db_connection):
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'
     assert columns['creator_fk']['Key'] == 'MUL'
-
-    assert columns['sort_order']['Type'] == 'smallint'
-    assert columns['sort_order']['Null'] == 'YES'
 
     assert columns['coordination_type']['Type'] == 'varchar(16)'
     assert columns['coordination_type']['Null'] == 'YES'
