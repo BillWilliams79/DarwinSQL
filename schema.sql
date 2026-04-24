@@ -148,7 +148,6 @@ CREATE TABLE IF NOT EXISTS requirements (
     project_fk      INT             NULL,
     category_fk     INT             NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
-    sort_order      SMALLINT        NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
