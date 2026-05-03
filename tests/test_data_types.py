@@ -374,7 +374,7 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns (post migration 045 — sort_order dropped):
+    Expected columns (migration 046 re-adds sort_order; req #2417):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
@@ -388,6 +388,7 @@ def test_requirements_columns(db_connection):
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
+    - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
     """
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirements")
@@ -396,7 +397,7 @@ def test_requirements_columns(db_connection):
     expected_fields = ['id', 'title', 'description', 'requirement_status',
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
                        'creator_fk', 'create_ts', 'update_ts',
-                       'coordination_type']
+                       'coordination_type', 'sort_order']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -437,6 +438,10 @@ def test_requirements_columns(db_connection):
     assert columns['coordination_type']['Type'] == 'varchar(16)'
     assert columns['coordination_type']['Null'] == 'YES'
     assert columns['coordination_type']['Default'] == 'implemented'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+    assert columns['sort_order']['Default'] is None
 
 
 def test_swarm_sessions_columns(db_connection):

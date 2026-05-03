@@ -1,0 +1,29 @@
+-- Re-add the requirements.sort_order column (req #2417).
+--
+-- Migration 045 dropped this column on the rationale that requirement-#
+-- addressing had supplanted position-based addressing for /swarm-start. That
+-- was correct for /swarm-start, but it also disabled the "Hand Sort" menu
+-- option in the SwarmView category card — selecting Hand Sort persisted
+-- categories.sort_mode='hand' but the only consumer (RequirementRow's
+-- useDrag/useDrop) had been removed alongside the column, so dragging a row
+-- did nothing.
+--
+-- Req #2417 restores in-card hand-sort drag-and-drop. The column is added back
+-- with the same shape it had pre-045: SMALLINT NULL DEFAULT NULL. Existing
+-- rows stay NULL (no lazy-fill); the UI's requirementHandSort treats NULL as
+-- +infinity so id-order remains the visible default until the user explicitly
+-- drags a row, at which point CategoryCard bulk-PUTs the new sort_order
+-- values for every requirement in that category.
+--
+-- /swarm-start and the cross-implementation sort scripts (scripts/swarm/sort-
+-- process.sh, darwin-mcp get_swarm_launch_data, the MCP requirements
+-- resources, etc.) keep ORDER BY id ASC — none of them re-acquire a
+-- sort_order dependency. This column is **only** consumed by the SwarmView
+-- card's hand-sort path.
+--
+-- Deploy sequence: this DDL is safe to apply ahead of the Darwin frontend +
+-- Lambda-Rest changes (the column simply becomes available; nothing reads it
+-- until the new code ships). Lambda-Rest's PUT/POST handlers are generic over
+-- columns, so no Lambda redeploy is required for the column itself.
+
+ALTER TABLE requirements ADD COLUMN sort_order SMALLINT NULL DEFAULT NULL;
