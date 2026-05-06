@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
                                             -- planned | implemented | deployed (default: implemented)
+    sort_order      SMALLINT        NULL DEFAULT NULL,
+                                            -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
