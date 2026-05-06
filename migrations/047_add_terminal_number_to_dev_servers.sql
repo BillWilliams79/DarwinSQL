@@ -1,4 +1,7 @@
--- Migration 046: Add terminal_number column to dev_servers (req #2419)
+-- Migration 047: Add terminal_number column to dev_servers (req #2419)
+--
+-- Renumbered from 046 → 047 at /swarm-complete merge time when master's
+-- 046_add_requirements_sort_order_back.sql (req #2405 follow-up) landed first.
 --
 -- Encodes the iTerm tty number (e.g. /dev/ttys005 → 5) of the Claude Code
 -- session that owns each dev server. The /devops-devserver-start skill
