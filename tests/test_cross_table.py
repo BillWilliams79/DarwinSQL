@@ -238,6 +238,15 @@ def test_creator_fk_tables_match_auth_utils(db_connection):
 
     profiles is excluded because it uses id-based auth (PROFILE_TABLE), not creator_fk.
     """
+    # Skip when Lambda-Rest isn't co-located with this worktree (swarm worker
+    # without Lambda-Rest in affectedRepos). The cross-repo invariant is only
+    # verifiable when both repos are present.
+    test_dir = os.path.dirname(__file__)
+    workspace_root = os.path.dirname(os.path.dirname(test_dir))
+    auth_utils_path = os.path.join(workspace_root, 'Lambda-Rest', 'auth_utils.py')
+    if not os.path.exists(auth_utils_path):
+        pytest.skip(f"Lambda-Rest not checked out at {workspace_root}; cross-repo test skipped")
+
     # Get tables with creator_fk from the live database (exclude mig_ temp tables)
     with db_connection.cursor() as cur:
         cur.execute(
