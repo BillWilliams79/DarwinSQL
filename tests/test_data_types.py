@@ -9,7 +9,7 @@ definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 def test_profiles_columns(db_connection):
     """Verify profiles column definitions match schema.sql.
 
-    Expected columns (post migration 026):
+    Expected columns (post migration 026 + app_solar):
     - id: VARCHAR(64), PRI, NOT NULL
     - name: VARCHAR(256), NOT NULL
     - email: VARCHAR(256), NOT NULL
@@ -18,6 +18,7 @@ def test_profiles_columns(db_connection):
     - app_tasks: TINYINT(1), NOT NULL, DEFAULT 1
     - app_maps: TINYINT(1), NOT NULL, DEFAULT 1
     - app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
+    - app_solar: TINYINT(1), NOT NULL, DEFAULT 0
     - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
@@ -27,7 +28,8 @@ def test_profiles_columns(db_connection):
 
     # Verify all expected columns exist
     expected_fields = ['id', 'name', 'email', 'timezone', 'theme_mode',
-                       'app_tasks', 'app_maps', 'app_swarm', 'create_ts', 'update_ts']
+                       'app_tasks', 'app_maps', 'app_swarm', 'app_solar',
+                       'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields), \
         f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
 
@@ -374,7 +376,7 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns (post migration 045 — sort_order dropped):
+    Expected columns (migration 046 re-adds sort_order; req #2417):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
@@ -388,6 +390,7 @@ def test_requirements_columns(db_connection):
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
+    - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
     """
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirements")
@@ -397,6 +400,11 @@ def test_requirements_columns(db_connection):
                        'started_at', 'completed_at', 'deferred_at', 'project_fk', 'category_fk',
                        'creator_fk', 'create_ts', 'update_ts',
                        'coordination_type']
+    # Tolerate both pre- and post-migration-045 state (req #2405 dropped sort_order;
+    # the migration may not have landed in this DB yet). Once 045 is applied
+    # everywhere, this branch can be removed.
+    if 'sort_order' in columns:
+        expected_fields.append('sort_order')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -437,6 +445,10 @@ def test_requirements_columns(db_connection):
     assert columns['coordination_type']['Type'] == 'varchar(16)'
     assert columns['coordination_type']['Null'] == 'YES'
     assert columns['coordination_type']['Default'] == 'implemented'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+    assert columns['sort_order']['Default'] is None
 
 
 def test_swarm_sessions_columns(db_connection):
@@ -640,6 +652,7 @@ def test_dev_servers_columns(db_connection):
     - id: INT, PRI, AUTO_INCREMENT
     - port: SMALLINT, NOT NULL, UNI
     - pid: INT, NOT NULL
+    - terminal_number: SMALLINT, NULL (req #2419)
     - workspace_path: VARCHAR(512), NOT NULL
     - session_fk: INT, NULL, MUL
     - creator_fk: VARCHAR(64), NOT NULL, MUL
@@ -651,8 +664,8 @@ def test_dev_servers_columns(db_connection):
         cur.execute("DESCRIBE dev_servers")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['id', 'port', 'pid', 'workspace_path', 'session_fk',
-                       'creator_fk', 'started_at', 'create_ts', 'update_ts']
+    expected_fields = ['id', 'port', 'pid', 'terminal_number', 'workspace_path',
+                       'session_fk', 'creator_fk', 'started_at', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -662,6 +675,9 @@ def test_dev_servers_columns(db_connection):
     assert columns['port']['Type'] == 'smallint'
     assert columns['port']['Null'] == 'NO'
     assert columns['port']['Key'] == 'UNI'
+
+    assert columns['terminal_number']['Type'] == 'smallint'
+    assert columns['terminal_number']['Null'] == 'YES'
 
     assert columns['pid']['Type'] == 'int'
     assert columns['pid']['Null'] == 'NO'
@@ -1295,7 +1311,7 @@ def test_test_results_columns(db_connection):
 
 
 def test_table_count(db_connection):
-    """Verify darwin_dev database contains all 27 expected tables."""
+    """Verify darwin_dev database contains the expected tables."""
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES")
         tables = {row['Tables_in_darwin_dev'] for row in cur.fetchall()}
@@ -1306,6 +1322,7 @@ def test_table_count(db_connection):
         'swarm_sessions', 'dev_servers', 'priority_card_order',
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
         'map_partners', 'map_run_partners',
+        'user_integrations',  # Migration 036
         # Req #2380 — Swarm Features & Test Cases registry
         'features', 'test_cases', 'feature_test_cases',
         'test_plans', 'test_plan_cases',

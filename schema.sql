@@ -152,6 +152,8 @@ CREATE TABLE IF NOT EXISTS requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
                                             -- planned | implemented | deployed (default: implemented)
+    sort_order      SMALLINT        NULL DEFAULT NULL,
+                                            -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
@@ -252,6 +254,7 @@ CREATE TABLE IF NOT EXISTS dev_servers (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     port            SMALLINT        NOT NULL,
     pid             INT             NOT NULL,
+    terminal_number SMALLINT        NULL,
     workspace_path  VARCHAR(512)    NOT NULL,
     session_fk      INT             NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
