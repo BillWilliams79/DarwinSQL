@@ -554,6 +554,97 @@ def test_requirement_sessions_columns(db_connection):
     assert columns['session_fk']['Key'] == 'PRI'
 
 
+def test_swarm_starts_columns(db_connection):
+    """Verify swarm_starts column definitions match migration 046.
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - arguments: VARCHAR(512), NULL
+    - autonomy_filter: VARCHAR(16), NULL
+    - auto_start: TINYINT(1), NOT NULL, DEFAULT 0
+    - session_count: INT, NOT NULL, DEFAULT 0
+    - tokens_input / tokens_cache_write / tokens_cache_read / tokens_output: INT, NULL
+    - wall_seconds: INT, NULL
+    - turn_count: INT, NULL
+    - start_summary: TEXT, NULL
+    - telemetry: TEXT, NULL
+    - started_at: TIMESTAMP, NOT NULL, DEFAULT CURRENT_TIMESTAMP
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts / update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE swarm_starts")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'arguments', 'autonomy_filter',
+                       'auto_start', 'session_count',
+                       'tokens_input', 'tokens_cache_write', 'tokens_cache_read',
+                       'tokens_output', 'wall_seconds', 'turn_count',
+                       'start_summary', 'telemetry',
+                       'started_at', 'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['arguments']['Type'] == 'varchar(512)'
+    assert columns['arguments']['Null'] == 'YES'
+
+    assert columns['autonomy_filter']['Type'] == 'varchar(16)'
+    assert columns['autonomy_filter']['Null'] == 'YES'
+
+    assert columns['auto_start']['Type'] == 'tinyint(1)'
+    assert columns['auto_start']['Null'] == 'NO'
+    assert columns['auto_start']['Default'] == '0'
+
+    assert columns['session_count']['Type'] == 'int'
+    assert columns['session_count']['Null'] == 'NO'
+    assert columns['session_count']['Default'] == '0'
+
+    # Token / timing / count columns are NULL until skill-finalize populates them.
+    for col in ('tokens_input', 'tokens_cache_write', 'tokens_cache_read',
+                'tokens_output', 'wall_seconds', 'turn_count'):
+        assert columns[col]['Type'] == 'int', col
+        assert columns[col]['Null'] == 'YES', col
+
+    assert columns['start_summary']['Type'] == 'text'
+    assert columns['start_summary']['Null'] == 'YES'
+
+    assert columns['telemetry']['Type'] == 'text'
+    assert columns['telemetry']['Null'] == 'YES'
+
+    assert 'timestamp' in columns['started_at']['Type']
+    assert columns['started_at']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+
+def test_swarm_start_sessions_columns(db_connection):
+    """Verify swarm_start_sessions junction table column definitions.
+
+    Expected columns:
+    - swarm_start_fk: INT, PRI, NOT NULL
+    - session_fk: INT, PRI, NOT NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE swarm_start_sessions")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['swarm_start_fk', 'session_fk']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['swarm_start_fk']['Type'] == 'int'
+    assert columns['swarm_start_fk']['Null'] == 'NO'
+    assert columns['swarm_start_fk']['Key'] == 'PRI'
+
+    assert columns['session_fk']['Type'] == 'int'
+    assert columns['session_fk']['Null'] == 'NO'
+    assert columns['session_fk']['Key'] == 'PRI'
+
+
 def test_dev_servers_columns(db_connection):
     """Verify dev_servers column definitions match schema.sql.
 
@@ -1236,6 +1327,8 @@ def test_table_count(db_connection):
         'features', 'test_cases', 'feature_test_cases',
         'test_plans', 'test_plan_cases',
         'test_runs', 'test_results',
+        # Req #2422 — swarm-start data type
+        'swarm_starts', 'swarm_start_sessions',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
