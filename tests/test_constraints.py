@@ -426,6 +426,29 @@ def test_swarm_session_fk_invalid_creator(db_connection):
     db_connection.rollback()
 
 
+def test_swarm_start_fk_invalid_creator(db_connection):
+    """INSERT swarm_start with non-existent creator_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO swarm_starts (creator_fk) VALUES (%s)",
+                ('nonexistent-profile-id',)
+            )
+    db_connection.rollback()
+
+
+def test_swarm_start_session_fk_invalid_swarm_start(db_connection):
+    """INSERT swarm_start_session with non-existent swarm_start_fk → IntegrityError"""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO swarm_start_sessions (swarm_start_fk, session_fk) "
+                "VALUES (%s, %s)",
+                (999999, 999999)
+            )
+    db_connection.rollback()
+
+
 # ---------------------------------------------------------------------------
 # Roadmap table NOT NULL tests
 # ---------------------------------------------------------------------------

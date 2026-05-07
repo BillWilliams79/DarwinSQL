@@ -539,6 +539,95 @@ def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection, te
     db_connection.rollback()
 
 
+def test_delete_swarm_start_cascades_to_swarm_start_sessions(db_connection):
+    """DELETE swarm_start → associated swarm_start_sessions rows are deleted.
+    The linked swarm_session itself survives."""
+    test_creator = 'cascade-test-swarm-start-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_starts (arguments, creator_fk) VALUES (%s, %s)",
+            ('swarm 1 2', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        swarm_start_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_start_sessions (swarm_start_fk, session_fk) VALUES (%s, %s)",
+            (swarm_start_id, session_id)
+        )
+
+        cur.execute("DELETE FROM swarm_starts WHERE id = %s", (swarm_start_id,))
+
+        cur.execute(
+            "SELECT * FROM swarm_start_sessions WHERE swarm_start_fk = %s",
+            (swarm_start_id,)
+        )
+        assert cur.fetchone() is None
+
+        # Linked swarm_session itself survives
+        cur.execute("SELECT id FROM swarm_sessions WHERE id = %s", (session_id,))
+        assert cur.fetchone() is not None
+
+    db_connection.rollback()
+
+
+def test_delete_swarm_session_cascades_to_swarm_start_sessions(db_connection):
+    """DELETE swarm_session → linked swarm_start_sessions rows are deleted.
+    The parent swarm_start row survives."""
+    test_creator = 'cascade-test-swarm-start-2'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) "
+            "VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_starts (arguments, creator_fk) VALUES (%s, %s)",
+            ('swarm', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        swarm_start_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_start_sessions (swarm_start_fk, session_fk) VALUES (%s, %s)",
+            (swarm_start_id, session_id)
+        )
+
+        cur.execute("DELETE FROM swarm_sessions WHERE id = %s", (session_id,))
+
+        cur.execute(
+            "SELECT * FROM swarm_start_sessions WHERE session_fk = %s",
+            (session_id,)
+        )
+        assert cur.fetchone() is None
+
+        cur.execute("SELECT id FROM swarm_starts WHERE id = %s", (swarm_start_id,))
+        assert cur.fetchone() is not None
+
+    db_connection.rollback()
+
+
 def test_delete_profile_cascades_to_roadmap_tables(db_connection, test_category_id):
     """DELETE profile → cascades through projects→categories, requirements, swarm_sessions.
 

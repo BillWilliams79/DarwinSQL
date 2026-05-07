@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 25 tables after all migrations.
+-- This file reflects the final state of all 27 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -201,6 +201,46 @@ CREATE TABLE IF NOT EXISTS requirement_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- swarm_starts: one row per /swarm-start invocation. Execution table — no
+-- closed flag, no sort_order (chronological by started_at), no category_fk
+-- (a launch can span categories), no title (arguments string is the label).
+-- Token / wall / turn / summary / telemetry columns are NULL until skill-finalize
+-- captures them at end-of-run; populated via update_swarm_start.
+CREATE TABLE IF NOT EXISTS swarm_starts (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    arguments           VARCHAR(512)    NULL,
+    autonomy_filter     VARCHAR(16)     NULL,
+    auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
+    session_count       INT             NOT NULL DEFAULT 0,
+    tokens_input        INT             NULL,
+    tokens_cache_write  INT             NULL,
+    tokens_cache_read   INT             NULL,
+    tokens_output       INT             NULL,
+    wall_seconds        INT             NULL,
+    turn_count          INT             NULL,
+    start_summary       TEXT            NULL,
+    telemetry           TEXT            NULL,
+    started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_starts_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS swarm_start_sessions (
+    swarm_start_fk  INT             NOT NULL,
+    session_fk      INT             NOT NULL,
+    PRIMARY KEY (swarm_start_fk, session_fk),
+    CONSTRAINT fk_sss_swarm_start
+        FOREIGN KEY (swarm_start_fk) REFERENCES swarm_starts (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_sss_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 

@@ -1,7 +1,7 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 25 tables in FK-dependency order
+-- All 27 tables in FK-dependency order
 
 USE darwin_dev;
 
@@ -10,7 +10,9 @@ DROP TABLE IF EXISTS test_results, test_runs, test_plan_cases, test_plans,
     feature_test_cases, test_cases, features,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
-    priority_card_order, dev_servers, requirement_sessions,
+    priority_card_order, dev_servers,
+    swarm_start_sessions, swarm_starts,
+    requirement_sessions,
     requirements, swarm_sessions, categories, projects,
     tasks, recurring_tasks, areas, domains, profiles;
 SET FOREIGN_KEY_CHECKS = 1;
@@ -200,6 +202,41 @@ CREATE TABLE requirement_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE swarm_starts (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    arguments           VARCHAR(512)    NULL,
+    autonomy_filter     VARCHAR(16)     NULL,
+    auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
+    session_count       INT             NOT NULL DEFAULT 0,
+    tokens_input        INT             NULL,
+    tokens_cache_write  INT             NULL,
+    tokens_cache_read   INT             NULL,
+    tokens_output       INT             NULL,
+    wall_seconds        INT             NULL,
+    turn_count          INT             NULL,
+    start_summary       TEXT            NULL,
+    telemetry           TEXT            NULL,
+    started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_starts_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE swarm_start_sessions (
+    swarm_start_fk  INT             NOT NULL,
+    session_fk      INT             NOT NULL,
+    PRIMARY KEY (swarm_start_fk, session_fk),
+    CONSTRAINT fk_sss_swarm_start
+        FOREIGN KEY (swarm_start_fk) REFERENCES swarm_starts (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_sss_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
