@@ -59,6 +59,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        # Req #2496 — Agents 2.0
+        'agents',
         # Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044).
         # Listed longest-first within this group to avoid partial matches
         # (e.g., 'test_cases' inside 'feature_test_cases' is blocked by the
@@ -136,6 +138,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 046
         'fk_swarm_starts_creator',
         'fk_sss_swarm_start', 'fk_sss_session',
+        # Migration 048 (req #2496)
+        'fk_agents_creator',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -225,6 +229,8 @@ ALL_TABLE_SUFFIXES = [
     'priority_card_order', 'dev_servers',
     # Req #2422 — junction first, then parent (FK-safe drop order).
     'swarm_start_sessions', 'swarm_starts',
+    # Req #2496 — agents (FK only to profiles, drop before profiles).
+    'agents',
     'requirement_sessions', 'priority_sessions',  # pre-038 name
     'requirements', 'priorities',                  # pre-038 name
     'swarm_sessions', 'categories', 'projects',
@@ -378,6 +384,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'test_runs', 'test_results',
             # Req #2422 — swarm-start data type
             'swarm_starts', 'swarm_start_sessions',
+            # Req #2496 — Agents 2.0
+            'agents',
         ]
     }
     assert tables == expected_tables, \
