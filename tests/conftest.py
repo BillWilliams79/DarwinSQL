@@ -103,6 +103,7 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM features WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM features WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM agents WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))

@@ -1163,6 +1163,58 @@ def test_test_cases_columns(db_connection):
     assert columns['sort_order']['Null'] == 'YES'
 
 
+def test_agents_columns(db_connection):
+    """Verify agents column definitions match schema (migration 048, req #2496)."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE agents")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'darwin_id', 'name', 'description', 'model',
+                       'tools_csv', 'file_path', 'body_markdown', 'frontmatter_json',
+                       'creator_fk', 'closed', 'sort_order', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}, " \
+        f"missing: {set(expected_fields) - set(columns.keys())}"
+
+    assert 'smallint' in columns['id']['Type']
+    assert 'unsigned' in columns['id']['Type']
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['darwin_id']['Type'] == 'int'
+    assert columns['darwin_id']['Null'] == 'NO'
+
+    assert columns['name']['Type'] == 'varchar(64)'
+    assert columns['name']['Null'] == 'NO'
+
+    assert columns['file_path']['Type'] == 'varchar(512)'
+    assert columns['file_path']['Null'] == 'NO'
+
+    assert columns['body_markdown']['Type'] == 'mediumtext'
+    assert columns['frontmatter_json']['Type'] == 'json'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+
+    assert 'tinyint' in columns['closed']['Type']
+    assert columns['closed']['Default'] == '0'
+
+
+def test_agents_indexes(db_connection):
+    """Verify agents has the expected unique keys (scoped by creator_fk)."""
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW INDEX FROM agents")
+        idx = {}
+        for row in cur.fetchall():
+            idx.setdefault(row['Key_name'], []).append(row['Column_name'])
+
+    assert 'uk_agents_creator_darwin_id' in idx
+    assert idx['uk_agents_creator_darwin_id'] == ['creator_fk', 'darwin_id']
+    assert 'uk_agents_creator_name' in idx
+    assert idx['uk_agents_creator_name'] == ['creator_fk', 'name']
+    assert 'ix_agents_creator_closed' in idx
+
+
 def test_feature_test_cases_columns(db_connection):
     """Verify feature_test_cases junction (migration 042) — composite PK, no id."""
     with db_connection.cursor() as cur:
@@ -1329,6 +1381,8 @@ def test_table_count(db_connection):
         'test_runs', 'test_results',
         # Req #2422 — swarm-start data type
         'swarm_starts', 'swarm_start_sessions',
+        # Req #2496 — Agents 2.0
+        'agents',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
