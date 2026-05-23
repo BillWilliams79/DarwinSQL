@@ -376,7 +376,8 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns (migration 046 re-adds sort_order; req #2417):
+    Expected columns (migration 046 re-adds sort_order; req #2417;
+    migration 048 adds affected_repos; req #2583):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
@@ -391,6 +392,7 @@ def test_requirements_columns(db_connection):
     - update_ts: TIMESTAMP, NULL
     - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
     - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
+    - affected_repos: VARCHAR(255), NULL, DEFAULT NULL  (req #2583 — per-requirement repo override)
     """
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirements")
@@ -405,6 +407,10 @@ def test_requirements_columns(db_connection):
     # everywhere, this branch can be removed.
     if 'sort_order' in columns:
         expected_fields.append('sort_order')
+    # Tolerate both pre- and post-migration-048 state (req #2583 added
+    # affected_repos; the migration may not have landed in this DB yet).
+    if 'affected_repos' in columns:
+        expected_fields.append('affected_repos')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -449,6 +455,11 @@ def test_requirements_columns(db_connection):
     assert columns['sort_order']['Type'] == 'smallint'
     assert columns['sort_order']['Null'] == 'YES'
     assert columns['sort_order']['Default'] is None
+
+    if 'affected_repos' in columns:
+        assert columns['affected_repos']['Type'] == 'varchar(255)'
+        assert columns['affected_repos']['Null'] == 'YES'
+        assert columns['affected_repos']['Default'] is None
 
 
 def test_swarm_sessions_columns(db_connection):
