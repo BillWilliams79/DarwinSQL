@@ -71,6 +71,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'test_runs',
         'features',
         'user_integrations',
+        # Req #2497 — swarm_complete_sessions before swarm_completes (longest-first).
+        'swarm_complete_sessions',
+        'swarm_completes',
         # Req #2422 — swarm_start_sessions before swarm_starts so the longer
         # match wins under the longest-first replace order.
         'swarm_start_sessions',
@@ -136,6 +139,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 046
         'fk_swarm_starts_creator',
         'fk_sss_swarm_start', 'fk_sss_session',
+        # Migration 048 (req #2497)
+        'fk_swarm_completes_creator',
+        'fk_scs_swarm_complete', 'fk_scs_session',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -223,6 +229,8 @@ ALL_TABLE_SUFFIXES = [
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers',
+    # Req #2497 — junction first, then parent (FK-safe drop order). Migration 048.
+    'swarm_complete_sessions', 'swarm_completes',
     # Req #2422 — junction first, then parent (FK-safe drop order).
     'swarm_start_sessions', 'swarm_starts',
     'requirement_sessions', 'priority_sessions',  # pre-038 name
@@ -378,6 +386,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'test_runs', 'test_results',
             # Req #2422 — swarm-start data type
             'swarm_starts', 'swarm_start_sessions',
+            # Req #2497 — swarm-complete data type (migration 048)
+            'swarm_completes', 'swarm_complete_sessions',
         ]
     }
     assert tables == expected_tables, \

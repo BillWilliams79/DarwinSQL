@@ -246,6 +246,51 @@ CREATE TABLE IF NOT EXISTS swarm_start_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- swarm_completes: one row per /swarm-complete or /primary-ai-swarm-complete
+-- invocation. Parallels swarm_starts (req #2422). Differences: skill_name
+-- discriminates which closeout ran, coordination_type captures the manifest
+-- value (NULL for primary), status tracks in_progress/ok/error, completed_at
+-- records the finalize time. complete_summary mirrors the swarm_sessions
+-- column name. Token / wall / turn / summary / telemetry columns are NULL
+-- until the skill's finalize step writes them via update_swarm_complete.
+-- Migration 048, req #2497.
+CREATE TABLE IF NOT EXISTS swarm_completes (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    skill_name          VARCHAR(64)     NOT NULL,
+    arguments           VARCHAR(512)    NULL,
+    coordination_type   VARCHAR(16)     NULL,
+    status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
+    session_count       INT             NOT NULL DEFAULT 0,
+    tokens_input        INT             NULL,
+    tokens_cache_write  INT             NULL,
+    tokens_cache_read   INT             NULL,
+    tokens_output       INT             NULL,
+    wall_seconds        INT             NULL,
+    turn_count          INT             NULL,
+    complete_summary    TEXT            NULL,
+    telemetry           TEXT            NULL,
+    started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at        TIMESTAMP       NULL,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_completes_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS swarm_complete_sessions (
+    swarm_complete_fk   INT             NOT NULL,
+    session_fk          INT             NOT NULL,
+    PRIMARY KEY (swarm_complete_fk, session_fk),
+    CONSTRAINT fk_scs_swarm_complete
+        FOREIGN KEY (swarm_complete_fk) REFERENCES swarm_completes (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_scs_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 -- ============================================================================
 -- Dev server port coordination
 -- ============================================================================

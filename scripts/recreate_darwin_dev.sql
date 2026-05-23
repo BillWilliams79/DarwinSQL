@@ -1,7 +1,7 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 27 tables in FK-dependency order
+-- All 29 tables in FK-dependency order
 
 USE darwin_dev;
 
@@ -11,6 +11,7 @@ DROP TABLE IF EXISTS test_results, test_runs, test_plan_cases, test_plans,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
     priority_card_order, dev_servers,
+    swarm_complete_sessions, swarm_completes,
     swarm_start_sessions, swarm_starts,
     requirement_sessions,
     requirements, swarm_sessions, categories, projects,
@@ -236,6 +237,43 @@ CREATE TABLE swarm_start_sessions (
         FOREIGN KEY (swarm_start_fk) REFERENCES swarm_starts (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_sss_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE swarm_completes (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    skill_name          VARCHAR(64)     NOT NULL,
+    arguments           VARCHAR(512)    NULL,
+    coordination_type   VARCHAR(16)     NULL,
+    status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
+    session_count       INT             NOT NULL DEFAULT 0,
+    tokens_input        INT             NULL,
+    tokens_cache_write  INT             NULL,
+    tokens_cache_read   INT             NULL,
+    tokens_output       INT             NULL,
+    wall_seconds        INT             NULL,
+    turn_count          INT             NULL,
+    complete_summary    TEXT            NULL,
+    telemetry           TEXT            NULL,
+    started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at        TIMESTAMP       NULL,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_completes_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE swarm_complete_sessions (
+    swarm_complete_fk   INT             NOT NULL,
+    session_fk          INT             NOT NULL,
+    PRIMARY KEY (swarm_complete_fk, session_fk),
+    CONSTRAINT fk_scs_swarm_complete
+        FOREIGN KEY (swarm_complete_fk) REFERENCES swarm_completes (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_scs_session
         FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
