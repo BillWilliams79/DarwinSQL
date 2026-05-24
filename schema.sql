@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     app_tasks       TINYINT(1)      NOT NULL DEFAULT 1,
     app_maps        TINYINT(1)      NOT NULL DEFAULT 1,
     app_swarm       TINYINT(1)      NOT NULL DEFAULT 0,
+    app_solar       TINYINT(1)      NOT NULL DEFAULT 0,
+    app_swarm_validate TINYINT(1)   NOT NULL DEFAULT 0,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
 );
