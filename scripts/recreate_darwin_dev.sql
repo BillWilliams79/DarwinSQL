@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 28 tables in FK-dependency order
+-- All 32 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS customers,
+DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
+    customers,
     test_results, test_runs, test_plan_cases, test_plans,
     feature_test_cases, test_cases, features,
     map_run_partners, map_partners,
@@ -508,4 +509,104 @@ CREATE TABLE customers (
     CONSTRAINT fk_customers_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Req #2606: Build Visualizer data model. Trunk is identified by
+-- build_projects.trunk_branch_fk (a project links to its trunk branch).
+-- No parent_branch_fk on branches: a branch originates from a Build via
+-- parent_build_fk; the parent BRANCH is builds[parent_build_fk].branch_fk.
+-- No segment columns: branches carry M.m; builds carry the computed-once
+-- M.m.B.b values. No `closed` soft-delete columns. Two circular FKs
+-- (branches.parent_build_fk <-> builds.branch_fk;
+-- build_projects.trunk_branch_fk <-> branches.project_fk) safe under
+-- SET FOREIGN_KEY_CHECKS=0 above; in migration 050 they're deferred ALTERs.
+-- ============================================================================
+
+CREATE TABLE build_projects (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    project_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',
+    trunk_branch_fk INT             NULL,
+    sort_order      SMALLINT        NULL,
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_build_projects_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_build_projects_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_build_projects_trunk_branch
+        FOREIGN KEY (trunk_branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+CREATE TABLE branches (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    project_fk          INT             NOT NULL,
+    branch_type         VARCHAR(32)     NOT NULL,
+    name                TEXT            NULL,
+    major               INT             NOT NULL,
+    minor               INT             NOT NULL,
+    parent_build_fk     INT             NULL,
+    side                VARCHAR(16)     NULL,
+    row_order           INT             NULL,
+    label_end           VARCHAR(128)    NULL,
+    sort_order          SMALLINT        NULL,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_branches_project
+        FOREIGN KEY (project_fk) REFERENCES build_projects (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_branches_parent_build
+        FOREIGN KEY (parent_build_fk) REFERENCES builds (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_branches_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE builds (
+    id                      INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    branch_fk               INT             NOT NULL,
+    position                SMALLINT        NOT NULL,
+    build_number            INT             NOT NULL,
+    branch_number           INT             NOT NULL DEFAULT 0,
+    dot_color               VARCHAR(32)     NULL,
+    approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
+    creator_fk              VARCHAR(64)     NOT NULL,
+    create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_builds_branch
+        FOREIGN KEY (branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_builds_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT uq_builds_branch_position UNIQUE KEY (branch_fk, position)
+);
+
+CREATE TABLE customer_releases (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    customer_fk     INT             NOT NULL,
+    build_fk        INT             NOT NULL,
+    release_notes   TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customer_releases_customer
+        FOREIGN KEY (customer_fk) REFERENCES customers (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_customer_releases_build
+        FOREIGN KEY (build_fk) REFERENCES builds (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_customer_releases_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT uq_customer_releases_customer_build UNIQUE KEY (customer_fk, build_fk)
 );

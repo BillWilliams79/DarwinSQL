@@ -1385,6 +1385,78 @@ def test_table_count(db_connection):
         'swarm_starts', 'swarm_start_sessions',
         # Req #2604 — Customer Release
         'customers',
+        # Req #2606 — Build Visualizer data model
+        'build_projects', 'branches', 'builds', 'customer_releases',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
+
+
+# ============================================================================
+# Req #2606 — Build Visualizer data model column tests
+# ============================================================================
+
+def _columns(cur, table):
+    cur.execute(f"DESCRIBE {table}")
+    return {row['Field']: row for row in cur.fetchall()}
+
+
+def test_build_projects_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'build_projects')
+    assert cols['title']['Null'] == 'NO'
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['description']['Null'] == 'YES'
+    assert cols['project_status']['Null'] == 'NO'
+    assert cols['project_status']['Default'] == 'draft'
+    assert cols['trunk_branch_fk']['Null'] == 'YES'
+    assert cols['category_fk']['Null'] == 'NO'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2606: no `closed` column on any new build-feature table.
+    assert 'closed' not in cols
+
+
+def test_branches_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'branches')
+    assert cols['project_fk']['Null'] == 'NO'
+    assert cols['branch_type']['Null'] == 'NO'
+    assert cols['name']['Null'] == 'YES'
+    assert cols['major']['Null'] == 'NO'
+    assert cols['minor']['Null'] == 'NO'
+    assert cols['parent_build_fk']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2606: parent_branch_fk REMOVED (derived via builds[parent_build_fk]).
+    assert 'parent_branch_fk' not in cols
+    # Req #2606: segment_* columns REMOVED (each branch carries M.m directly).
+    assert 'segment_major' not in cols
+    assert 'segment_minor' not in cols
+    assert 'segment_initial_build_number' not in cols
+    assert 'closed' not in cols
+
+
+def test_builds_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'builds')
+    assert cols['branch_fk']['Null'] == 'NO'
+    assert cols['position']['Null'] == 'NO'
+    assert cols['build_number']['Null'] == 'NO'        # B — stored, computed once
+    assert cols['branch_number']['Null'] == 'NO'        # b — stored, 0 for trunk
+    assert cols['branch_number']['Default'] == '0'
+    assert cols['approved_for_release']['Null'] == 'NO'
+    assert cols['approved_for_release']['Default'] == '0'
+    assert cols['dot_color']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2606: no `closed` column; auto-numbered (no `title`).
+    assert 'closed' not in cols
+    assert 'title' not in cols
+
+
+def test_customer_releases_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'customer_releases')
+    assert cols['customer_fk']['Null'] == 'NO'
+    assert cols['build_fk']['Null'] == 'NO'
+    assert cols['release_notes']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    assert 'closed' not in cols
