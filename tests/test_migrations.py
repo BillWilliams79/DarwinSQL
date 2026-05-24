@@ -87,6 +87,7 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'requirements',
         'priorities',            # pre-038 name (for RENAME TABLE in migration 038)
         'categories',
+        'customers',
         'map_routes',
         'map_views',
         'map_runs',
@@ -136,6 +137,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 046
         'fk_swarm_starts_creator',
         'fk_sss_swarm_start', 'fk_sss_session',
+        # Migration 049 — Customer Release
+        'fk_customers_creator',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -227,6 +230,8 @@ ALL_TABLE_SUFFIXES = [
     'swarm_start_sessions', 'swarm_starts',
     'requirement_sessions', 'priority_sessions',  # pre-038 name
     'requirements', 'priorities',                  # pre-038 name
+    # Req #2604 — customers (FK to profiles, no children) drops before profiles.
+    'customers',
     'swarm_sessions', 'categories', 'projects',
     'tasks', 'recurring_tasks', 'areas', 'domains', 'profiles',
 ]
@@ -378,6 +383,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'test_runs', 'test_results',
             # Req #2422 — swarm-start data type
             'swarm_starts', 'swarm_start_sessions',
+            # Req #2604 — Customer Release
+            'customers',
         ]
     }
     assert tables == expected_tables, \

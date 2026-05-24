@@ -513,3 +513,20 @@ CREATE TABLE IF NOT EXISTS test_results (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT uq_run_case UNIQUE KEY (test_run_fk, test_case_fk)
 );
+
+-- Req #2604: customers — recipients of build releases (HP, NVIDIA, Cisco, …).
+-- The Build Visualizer attaches `customer-release` branches to build dots to
+-- visualize which customer received which sprint/end-release build.
+CREATE TABLE IF NOT EXISTS customers (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    customer_name   VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customers_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);

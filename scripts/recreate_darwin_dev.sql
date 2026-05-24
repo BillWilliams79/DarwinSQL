@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 27 tables in FK-dependency order
+-- All 28 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS test_results, test_runs, test_plan_cases, test_plans,
+DROP TABLE IF EXISTS customers,
+    test_results, test_runs, test_plan_cases, test_plans,
     feature_test_cases, test_cases, features,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
@@ -492,4 +493,19 @@ CREATE TABLE test_results (
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT uq_run_case UNIQUE KEY (test_run_fk, test_case_fk)
+);
+
+-- Req #2604: customers — recipients of build releases.
+CREATE TABLE customers (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    customer_name   VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customers_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
 );
