@@ -9,7 +9,7 @@ definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 def test_profiles_columns(db_connection):
     """Verify profiles column definitions match schema.sql.
 
-    Expected columns (post migration 026 + app_solar):
+    Expected columns (post migration 026 + app_solar + migration 050):
     - id: VARCHAR(64), PRI, NOT NULL
     - name: VARCHAR(256), NOT NULL
     - email: VARCHAR(256), NOT NULL
@@ -19,6 +19,7 @@ def test_profiles_columns(db_connection):
     - app_maps: TINYINT(1), NOT NULL, DEFAULT 1
     - app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
     - app_solar: TINYINT(1), NOT NULL, DEFAULT 0
+    - app_swarm_validate: TINYINT(1), NOT NULL, DEFAULT 0  (req #2611, migration 050)
     - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
@@ -29,6 +30,7 @@ def test_profiles_columns(db_connection):
     # Verify all expected columns exist
     expected_fields = ['id', 'name', 'email', 'timezone', 'theme_mode',
                        'app_tasks', 'app_maps', 'app_swarm', 'app_solar',
+                       'app_swarm_validate',
                        'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields), \
         f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
@@ -69,6 +71,16 @@ def test_profiles_columns(db_connection):
     assert 'tinyint' in columns['app_swarm']['Type']
     assert columns['app_swarm']['Null'] == 'NO'
     assert columns['app_swarm']['Default'] == '0'
+
+    # app_solar: TINYINT(1), NOT NULL, DEFAULT 0
+    assert 'tinyint' in columns['app_solar']['Type']
+    assert columns['app_solar']['Null'] == 'NO'
+    assert columns['app_solar']['Default'] == '0'
+
+    # app_swarm_validate: TINYINT(1), NOT NULL, DEFAULT 0  (req #2611)
+    assert 'tinyint' in columns['app_swarm_validate']['Type']
+    assert columns['app_swarm_validate']['Null'] == 'NO'
+    assert columns['app_swarm_validate']['Default'] == '0'
 
     # create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     assert 'timestamp' in columns['create_ts']['Type']
