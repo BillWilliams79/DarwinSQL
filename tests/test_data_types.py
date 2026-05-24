@@ -1321,6 +1321,49 @@ def test_test_results_columns(db_connection):
         f"uq_run_case UNIQUE should cover (test_run_fk, test_case_fk), got {columns_in_unique}"
 
 
+def test_customers_columns(db_connection):
+    """Verify customers column definitions match migration 049 (req #2604).
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - customer_name: VARCHAR(256), NOT NULL
+    - description: TEXT, NULL
+    - creator_fk: VARCHAR(64), NOT NULL, MUL (FK to profiles)
+    - closed: TINYINT(1), NOT NULL, DEFAULT 0
+    - sort_order: SMALLINT, NULL
+    - create_ts / update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE customers")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'customer_name', 'description',
+                       'creator_fk', 'closed', 'sort_order',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['customer_name']['Type'] == 'varchar(256)'
+    assert columns['customer_name']['Null'] == 'NO'
+
+    assert columns['description']['Type'] == 'text'
+    assert columns['description']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+    assert columns['closed']['Type'] == 'tinyint(1)'
+    assert columns['closed']['Null'] == 'NO'
+    assert columns['closed']['Default'] == '0'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+
 def test_table_count(db_connection):
     """Verify darwin_dev database contains the expected tables."""
     with db_connection.cursor() as cur:
@@ -1340,6 +1383,8 @@ def test_table_count(db_connection):
         'test_runs', 'test_results',
         # Req #2422 — swarm-start data type
         'swarm_starts', 'swarm_start_sessions',
+        # Req #2604 — Customer Release
+        'customers',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
