@@ -65,7 +65,7 @@ DEMO_BRANCHES = [
     ('r1-csr-1',        'csr',              'r1-3',         2,   5,  1,  'R1 CSR'),
     ('r2-hotfix',       'hotfix',           'r2-3',         3,   5,  2,  'R2 Hot Fix'),
     ('r2-csr',          'csr',              'r2-3',         3,   5,  2,  'R2 CSR'),
-    ('dev-a',           'development',      'm6',           3,   5,  0,  'Development Branches'),
+    ('dev-a',           'development',      'm6',           3,   5,  0,  'Dev Branch'),
     ('br20',            'development',      'm6',           1,   5,  0,  'Branch 20'),
     ('br21',            'development',      'm6',           1,   5,  0,  'Branch 21'),
 ]
