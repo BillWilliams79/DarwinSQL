@@ -236,18 +236,23 @@ def compute_build_numbers(branch_type, position, parent_trunk_build_number,
     if parent_trunk_build_number is None:
         # Trunk: monotonic from starting_build_number
         return trunk_starting_build_number + position, 0
-    # Sub-branches: build_number FROZEN at parent's value; branch_number per type
+    # Sub-branches: build_number FROZEN at parent's value; branch_number per type.
+    # Reserved-range scheme mirrors `computeBranchNum` in app.js (req #2614):
+    # 0-indexed position, sample-release in 8000-block, hotfix/bootleg stride 50,
+    # csr stride 1000, development stride 100.
     B = parent_trunk_build_number
-    if branch_type in ('release', 'sample-release'):
-        b = position + 1
+    if branch_type == 'release':
+        b = 0
+    elif branch_type == 'sample-release':
+        b = 8000 + ord0 * 100 + position
     elif branch_type == 'csr':
-        b = ord1 * 1000 + position + 1
+        b = ord1 * 1000 + position
     elif branch_type == 'hotfix':
-        b = 6000 + ord0 * 100 + position + 1
+        b = 6000 + ord0 * 50 + position
     elif branch_type == 'development':
-        b = 7000 + ord0 * 100 + position + 1
+        b = 7000 + ord0 * 100 + position
     elif branch_type == 'bootleg':
-        b = 9000 + ord0 * 100 + position + 1
+        b = 9000 + ord0 * 50 + position
     else:
         b = position + 1
     return B, b

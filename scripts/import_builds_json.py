@@ -226,17 +226,25 @@ def compute_branch_major_minor(branch_id, branches_by_id, builds_by_id,
 
 
 def compute_build_b(branch_type, position, ord0_among_siblings, ord1_among_siblings):
-    """Compute the b (branch_number) for a sub-branch build — mirrors §4.2."""
-    if branch_type in ('release', 'sample-release'):
-        return position + 1
+    """Compute the b (branch_number) for a sub-branch build.
+
+    Mirrors `computeBranchNum` in `Topology/build-visualizer/app.js` (req #2614
+    reserved-range scheme): 0-indexed `i`, no `+1` offset; sample-release lives
+    in the 8000-block; hotfix/bootleg use stride 50; csr stride 1000; development
+    stride 100. Customer-release is no longer a branch type (req #2648).
+    """
+    if branch_type == 'release':
+        return 0
+    if branch_type == 'sample-release':
+        return 8000 + ord0_among_siblings * 100 + position
     if branch_type == 'csr':
-        return ord1_among_siblings * 1000 + position + 1
+        return ord1_among_siblings * 1000 + position
     if branch_type == 'hotfix':
-        return 6000 + ord0_among_siblings * 100 + position + 1
+        return 6000 + ord0_among_siblings * 50 + position
     if branch_type == 'development':
-        return 7000 + ord0_among_siblings * 100 + position + 1
+        return 7000 + ord0_among_siblings * 100 + position
     if branch_type == 'bootleg':
-        return 9000 + ord0_among_siblings * 100 + position + 1
+        return 9000 + ord0_among_siblings * 50 + position
     return position + 1
 
 
