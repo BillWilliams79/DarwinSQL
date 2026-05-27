@@ -584,9 +584,11 @@ CREATE TABLE IF NOT EXISTS branches (
     row_order           INT             NULL,
     label_end           VARCHAR(128)    NULL,
     sort_order          SMALLINT        NULL,
+    external_id         VARCHAR(64)     NULL,     -- iframe slug ('main', 'release-1', 'dev-a') — req #2648 / migration 051
     creator_fk          VARCHAR(64)     NOT NULL,
     create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_branches_project_external (project_fk, external_id),
     CONSTRAINT fk_branches_project
         FOREIGN KEY (project_fk) REFERENCES build_projects (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
@@ -606,9 +608,11 @@ CREATE TABLE IF NOT EXISTS builds (
     branch_number           INT             NOT NULL DEFAULT 0, -- b in M.m.B.b — 0 for trunk
     dot_color               VARCHAR(32)     NULL,        -- green|red|yellow|gray
     approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
+    external_id             VARCHAR(64)     NULL,        -- iframe slug ('m1', 'r1c', 'sr3') — req #2648 / migration 051
     creator_fk              VARCHAR(64)     NOT NULL,
     create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_builds_branch_external (branch_fk, external_id),
     CONSTRAINT fk_builds_branch
         FOREIGN KEY (branch_fk) REFERENCES branches (id)
         ON UPDATE CASCADE ON DELETE CASCADE,

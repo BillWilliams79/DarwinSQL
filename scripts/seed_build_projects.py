@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Seed darwin_dev with a Sample Project for the Build Visualizer (req #2606).
+Seed a darwin database (dev OR production) with a Sample Project for the
+Build Visualizer (req #2606 / req #2691).
 
 Idempotent — uses natural-key UPSERTs so re-runs leave the same state.
 
@@ -20,18 +21,28 @@ Fails fast if customers (HP/NVIDIA/Cisco/Google) are missing — they MUST be
 seeded by req #2604's own seed first (already done).
 
 Usage:
-    cd Lambda-Rest && . exports.sh && python3 ../DarwinSQL/scripts/seed_build_projects.py
+    # Dev (default):
+    cd Lambda-Rest && . exports.sh && \\
+        python3 ../DarwinSQL/scripts/seed_build_projects.py
+
+    # Production (req #2691) — requires a recent darwin-pre-migration snapshot:
+    cd Lambda-Rest && . exports.sh && \\
+        python3 ../DarwinSQL/scripts/seed_build_projects.py --db darwin
 """
+import argparse
 import os
 import sys
 
 import pymysql
 
-TARGET_DATABASE = 'darwin_dev'
+from _production_snapshot_guard import assert_recent_production_snapshot
 
 # Bill Williams primary user — owns the demo data
 DEFAULT_CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
 BUILD_PROJECTS_CATEGORY_NAME = 'Build Projects'
+
+ALLOWED_DATABASES = ('darwin_dev', 'darwin')
+PRODUCTION_DATABASE = 'darwin'
 
 # Demo project shape — derived from Topology/build-visualizer/builds.json
 # Each tuple: (slug, branch_type, parent_branch_slug, parent_build_slug, build_count,
@@ -102,12 +113,12 @@ RELEASE_EVENTS = [
 ]
 
 
-def get_admin_connection():
+def get_admin_connection(database):
     return pymysql.connect(
         host=os.environ['endpoint'],
         user=os.environ['username'],
         password=os.environ['db_password'],
-        database=TARGET_DATABASE,
+        database=database,
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=True,
     )
@@ -287,12 +298,24 @@ def lookup_customer_id(cur, customer_name):
 
 
 def main():
-    conn = get_admin_connection()
+    parser = argparse.ArgumentParser(description='Seed Build Visualizer demo data.')
+    parser.add_argument(
+        '--db', default='darwin_dev', choices=ALLOWED_DATABASES,
+        help='Target database (default: darwin_dev). Use `darwin` for production seed.',
+    )
+    args = parser.parse_args()
+    target_database = args.db
+
+    if target_database == PRODUCTION_DATABASE:
+        print(f"WARNING: seeding PRODUCTION database '{target_database}'")
+        assert_recent_production_snapshot('seed')
+
+    conn = get_admin_connection(target_database)
     with conn.cursor() as cur:
         cur.execute("SELECT DATABASE() AS db")
         actual = cur.fetchone()['db']
-        if actual != TARGET_DATABASE:
-            sys.exit(f"ABORT: expected '{TARGET_DATABASE}', got '{actual}'")
+        if actual != target_database:
+            sys.exit(f"ABORT: expected '{target_database}', got '{actual}'")
 
         category_id = upsert_category(cur)
         print(f"category '{BUILD_PROJECTS_CATEGORY_NAME}' id={category_id}")

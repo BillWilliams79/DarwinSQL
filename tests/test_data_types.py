@@ -1438,6 +1438,10 @@ def test_branches_columns(db_connection):
     assert cols['minor']['Null'] == 'NO'
     assert cols['parent_build_fk']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2648: external_id holds the iframe slug ('main', 'release-1', etc.)
+    # so the SqlBackedStorageAdapter can round-trip the in-memory model.
+    assert cols['external_id']['Null'] == 'YES'
+    assert 'varchar(64)' in cols['external_id']['Type'].lower()
     # Req #2606: parent_branch_fk REMOVED (derived via builds[parent_build_fk]).
     assert 'parent_branch_fk' not in cols
     # Req #2606: segment_* columns REMOVED (each branch carries M.m directly).
@@ -1459,6 +1463,9 @@ def test_builds_columns(db_connection):
     assert cols['approved_for_release']['Default'] == '0'
     assert cols['dot_color']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2648: external_id holds the iframe slug ('m1', 'r1c', 'sr3', etc.).
+    assert cols['external_id']['Null'] == 'YES'
+    assert 'varchar(64)' in cols['external_id']['Type'].lower()
     # Req #2606: no `closed` column; auto-numbered (no `title`).
     assert 'closed' not in cols
     assert 'title' not in cols
