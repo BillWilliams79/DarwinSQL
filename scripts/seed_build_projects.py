@@ -157,37 +157,45 @@ def upsert_project(cur, category_id):
     return cur.lastrowid
 
 
-def upsert_branch(cur, project_id, branch_type, name, parent_build_id, major, minor):
-    """UPSERT one branch. Lookup key: (project_id, branch_type, name).
+def upsert_branch(cur, project_id, branch_type, name, parent_build_id, major, minor, external_id):
+    """UPSERT one branch. Lookup key: (project_id, external_id) — req #2648 added
+    external_id as the iframe slug. Falls back to (project_fk, branch_type, name)
+    for legacy rows seeded before #2648 (external_id NULL) so re-running upgrades
+    them in place.
 
     parent_build_fk is INTENTIONALLY excluded from the lookup — branches are
     inserted in two passes (parent_build_fk patched after builds exist).
-    Re-running with the same (project, branch_type, name) updates major/minor
-    rather than inserting a duplicate.
     """
     cur.execute(
-        "SELECT id FROM branches WHERE project_fk=%s AND branch_type=%s AND name<=>%s",
-        (project_id, branch_type, name),
+        "SELECT id FROM branches WHERE project_fk=%s AND external_id=%s",
+        (project_id, external_id),
     )
     row = cur.fetchone()
+    if not row:
+        cur.execute(
+            "SELECT id FROM branches WHERE project_fk=%s AND branch_type=%s AND name<=>%s AND external_id IS NULL",
+            (project_id, branch_type, name),
+        )
+        row = cur.fetchone()
     if row:
         cur.execute(
-            "UPDATE branches SET major=%s, minor=%s WHERE id=%s",
-            (major, minor, row['id']),
+            "UPDATE branches SET major=%s, minor=%s, external_id=%s WHERE id=%s",
+            (major, minor, external_id, row['id']),
         )
         return row['id']
     cur.execute(
         """INSERT INTO branches
-           (project_fk, branch_type, name, major, minor, parent_build_fk, creator_fk)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (project_id, branch_type, name, major, minor, parent_build_id, DEFAULT_CREATOR_FK),
+           (project_fk, branch_type, name, major, minor, parent_build_fk, external_id, creator_fk)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (project_id, branch_type, name, major, minor, parent_build_id, external_id, DEFAULT_CREATOR_FK),
     )
     return cur.lastrowid
 
 
-def upsert_build(cur, branch_id, position, build_number, branch_number,
+def upsert_build(cur, branch_id, position, build_number, branch_number, external_id,
                  dot_color=None, approved_for_release=0):
-    """UPSERT one build. Lookup key: (branch_id, position). UNIQUE constraint.
+    """UPSERT one build. Lookup key: (branch_id, position) — the UNIQUE constraint
+    on the table. external_id is patched on top of the matched row.
 
     build_number (B) and branch_number (b) are computed by the caller at seed
     time using the version-scheme rules — matching what the UI would compute
@@ -200,16 +208,16 @@ def upsert_build(cur, branch_id, position, build_number, branch_number,
     row = cur.fetchone()
     if row:
         cur.execute(
-            """UPDATE builds SET build_number=%s, branch_number=%s,
+            """UPDATE builds SET build_number=%s, branch_number=%s, external_id=%s,
                      dot_color=%s, approved_for_release=%s WHERE id=%s""",
-            (build_number, branch_number, dot_color, approved_for_release, row['id']),
+            (build_number, branch_number, external_id, dot_color, approved_for_release, row['id']),
         )
         return row['id']
     cur.execute(
-        """INSERT INTO builds (branch_fk, position, build_number, branch_number,
+        """INSERT INTO builds (branch_fk, position, build_number, branch_number, external_id,
                                dot_color, approved_for_release, creator_fk)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-        (branch_id, position, build_number, branch_number,
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+        (branch_id, position, build_number, branch_number, external_id,
          dot_color, approved_for_release, DEFAULT_CREATOR_FK),
     )
     return cur.lastrowid
@@ -290,9 +298,14 @@ def main():
         # Pass 1: create every branch row (parent_build_fk left NULL — patched
         # later once builds exist). Trunk is created first since it has no
         # parent_build dependency.
+        #
+        # external_id (req #2648) — the iframe's slug, stored on the row so the
+        # SqlBackedStorageAdapter can round-trip the in-memory model. The trunk's
+        # iframe slug is 'main' (not the seed's internal 'trunk' lookup key).
         branch_id_by_slug = {}
         for (slug, btype, parent_build_slug, count, major, minor, name) in DEMO_BRANCHES:
-            bid = upsert_branch(cur, project_id, btype, name, None, major, minor)
+            external_id = 'main' if slug == 'trunk' else slug
+            bid = upsert_branch(cur, project_id, btype, name, None, major, minor, external_id)
             branch_id_by_slug[slug] = bid
 
         trunk_id = branch_id_by_slug['trunk']
@@ -351,10 +364,11 @@ def main():
                     ord0 = ord0_by_slug.get(slug, 0)
                     ord1 = ord0 + 1
                     B, b = compute_build_numbers(btype, pos, parent_B, ord0, ord1, TRUNK_STARTING_BUILD_NUMBER)
-                build = upsert_build(cur, branch_id, pos, B, b)
-                build_id_by_slug[build_slug(slug, pos)] = build
+                build_ext_id = build_slug(slug, pos)
+                build = upsert_build(cur, branch_id, pos, B, b, build_ext_id)
+                build_id_by_slug[build_ext_id] = build
                 if parent_build_slug is None:
-                    trunk_build_number_by_slug[build_slug(slug, pos)] = B
+                    trunk_build_number_by_slug[build_ext_id] = B
         print(f"builds inserted: {len(build_id_by_slug)} total")
 
         # Pass 3: patch parent_build_fk on each non-trunk branch
