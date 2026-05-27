@@ -33,6 +33,10 @@ Usage:
     # Import a different JSON blob with a custom title:
     python3 ../DarwinSQL/scripts/import_builds_json.py \\
         --path /tmp/sprint-cycle.json --title 'Sprint Cycle'
+
+    # Production (req #2691) — requires a recent darwin-pre-migration snapshot:
+    cd Lambda-Rest && . exports.sh && \\
+        python3 ../DarwinSQL/scripts/import_builds_json.py --db darwin
 """
 import argparse
 import json
@@ -41,12 +45,15 @@ import sys
 
 import pymysql
 
-TARGET_DATABASE = 'darwin_dev'
+from _production_snapshot_guard import assert_recent_production_snapshot
 
 # Bill Williams primary user — owns the imported demo data
 DEFAULT_CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
 BUILD_PROJECTS_CATEGORY_NAME = 'Build Projects'
 DEFAULT_IMPORT_TITLE = 'Default'
+
+ALLOWED_DATABASES = ('darwin_dev', 'darwin')
+PRODUCTION_DATABASE = 'darwin'
 
 # Path to builds.json — relative to this script's repo root sibling structure:
 #   DarwinSQL/scripts/import_builds_json.py
@@ -57,22 +64,22 @@ DEFAULT_BUILDS_JSON_PATH = os.path.normpath(
 )
 
 
-def get_admin_connection():
+def get_admin_connection(database):
     return pymysql.connect(
         host=os.environ['endpoint'],
         user=os.environ['username'],
         password=os.environ['db_password'],
-        database=TARGET_DATABASE,
+        database=database,
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=True,
     )
 
 
-def assert_target_db(cur):
+def assert_target_db(cur, target_database):
     cur.execute("SELECT DATABASE() AS db")
     actual = cur.fetchone()['db']
-    if actual != TARGET_DATABASE:
-        sys.exit(f"ABORT: expected '{TARGET_DATABASE}', got '{actual}'")
+    if actual != target_database:
+        sys.exit(f"ABORT: expected '{target_database}', got '{actual}'")
 
 
 def lookup_category_id(cur):
@@ -269,7 +276,16 @@ def main():
         '--description', default=None,
         help='build_projects.description (default: derived from source path).',
     )
+    parser.add_argument(
+        '--db', default='darwin_dev', choices=ALLOWED_DATABASES,
+        help='Target database (default: darwin_dev). Use `darwin` for production import.',
+    )
     args = parser.parse_args()
+    target_database = args.db
+
+    if target_database == PRODUCTION_DATABASE:
+        print(f"WARNING: importing into PRODUCTION database '{target_database}'")
+        assert_recent_production_snapshot('import')
 
     data = load_builds_json(args.path)
     branches = data['branches']
@@ -288,9 +304,9 @@ def main():
         f"Imported from {os.path.basename(args.path)} by import_builds_json.py."
     )
 
-    conn = get_admin_connection()
+    conn = get_admin_connection(target_database)
     with conn.cursor() as cur:
-        assert_target_db(cur)
+        assert_target_db(cur, target_database)
 
         category_id = lookup_category_id(cur)
         project_id = upsert_project(cur, category_id, args.title, description)
