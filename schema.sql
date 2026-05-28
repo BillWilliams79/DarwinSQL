@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 32 tables after all migrations.
+-- This file reflects the final state of all 33 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -248,6 +248,40 @@ CREATE TABLE IF NOT EXISTS swarm_start_sessions (
     CONSTRAINT fk_sss_session
         FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- swarm_undos: one row per /swarm-undo invocation. Execution table — no
+-- closed flag, no sort_order (chronological by undone_at), no category_fk
+-- (inherits from the session/requirement being undone). Captures a mandatory
+-- free-text reason from the user plus snapshot metadata so the record survives
+-- the session-row deletion that /swarm-undo performs immediately afterwards.
+CREATE TABLE IF NOT EXISTS swarm_undos (
+    id                       INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    session_fk               INT             NULL,
+    swarm_start_fk_at_undo   INT             NULL,
+    req_id_at_undo           INT             NULL,
+    task_name                VARCHAR(255)    NULL,
+    branch                   VARCHAR(255)    NULL,
+    coordination_type        VARCHAR(16)     NULL,
+    reason                   TEXT            NOT NULL,
+    undone_at                TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk               VARCHAR(64)     NOT NULL,
+    create_ts                TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts                TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_undos_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_swarm_start
+        FOREIGN KEY (swarm_start_fk_at_undo) REFERENCES swarm_starts (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_req
+        FOREIGN KEY (req_id_at_undo) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    KEY ix_swarm_undos_swarm_start_fk_at_undo (swarm_start_fk_at_undo),
+    KEY ix_swarm_undos_undone_at (undone_at)
 );
 
 -- ============================================================================

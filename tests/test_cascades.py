@@ -1029,3 +1029,163 @@ def test_delete_test_plan_cascades_to_plan_cases(db_connection):
         cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
         assert cur.fetchone() is not None
     db_connection.rollback()
+
+
+# ============================================================================
+# swarm_undos (req #2719) — the core design invariant of this table is that
+# the row survives every parent-row deletion via ON DELETE SET NULL, so the
+# audit-trail of "this launch was undone, here's the reason" persists even
+# after /swarm-undo removes the session row and the requirement is flipped
+# back to approved. These four tests pin that invariant down per FK.
+# ============================================================================
+
+def test_delete_session_sets_swarm_undo_session_fk_null(db_connection, test_category_id):
+    """DELETE swarm_session → swarm_undos.session_fk = NULL, undo row survives.
+
+    This is the load-bearing invariant: `/swarm-undo` writes the undo row
+    BEFORE deleting the session (Step 2.6 before Step 6 of the skill); the
+    cascade then nulls the back-reference while the snapshot columns
+    (swarm_start_fk_at_undo, req_id_at_undo, task_name, branch, ...) keep
+    full record of what was undone.
+    """
+    test_creator = 'cascade-test-undo-session-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-undo-1@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_sessions (swarm_status, creator_fk) VALUES (%s, %s)",
+            ('active', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        session_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_undos (session_fk, reason, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (session_id, 'cascade-test-undo-reason', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        undo_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM swarm_sessions WHERE id = %s", (session_id,))
+
+        cur.execute("SELECT session_fk, reason FROM swarm_undos WHERE id = %s",
+                    (undo_id,))
+        row = cur.fetchone()
+        assert row is not None, "swarm_undo row was deleted; should have survived"
+        assert row['session_fk'] is None, \
+            "session_fk should be NULLed by ON DELETE SET NULL"
+        assert row['reason'] == 'cascade-test-undo-reason', \
+            "snapshot columns must survive the cascade unchanged"
+
+    db_connection.rollback()
+
+
+def test_delete_swarm_start_sets_swarm_undo_start_fk_null(db_connection):
+    """DELETE swarm_start → swarm_undos.swarm_start_fk_at_undo = NULL,
+    undo row survives. swarm_starts are not deleted by /swarm-undo today,
+    but this FK behavior is the safety net for future cleanup paths.
+    """
+    test_creator = 'cascade-test-undo-start-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-undo-2@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_starts (creator_fk) VALUES (%s)",
+            (test_creator,)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        start_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_undos (swarm_start_fk_at_undo, reason, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (start_id, 'cascade-test-start-fk', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        undo_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM swarm_starts WHERE id = %s", (start_id,))
+
+        cur.execute(
+            "SELECT swarm_start_fk_at_undo, reason FROM swarm_undos WHERE id = %s",
+            (undo_id,)
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row['swarm_start_fk_at_undo'] is None
+        assert row['reason'] == 'cascade-test-start-fk'
+
+    db_connection.rollback()
+
+
+def test_delete_requirement_sets_swarm_undo_req_fk_null(db_connection, test_category_id):
+    """DELETE requirement → swarm_undos.req_id_at_undo = NULL, undo row
+    survives."""
+    test_creator = 'cascade-test-undo-req-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-undo-3@test.com')
+        )
+        cur.execute(
+            "INSERT INTO requirements (title, creator_fk, category_fk) "
+            "VALUES (%s, %s, %s)",
+            ('Cascade Undo Req', test_creator, test_category_id)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        req_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO swarm_undos (req_id_at_undo, reason, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (req_id, 'cascade-test-req-fk', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        undo_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM requirements WHERE id = %s", (req_id,))
+
+        cur.execute(
+            "SELECT req_id_at_undo, reason FROM swarm_undos WHERE id = %s",
+            (undo_id,)
+        )
+        row = cur.fetchone()
+        assert row is not None
+        assert row['req_id_at_undo'] is None
+        assert row['reason'] == 'cascade-test-req-fk'
+
+    db_connection.rollback()
+
+
+def test_delete_profile_cascades_to_swarm_undos(db_connection):
+    """DELETE profile → swarm_undos rows owned by the profile are deleted
+    (ON DELETE CASCADE on creator_fk)."""
+    test_creator = 'cascade-test-undo-creator-1'
+
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-undo-4@test.com')
+        )
+        cur.execute(
+            "INSERT INTO swarm_undos (reason, creator_fk) VALUES (%s, %s)",
+            ('cascade-test-creator', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        undo_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
+
+        cur.execute("SELECT id FROM swarm_undos WHERE id = %s", (undo_id,))
+        assert cur.fetchone() is None, \
+            "swarm_undo row should be cascade-deleted when its creator profile is deleted"
+
+    db_connection.rollback()
