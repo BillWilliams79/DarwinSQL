@@ -39,7 +39,6 @@ from _production_snapshot_guard import assert_recent_production_snapshot
 
 # Bill Williams primary user — owns the demo data
 DEFAULT_CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
-BUILD_PROJECTS_CATEGORY_NAME = 'Build Projects'
 
 ALLOWED_DATABASES = ('darwin_dev', 'darwin')
 PRODUCTION_DATABASE = 'darwin'
@@ -124,31 +123,7 @@ def get_admin_connection(database):
     )
 
 
-def upsert_category(cur):
-    """UPSERT 'Build Projects' category for the demo creator. Returns id."""
-    cur.execute(
-        "SELECT id FROM categories WHERE category_name=%s AND creator_fk=%s",
-        (BUILD_PROJECTS_CATEGORY_NAME, DEFAULT_CREATOR_FK),
-    )
-    row = cur.fetchone()
-    if row:
-        return row['id']
-    # Categories require project_fk NOT NULL — reuse any existing project for this creator
-    cur.execute(
-        "SELECT id FROM projects WHERE creator_fk=%s ORDER BY id LIMIT 1",
-        (DEFAULT_CREATOR_FK,),
-    )
-    proj_row = cur.fetchone()
-    if not proj_row:
-        sys.exit(f"ABORT: no projects row for creator {DEFAULT_CREATOR_FK}; cannot create category")
-    cur.execute(
-        "INSERT INTO categories (category_name, project_fk, creator_fk) VALUES (%s, %s, %s)",
-        (BUILD_PROJECTS_CATEGORY_NAME, proj_row['id'], DEFAULT_CREATOR_FK),
-    )
-    return cur.lastrowid
-
-
-def upsert_project(cur, category_id):
+def upsert_project(cur):
     """UPSERT 'Sample Project' build_projects row. Returns id."""
     cur.execute(
         "SELECT id FROM build_projects WHERE title=%s AND creator_fk=%s",
@@ -159,11 +134,11 @@ def upsert_project(cur, category_id):
         return row['id']
     cur.execute(
         """INSERT INTO build_projects
-           (title, description, project_status, category_fk, creator_fk)
-           VALUES (%s, %s, %s, %s, %s)""",
+           (title, description, project_status, creator_fk)
+           VALUES (%s, %s, %s, %s)""",
         ('Sample Project',
          'Demo project for the Build Visualizer. Trunk = a release-type Branch the project links to via trunk_branch_fk.',
-         'active', category_id, DEFAULT_CREATOR_FK),
+         'active', DEFAULT_CREATOR_FK),
     )
     return cur.lastrowid
 
@@ -317,10 +292,7 @@ def main():
         if actual != target_database:
             sys.exit(f"ABORT: expected '{target_database}', got '{actual}'")
 
-        category_id = upsert_category(cur)
-        print(f"category '{BUILD_PROJECTS_CATEGORY_NAME}' id={category_id}")
-
-        project_id = upsert_project(cur, category_id)
+        project_id = upsert_project(cur)
         print(f"project 'Sample Project' id={project_id}")
 
         # Pass 1: create every branch row (parent_build_fk left NULL — patched

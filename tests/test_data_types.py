@@ -1483,10 +1483,11 @@ def test_build_projects_columns(db_connection):
     assert cols['project_status']['Null'] == 'NO'
     assert cols['project_status']['Default'] == 'draft'
     assert cols['trunk_branch_fk']['Null'] == 'YES'
-    assert cols['category_fk']['Null'] == 'NO'
     assert cols['creator_fk']['Null'] == 'NO'
     # Req #2606: no `closed` column on any new build-feature table.
     assert 'closed' not in cols
+    # Req #2723: build_projects no longer carries a category_fk.
+    assert 'category_fk' not in cols
 
 
 def test_branches_columns(db_connection):
