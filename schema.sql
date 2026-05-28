@@ -591,13 +591,9 @@ CREATE TABLE IF NOT EXISTS build_projects (
     project_status  VARCHAR(16)     NOT NULL DEFAULT 'draft', -- draft|active|archived
     trunk_branch_fk INT             NULL, -- FK declared at bottom (circular: -> branches)
     sort_order      SMALLINT        NULL,
-    category_fk     INT             NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_build_projects_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_build_projects_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,

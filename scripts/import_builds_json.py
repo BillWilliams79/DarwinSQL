@@ -49,7 +49,6 @@ from _production_snapshot_guard import assert_recent_production_snapshot
 
 # Bill Williams primary user — owns the imported demo data
 DEFAULT_CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
-BUILD_PROJECTS_CATEGORY_NAME = 'Build Projects'
 DEFAULT_IMPORT_TITLE = 'Default'
 
 ALLOWED_DATABASES = ('darwin_dev', 'darwin')
@@ -82,23 +81,7 @@ def assert_target_db(cur, target_database):
         sys.exit(f"ABORT: expected '{target_database}', got '{actual}'")
 
 
-def lookup_category_id(cur):
-    cur.execute(
-        "SELECT id FROM categories WHERE category_name=%s AND creator_fk=%s",
-        (BUILD_PROJECTS_CATEGORY_NAME, DEFAULT_CREATOR_FK),
-    )
-    row = cur.fetchone()
-    if row:
-        return row['id']
-    # Category must exist (seeded by seed_build_projects.py). Fail fast — this
-    # script's job is import, not seeding the surrounding scaffolding.
-    sys.exit(
-        f"ABORT: category '{BUILD_PROJECTS_CATEGORY_NAME}' not found for creator "
-        f"{DEFAULT_CREATOR_FK}; run seed_build_projects.py first."
-    )
-
-
-def upsert_project(cur, category_id, title, description):
+def upsert_project(cur, title, description):
     cur.execute(
         "SELECT id FROM build_projects WHERE title=%s AND creator_fk=%s",
         (title, DEFAULT_CREATOR_FK),
@@ -108,9 +91,9 @@ def upsert_project(cur, category_id, title, description):
         return row['id']
     cur.execute(
         """INSERT INTO build_projects
-           (title, description, project_status, category_fk, creator_fk)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (title, description, 'active', category_id, DEFAULT_CREATOR_FK),
+           (title, description, project_status, creator_fk)
+           VALUES (%s, %s, %s, %s)""",
+        (title, description, 'active', DEFAULT_CREATOR_FK),
     )
     return cur.lastrowid
 
@@ -308,8 +291,7 @@ def main():
     with conn.cursor() as cur:
         assert_target_db(cur, target_database)
 
-        category_id = lookup_category_id(cur)
-        project_id = upsert_project(cur, category_id, args.title, description)
+        project_id = upsert_project(cur, args.title, description)
         print(f"project '{args.title}' id={project_id}")
 
         # Pass 1: insert every non-cr branch (parent_build_fk NULL — patched later).
