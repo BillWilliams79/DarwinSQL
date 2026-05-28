@@ -1,7 +1,7 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 32 tables in FK-dependency order
+-- All 33 tables in FK-dependency order
 
 USE darwin_dev;
 
@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
     priority_card_order, dev_servers,
+    swarm_undos,
     swarm_start_sessions, swarm_starts,
     requirement_sessions,
     requirements, swarm_sessions, categories, projects,
@@ -240,6 +241,35 @@ CREATE TABLE swarm_start_sessions (
     CONSTRAINT fk_sss_session
         FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE swarm_undos (
+    id                       INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    session_fk               INT             NULL,
+    swarm_start_fk_at_undo   INT             NULL,
+    req_id_at_undo           INT             NULL,
+    task_name                VARCHAR(255)    NULL,
+    branch                   VARCHAR(255)    NULL,
+    coordination_type        VARCHAR(16)     NULL,
+    reason                   TEXT            NOT NULL,
+    undone_at                TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk               VARCHAR(64)     NOT NULL,
+    create_ts                TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts                TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_undos_session
+        FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_swarm_start
+        FOREIGN KEY (swarm_start_fk_at_undo) REFERENCES swarm_starts (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_req
+        FOREIGN KEY (req_id_at_undo) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    KEY ix_swarm_undos_swarm_start_fk_at_undo (swarm_start_fk_at_undo),
+    KEY ix_swarm_undos_undone_at (undone_at)
 );
 
 -- Dev server port coordination

@@ -668,6 +668,65 @@ def test_swarm_start_sessions_columns(db_connection):
     assert columns['session_fk']['Key'] == 'PRI'
 
 
+def test_swarm_undos_columns(db_connection):
+    """Verify swarm_undos column definitions match migration 053 (req #2719).
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - session_fk: INT, NULL, MUL (ON DELETE SET NULL)
+    - swarm_start_fk_at_undo: INT, NULL, MUL (snapshot)
+    - req_id_at_undo: INT, NULL, MUL (snapshot)
+    - task_name: VARCHAR(255), NULL
+    - branch: VARCHAR(255), NULL
+    - coordination_type: VARCHAR(16), NULL
+    - reason: TEXT, NOT NULL
+    - undone_at: TIMESTAMP, NOT NULL, DEFAULT CURRENT_TIMESTAMP
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts / update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE swarm_undos")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'session_fk', 'swarm_start_fk_at_undo',
+                       'req_id_at_undo', 'task_name', 'branch',
+                       'coordination_type', 'reason',
+                       'undone_at', 'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['session_fk']['Type'] == 'int'
+    assert columns['session_fk']['Null'] == 'YES'
+
+    assert columns['swarm_start_fk_at_undo']['Type'] == 'int'
+    assert columns['swarm_start_fk_at_undo']['Null'] == 'YES'
+
+    assert columns['req_id_at_undo']['Type'] == 'int'
+    assert columns['req_id_at_undo']['Null'] == 'YES'
+
+    assert columns['task_name']['Type'] == 'varchar(255)'
+    assert columns['task_name']['Null'] == 'YES'
+
+    assert columns['branch']['Type'] == 'varchar(255)'
+    assert columns['branch']['Null'] == 'YES'
+
+    assert columns['coordination_type']['Type'] == 'varchar(16)'
+    assert columns['coordination_type']['Null'] == 'YES'
+
+    assert columns['reason']['Type'] == 'text'
+    assert columns['reason']['Null'] == 'NO'
+
+    assert 'timestamp' in columns['undone_at']['Type']
+    assert columns['undone_at']['Null'] == 'NO'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+
 def test_dev_servers_columns(db_connection):
     """Verify dev_servers column definitions match schema.sql.
 
@@ -1399,6 +1458,8 @@ def test_table_count(db_connection):
         'customers',
         # Req #2606 — Build Visualizer data model
         'build_projects', 'branches', 'builds', 'customer_releases',
+        # Req #2719 — swarm-undo data type
+        'swarm_undos',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
