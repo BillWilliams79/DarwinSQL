@@ -636,6 +636,8 @@ CREATE TABLE IF NOT EXISTS builds (
     position                SMALLINT        NOT NULL,    -- 0-indexed order within branch
     build_number            INT             NOT NULL,    -- B in M.m.B.b — computed once at creation
     branch_number           INT             NOT NULL DEFAULT 0, -- b in M.m.B.b — 0 for trunk
+    major                   INT             NOT NULL DEFAULT 0, -- M in M.m.B.b — stamped at creation (req #2720)
+    minor                   INT             NOT NULL DEFAULT 0, -- m in M.m.B.b — stamped at creation (req #2720)
     dot_color               VARCHAR(32)     NULL,        -- green|red|yellow|gray
     approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
     external_id             VARCHAR(64)     NULL,        -- iframe slug ('m1', 'r1c', 'sr3') — req #2648 / migration 051

@@ -136,7 +136,7 @@ def upsert_branch(cur, project_id, branch_type, name, parent_build_id, major, mi
 
 
 def upsert_build(cur, branch_id, position, build_number, branch_number, external_id,
-                 dot_color=None, approved_for_release=0):
+                 major=0, minor=0, dot_color=None, approved_for_release=0):
     cur.execute(
         "SELECT id FROM builds WHERE branch_fk=%s AND position=%s",
         (branch_id, position),
@@ -145,17 +145,19 @@ def upsert_build(cur, branch_id, position, build_number, branch_number, external
     if row:
         cur.execute(
             """UPDATE builds SET build_number=%s, branch_number=%s, external_id=%s,
+                     major=%s, minor=%s,
                      dot_color=%s, approved_for_release=%s WHERE id=%s""",
-            (build_number, branch_number, external_id, dot_color, approved_for_release,
-             row['id']),
+            (build_number, branch_number, external_id, major, minor,
+             dot_color, approved_for_release, row['id']),
         )
         return row['id']
     cur.execute(
         """INSERT INTO builds (branch_fk, position, build_number, branch_number,
+                               major, minor,
                                external_id, dot_color, approved_for_release, creator_fk)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-        (branch_id, position, build_number, branch_number, external_id,
-         dot_color, approved_for_release, DEFAULT_CREATOR_FK),
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (branch_id, position, build_number, branch_number, major, minor,
+         external_id, dot_color, approved_for_release, DEFAULT_CREATOR_FK),
     )
     return cur.lastrowid
 
@@ -318,15 +320,26 @@ def main():
         sql_build_id_by_slug = {}
 
         # Trunk first.
+        # Build a lookup of branch M.m by slug (computed in Pass 1).
+        branch_mm_by_slug = {}
+        for br in non_cr_branches:
+            branch_mm_by_slug[br['id']] = compute_branch_major_minor(
+                br['id'], branches_by_id, builds, trunk_segments, main_build_ids,
+            )
+
         for pos, build_id in enumerate(main_build_ids):
-            seg = trunk_segments[0] if trunk_segments else {'startIdx': 0, 'initialBuildNumber': 1}
+            seg = trunk_segments[0] if trunk_segments else {'startIdx': 0, 'initialBuildNumber': 1, 'major': 1, 'minor': 0}
             for s in trunk_segments or []:
                 if s.get('startIdx', 0) <= pos:
                     seg = s
             B = seg.get('initialBuildNumber', 1) + (pos - seg.get('startIdx', 0))
             build_obj = builds.get(build_id, {})
+            # Per-build M.m: from the segment covering this trunk position.
+            seg_major = seg.get('major', 1)
+            seg_minor = seg.get('minor', 0)
             sql_build_id_by_slug[build_id] = upsert_build(
                 cur, trunk_id, pos, B, 0, build_id,
+                major=seg_major, minor=seg_minor,
                 dot_color=build_obj.get('dotColor'),
                 approved_for_release=0,
             )
@@ -377,11 +390,14 @@ def main():
 
             ord0 = ord0_by_branch_id.get(br['id'], 0)
             ord1 = ord0 + 1
+            # Per-build M.m: from the branch's computed M.m.
+            br_major, br_minor = branch_mm_by_slug.get(br['id'], (1, 0))
             for pos, build_id in enumerate(br.get('buildIds', [])):
                 b = compute_build_b(br['type'], pos, ord0, ord1)
                 build_obj = builds.get(build_id, {})
                 sql_build_id_by_slug[build_id] = upsert_build(
                     cur, sql_br_id, pos, parent_B, b, build_id,
+                    major=br_major, minor=br_minor,
                     dot_color=build_obj.get('dotColor'),
                     approved_for_release=0,
                 )

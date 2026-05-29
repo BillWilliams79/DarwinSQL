@@ -1521,6 +1521,13 @@ def test_builds_columns(db_connection):
     assert cols['build_number']['Null'] == 'NO'        # B — stored, computed once
     assert cols['branch_number']['Null'] == 'NO'        # b — stored, 0 for trunk
     assert cols['branch_number']['Default'] == '0'
+    # Req #2720: per-build M.m — stamped at creation, no look-back to branch.
+    assert cols['major']['Null'] == 'NO'
+    assert cols['major']['Default'] == '0'
+    assert 'int' in cols['major']['Type'].lower()
+    assert cols['minor']['Null'] == 'NO'
+    assert cols['minor']['Default'] == '0'
+    assert 'int' in cols['minor']['Type'].lower()
     assert cols['approved_for_release']['Null'] == 'NO'
     assert cols['approved_for_release']['Default'] == '0'
     assert cols['dot_color']['Null'] == 'YES'
