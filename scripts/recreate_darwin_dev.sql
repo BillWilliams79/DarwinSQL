@@ -609,6 +609,8 @@ CREATE TABLE builds (
     position                SMALLINT        NOT NULL,
     build_number            INT             NOT NULL,
     branch_number           INT             NOT NULL DEFAULT 0,
+    major                   INT             NOT NULL DEFAULT 0,
+    minor                   INT             NOT NULL DEFAULT 0,
     dot_color               VARCHAR(32)     NULL,
     approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
     external_id             VARCHAR(64)     NULL,
