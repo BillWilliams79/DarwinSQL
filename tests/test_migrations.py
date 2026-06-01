@@ -71,6 +71,14 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'test_runs',
         'features',
         'user_integrations',
+        # Req #2606 — Build Visualizer data model (migrations 050-054) + swarm_undos
+        # (migration 053). Listed longest-first: customer_releases before customers,
+        # build_projects before builds, so the longer match wins.
+        'customer_releases',
+        'build_projects',
+        'swarm_undos',
+        'branches',
+        'builds',
         # Req #2422 — swarm_start_sessions before swarm_starts so the longer
         # match wins under the longest-first replace order.
         'swarm_start_sessions',
@@ -139,6 +147,17 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_sss_swarm_start', 'fk_sss_session',
         # Migration 049 — Customer Release
         'fk_customers_creator',
+        # Migration 050 — Build Visualizer data model (build_projects/branches/
+        # builds/customer_releases). Both inline and deferred-ADD constraint names.
+        'fk_build_projects_trunk_branch', 'fk_build_projects_category',
+        'fk_build_projects_creator',
+        'fk_branches_parent_build', 'fk_branches_project', 'fk_branches_creator',
+        'fk_builds_branch', 'fk_builds_creator', 'uq_builds_branch_position',
+        'fk_customer_releases_customer', 'fk_customer_releases_build',
+        'fk_customer_releases_creator', 'uq_customer_releases_customer_build',
+        # Migration 053 — swarm_undos
+        'fk_swarm_undos_swarm_start', 'fk_swarm_undos_session',
+        'fk_swarm_undos_req', 'fk_swarm_undos_creator',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -226,6 +245,12 @@ ALL_TABLE_SUFFIXES = [
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers',
+    # Req #2606 — Build Visualizer (migrations 050-054). FK-safe order: leaves
+    # first — customer_releases → builds → branches → build_projects (the
+    # build_projects<->branches circular FK is handled by FK_CHECKS=0 in cleanup).
+    'customer_releases', 'builds', 'branches', 'build_projects',
+    # Req #2719 — swarm_undos (leaf log table; FKs to session/start/req SET NULL).
+    'swarm_undos',
     # Req #2422 — junction first, then parent (FK-safe drop order).
     'swarm_start_sessions', 'swarm_starts',
     'requirement_sessions', 'priority_sessions',  # pre-038 name
@@ -245,11 +270,15 @@ def cleanup_migration_test_tables(db_connection, migration_test_prefix):
     """
     def _cleanup():
         with db_connection.cursor() as cur:
+            # FK checks off so circular build-table FKs (build_projects<->branches)
+            # never block a DROP and leave temp tables stranded in darwin_dev.
+            cur.execute("SET FOREIGN_KEY_CHECKS = 0")
             for suffix in ALL_TABLE_SUFFIXES:
                 try:
                     cur.execute(f"DROP TABLE IF EXISTS `{migration_test_prefix}_{suffix}`")
                 except Exception:
                     pass
+            cur.execute("SET FOREIGN_KEY_CHECKS = 1")
         db_connection.commit()
 
     _cleanup()
@@ -385,6 +414,10 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'swarm_starts', 'swarm_start_sessions',
             # Req #2604 — Customer Release
             'customers',
+            # Req #2606 — Build Visualizer data model (migrations 050-054)
+            'build_projects', 'branches', 'builds', 'customer_releases',
+            # Req #2719 — swarm-undo data type (migration 053)
+            'swarm_undos',
         ]
     }
     assert tables == expected_tables, \
