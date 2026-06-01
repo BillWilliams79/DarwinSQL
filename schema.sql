@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 33 tables after all migrations.
+-- This file reflects the final state of all 34 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -416,6 +416,25 @@ CREATE TABLE IF NOT EXISTS map_run_partners (
     FOREIGN KEY (map_partner_fk)
         REFERENCES map_partners (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Third-party integrations (req — migration 036)
+-- OAuth tokens for external services (e.g., Strava). DB-backed so tokens
+-- persist across devices. Lambda-Rest auto-scopes via creator_fk.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS user_integrations (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    creator_fk      VARCHAR(36)     NOT NULL,
+    provider        VARCHAR(50)     NOT NULL,
+    access_token    TEXT            NOT NULL,
+    refresh_token   TEXT            NOT NULL,
+    expires_at      INT             NOT NULL,
+    athlete_data    JSON            NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_creator_provider (creator_fk, provider)
 );
 
 -- ============================================================================
