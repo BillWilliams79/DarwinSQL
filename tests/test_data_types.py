@@ -402,7 +402,7 @@ def test_requirements_columns(db_connection):
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
-    - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
+    - coordination_type: VARCHAR(16), NOT NULL, DEFAULT 'implemented' (mandatory, req #2745)
     - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
     - affected_repos: VARCHAR(255), NULL, DEFAULT NULL  (req #2583 — per-requirement repo override)
     """
@@ -461,7 +461,7 @@ def test_requirements_columns(db_connection):
     assert columns['creator_fk']['Key'] == 'MUL'
 
     assert columns['coordination_type']['Type'] == 'varchar(16)'
-    assert columns['coordination_type']['Null'] == 'YES'
+    assert columns['coordination_type']['Null'] == 'NO'   # mandatory autonomy (req #2745)
     assert columns['coordination_type']['Default'] == 'implemented'
 
     assert columns['sort_order']['Type'] == 'smallint'
