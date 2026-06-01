@@ -158,6 +158,7 @@ CREATE TABLE requirements (
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',  -- mandatory autonomy (req #2745)
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,

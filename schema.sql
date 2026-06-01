@@ -152,8 +152,8 @@ CREATE TABLE IF NOT EXISTS requirements (
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    coordination_type VARCHAR(16)   NULL DEFAULT 'implemented',
-                                            -- planned | implemented | deployed (default: implemented)
+    coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
+                                            -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
