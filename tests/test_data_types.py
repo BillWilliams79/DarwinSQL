@@ -728,7 +728,7 @@ def test_swarm_undos_columns(db_connection):
 
 
 def test_swarm_completes_columns(db_connection):
-    """Verify swarm_completes column definitions match migration 057 (req #2497).
+    """Verify swarm_completes column definitions match migration 058 (req #2497).
 
     Close-out counterpart to swarm_starts. Expected columns:
     - id: INT, PRI, AUTO_INCREMENT
