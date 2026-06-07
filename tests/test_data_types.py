@@ -9,7 +9,7 @@ definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 def test_profiles_columns(db_connection):
     """Verify profiles column definitions match schema.sql.
 
-    Expected columns (post migration 026 + app_solar):
+    Expected columns (post migration 026 + app_solar + migration 050):
     - id: VARCHAR(64), PRI, NOT NULL
     - name: VARCHAR(256), NOT NULL
     - email: VARCHAR(256), NOT NULL
@@ -19,6 +19,7 @@ def test_profiles_columns(db_connection):
     - app_maps: TINYINT(1), NOT NULL, DEFAULT 1
     - app_swarm: TINYINT(1), NOT NULL, DEFAULT 0
     - app_solar: TINYINT(1), NOT NULL, DEFAULT 0
+    - app_swarm_validate: TINYINT(1), NOT NULL, DEFAULT 0  (req #2611, migration 050)
     - create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     - update_ts: TIMESTAMP, NULL, ON UPDATE CURRENT_TIMESTAMP
     """
@@ -29,6 +30,7 @@ def test_profiles_columns(db_connection):
     # Verify all expected columns exist
     expected_fields = ['id', 'name', 'email', 'timezone', 'theme_mode',
                        'app_tasks', 'app_maps', 'app_swarm', 'app_solar',
+                       'app_swarm_validate',
                        'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields), \
         f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
@@ -69,6 +71,16 @@ def test_profiles_columns(db_connection):
     assert 'tinyint' in columns['app_swarm']['Type']
     assert columns['app_swarm']['Null'] == 'NO'
     assert columns['app_swarm']['Default'] == '0'
+
+    # app_solar: TINYINT(1), NOT NULL, DEFAULT 0
+    assert 'tinyint' in columns['app_solar']['Type']
+    assert columns['app_solar']['Null'] == 'NO'
+    assert columns['app_solar']['Default'] == '0'
+
+    # app_swarm_validate: TINYINT(1), NOT NULL, DEFAULT 0  (req #2611)
+    assert 'tinyint' in columns['app_swarm_validate']['Type']
+    assert columns['app_swarm_validate']['Null'] == 'NO'
+    assert columns['app_swarm_validate']['Default'] == '0'
 
     # create_ts: TIMESTAMP, NULL, DEFAULT CURRENT_TIMESTAMP
     assert 'timestamp' in columns['create_ts']['Type']
@@ -376,7 +388,8 @@ def test_categories_columns(db_connection):
 def test_requirements_columns(db_connection):
     """Verify requirements column definitions match schema.sql.
 
-    Expected columns (migration 046 re-adds sort_order; req #2417):
+    Expected columns (migration 046 re-adds sort_order; req #2417;
+    migration 048 adds affected_repos; req #2583):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
@@ -389,8 +402,9 @@ def test_requirements_columns(db_connection):
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
-    - coordination_type: VARCHAR(16), NULL, DEFAULT 'implemented'
+    - coordination_type: VARCHAR(16), NOT NULL, DEFAULT 'implemented' (mandatory, req #2745)
     - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
+    - affected_repos: VARCHAR(255), NULL, DEFAULT NULL  (req #2583 — per-requirement repo override)
     """
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirements")
@@ -405,6 +419,10 @@ def test_requirements_columns(db_connection):
     # everywhere, this branch can be removed.
     if 'sort_order' in columns:
         expected_fields.append('sort_order')
+    # Tolerate both pre- and post-migration-048 state (req #2583 added
+    # affected_repos; the migration may not have landed in this DB yet).
+    if 'affected_repos' in columns:
+        expected_fields.append('affected_repos')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -443,12 +461,17 @@ def test_requirements_columns(db_connection):
     assert columns['creator_fk']['Key'] == 'MUL'
 
     assert columns['coordination_type']['Type'] == 'varchar(16)'
-    assert columns['coordination_type']['Null'] == 'YES'
+    assert columns['coordination_type']['Null'] == 'NO'   # mandatory autonomy (req #2745)
     assert columns['coordination_type']['Default'] == 'implemented'
 
     assert columns['sort_order']['Type'] == 'smallint'
     assert columns['sort_order']['Null'] == 'YES'
     assert columns['sort_order']['Default'] is None
+
+    if 'affected_repos' in columns:
+        assert columns['affected_repos']['Type'] == 'varchar(255)'
+        assert columns['affected_repos']['Null'] == 'YES'
+        assert columns['affected_repos']['Default'] is None
 
 
 def test_swarm_sessions_columns(db_connection):
@@ -645,95 +668,63 @@ def test_swarm_start_sessions_columns(db_connection):
     assert columns['session_fk']['Key'] == 'PRI'
 
 
-def test_swarm_completes_columns(db_connection):
-    """Verify swarm_completes column definitions match migration 048 (req #2497).
+def test_swarm_undos_columns(db_connection):
+    """Verify swarm_undos column definitions match migration 053 (req #2719).
 
-    Parallel shape to swarm_starts with six differences:
-    - skill_name: VARCHAR(64), NOT NULL (discriminates closeout skill)
-    - coordination_type: VARCHAR(16), NULL (manifest value; NULL for primary)
-    - status: VARCHAR(16), NOT NULL, DEFAULT 'in_progress'
-    - completed_at: TIMESTAMP, NULL (finalize timestamp)
-    - complete_summary: TEXT, NULL (mirrors swarm_sessions.complete_summary)
-    - no auto_start, no autonomy_filter
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - session_fk: INT, NULL, MUL (ON DELETE SET NULL)
+    - swarm_start_fk_at_undo: INT, NULL, MUL (snapshot)
+    - req_id_at_undo: INT, NULL, MUL (snapshot)
+    - task_name: VARCHAR(255), NULL
+    - branch: VARCHAR(255), NULL
+    - coordination_type: VARCHAR(16), NULL
+    - reason: TEXT, NOT NULL
+    - undone_at: TIMESTAMP, NOT NULL, DEFAULT CURRENT_TIMESTAMP
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts / update_ts: TIMESTAMP, NULL
     """
     with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE swarm_completes")
+        cur.execute("DESCRIBE swarm_undos")
         columns = {row['Field']: row for row in cur.fetchall()}
 
-    expected_fields = ['id', 'skill_name', 'arguments', 'coordination_type',
-                       'status', 'session_count',
-                       'tokens_input', 'tokens_cache_write', 'tokens_cache_read',
-                       'tokens_output', 'wall_seconds', 'turn_count',
-                       'complete_summary', 'telemetry',
-                       'started_at', 'completed_at',
-                       'creator_fk', 'create_ts', 'update_ts']
+    expected_fields = ['id', 'session_fk', 'swarm_start_fk_at_undo',
+                       'req_id_at_undo', 'task_name', 'branch',
+                       'coordination_type', 'reason',
+                       'undone_at', 'creator_fk', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'
     assert columns['id']['Extra'] == 'auto_increment'
 
-    assert columns['skill_name']['Type'] == 'varchar(64)'
-    assert columns['skill_name']['Null'] == 'NO'
+    assert columns['session_fk']['Type'] == 'int'
+    assert columns['session_fk']['Null'] == 'YES'
 
-    assert columns['arguments']['Type'] == 'varchar(512)'
-    assert columns['arguments']['Null'] == 'YES'
+    assert columns['swarm_start_fk_at_undo']['Type'] == 'int'
+    assert columns['swarm_start_fk_at_undo']['Null'] == 'YES'
+
+    assert columns['req_id_at_undo']['Type'] == 'int'
+    assert columns['req_id_at_undo']['Null'] == 'YES'
+
+    assert columns['task_name']['Type'] == 'varchar(255)'
+    assert columns['task_name']['Null'] == 'YES'
+
+    assert columns['branch']['Type'] == 'varchar(255)'
+    assert columns['branch']['Null'] == 'YES'
 
     assert columns['coordination_type']['Type'] == 'varchar(16)'
     assert columns['coordination_type']['Null'] == 'YES'
 
-    assert columns['status']['Type'] == 'varchar(16)'
-    assert columns['status']['Null'] == 'NO'
-    assert columns['status']['Default'] == 'in_progress'
+    assert columns['reason']['Type'] == 'text'
+    assert columns['reason']['Null'] == 'NO'
 
-    assert columns['session_count']['Type'] == 'int'
-    assert columns['session_count']['Null'] == 'NO'
-    assert columns['session_count']['Default'] == '0'
-
-    # Token / timing / count columns are NULL until skill-finalize populates them.
-    for col in ('tokens_input', 'tokens_cache_write', 'tokens_cache_read',
-                'tokens_output', 'wall_seconds', 'turn_count'):
-        assert columns[col]['Type'] == 'int', col
-        assert columns[col]['Null'] == 'YES', col
-
-    assert columns['complete_summary']['Type'] == 'text'
-    assert columns['complete_summary']['Null'] == 'YES'
-
-    assert columns['telemetry']['Type'] == 'text'
-    assert columns['telemetry']['Null'] == 'YES'
-
-    assert 'timestamp' in columns['started_at']['Type']
-    assert columns['started_at']['Null'] == 'NO'
-
-    assert 'timestamp' in columns['completed_at']['Type']
-    assert columns['completed_at']['Null'] == 'YES'
+    assert 'timestamp' in columns['undone_at']['Type']
+    assert columns['undone_at']['Null'] == 'NO'
 
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'
     assert columns['creator_fk']['Key'] == 'MUL'
-
-
-def test_swarm_complete_sessions_columns(db_connection):
-    """Verify swarm_complete_sessions junction table column definitions (req #2497).
-
-    Expected columns:
-    - swarm_complete_fk: INT, PRI, NOT NULL
-    - session_fk: INT, PRI, NOT NULL
-    """
-    with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE swarm_complete_sessions")
-        columns = {row['Field']: row for row in cur.fetchall()}
-
-    expected_fields = ['swarm_complete_fk', 'session_fk']
-    assert set(columns.keys()) == set(expected_fields)
-
-    assert columns['swarm_complete_fk']['Type'] == 'int'
-    assert columns['swarm_complete_fk']['Null'] == 'NO'
-    assert columns['swarm_complete_fk']['Key'] == 'PRI'
-
-    assert columns['session_fk']['Type'] == 'int'
-    assert columns['session_fk']['Null'] == 'NO'
-    assert columns['session_fk']['Key'] == 'PRI'
 
 
 def test_dev_servers_columns(db_connection):
@@ -1401,6 +1392,49 @@ def test_test_results_columns(db_connection):
         f"uq_run_case UNIQUE should cover (test_run_fk, test_case_fk), got {columns_in_unique}"
 
 
+def test_customers_columns(db_connection):
+    """Verify customers column definitions match migration 049 (req #2604).
+
+    Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - customer_name: VARCHAR(256), NOT NULL
+    - description: TEXT, NULL
+    - creator_fk: VARCHAR(64), NOT NULL, MUL (FK to profiles)
+    - closed: TINYINT(1), NOT NULL, DEFAULT 0
+    - sort_order: SMALLINT, NULL
+    - create_ts / update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE customers")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'customer_name', 'description',
+                       'creator_fk', 'closed', 'sort_order',
+                       'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['customer_name']['Type'] == 'varchar(256)'
+    assert columns['customer_name']['Null'] == 'NO'
+
+    assert columns['description']['Type'] == 'text'
+    assert columns['description']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+    assert columns['closed']['Type'] == 'tinyint(1)'
+    assert columns['closed']['Null'] == 'NO'
+    assert columns['closed']['Default'] == '0'
+
+    assert columns['sort_order']['Type'] == 'smallint'
+    assert columns['sort_order']['Null'] == 'YES'
+
+
 def test_table_count(db_connection):
     """Verify darwin_dev database contains the expected tables."""
     with db_connection.cursor() as cur:
@@ -1420,8 +1454,97 @@ def test_table_count(db_connection):
         'test_runs', 'test_results',
         # Req #2422 — swarm-start data type
         'swarm_starts', 'swarm_start_sessions',
-        # Req #2497 — swarm-complete data type (migration 048)
-        'swarm_completes', 'swarm_complete_sessions',
+        # Req #2604 — Customer Release
+        'customers',
+        # Req #2606 — Build Visualizer data model
+        'build_projects', 'branches', 'builds', 'customer_releases',
+        # Req #2719 — swarm-undo data type
+        'swarm_undos',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
+
+
+# ============================================================================
+# Req #2606 — Build Visualizer data model column tests
+# ============================================================================
+
+def _columns(cur, table):
+    cur.execute(f"DESCRIBE {table}")
+    return {row['Field']: row for row in cur.fetchall()}
+
+
+def test_build_projects_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'build_projects')
+    assert cols['title']['Null'] == 'NO'
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['description']['Null'] == 'YES'
+    assert cols['project_status']['Null'] == 'NO'
+    assert cols['project_status']['Default'] == 'draft'
+    assert cols['trunk_branch_fk']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2606: no `closed` column on any new build-feature table.
+    assert 'closed' not in cols
+    # Req #2723: build_projects no longer carries a category_fk.
+    assert 'category_fk' not in cols
+
+
+def test_branches_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'branches')
+    assert cols['project_fk']['Null'] == 'NO'
+    assert cols['branch_type']['Null'] == 'NO'
+    assert cols['name']['Null'] == 'YES'
+    assert cols['major']['Null'] == 'NO'
+    assert cols['minor']['Null'] == 'NO'
+    assert cols['parent_build_fk']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2648: external_id holds the iframe slug ('main', 'release-1', etc.)
+    # so the SqlBackedStorageAdapter can round-trip the in-memory model.
+    assert cols['external_id']['Null'] == 'YES'
+    assert 'varchar(64)' in cols['external_id']['Type'].lower()
+    # Req #2606: parent_branch_fk REMOVED (derived via builds[parent_build_fk]).
+    assert 'parent_branch_fk' not in cols
+    # Req #2606: segment_* columns REMOVED (each branch carries M.m directly).
+    assert 'segment_major' not in cols
+    assert 'segment_minor' not in cols
+    assert 'segment_initial_build_number' not in cols
+    assert 'closed' not in cols
+
+
+def test_builds_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'builds')
+    assert cols['branch_fk']['Null'] == 'NO'
+    assert cols['position']['Null'] == 'NO'
+    assert cols['build_number']['Null'] == 'NO'        # B — stored, computed once
+    assert cols['branch_number']['Null'] == 'NO'        # b — stored, 0 for trunk
+    assert cols['branch_number']['Default'] == '0'
+    # Req #2720: per-build M.m — stamped at creation, no look-back to branch.
+    assert cols['major']['Null'] == 'NO'
+    assert cols['major']['Default'] == '0'
+    assert 'int' in cols['major']['Type'].lower()
+    assert cols['minor']['Null'] == 'NO'
+    assert cols['minor']['Default'] == '0'
+    assert 'int' in cols['minor']['Type'].lower()
+    assert cols['approved_for_release']['Null'] == 'NO'
+    assert cols['approved_for_release']['Default'] == '0'
+    assert cols['dot_color']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Req #2648: external_id holds the iframe slug ('m1', 'r1c', 'sr3', etc.).
+    assert cols['external_id']['Null'] == 'YES'
+    assert 'varchar(64)' in cols['external_id']['Type'].lower()
+    # Req #2606: no `closed` column; auto-numbered (no `title`).
+    assert 'closed' not in cols
+    assert 'title' not in cols
+
+
+def test_customer_releases_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'customer_releases')
+    assert cols['customer_fk']['Null'] == 'NO'
+    assert cols['build_fk']['Null'] == 'NO'
+    assert cols['release_notes']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    assert 'closed' not in cols

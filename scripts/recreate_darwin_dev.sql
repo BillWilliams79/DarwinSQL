@@ -1,17 +1,20 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 29 tables in FK-dependency order
+-- All 34 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS test_results, test_runs, test_plan_cases, test_plans,
+DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
+    customers,
+    test_results, test_runs, test_plan_cases, test_plans,
     feature_test_cases, test_cases, features,
+    user_integrations,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
     priority_card_order, dev_servers,
-    swarm_complete_sessions, swarm_completes,
+    swarm_undos,
     swarm_start_sessions, swarm_starts,
     requirement_sessions,
     requirements, swarm_sessions, categories, projects,
@@ -29,6 +32,8 @@ CREATE TABLE profiles (
     app_tasks       TINYINT(1)      NOT NULL DEFAULT 1,
     app_maps        TINYINT(1)      NOT NULL DEFAULT 1,
     app_swarm       TINYINT(1)      NOT NULL DEFAULT 0,
+    app_solar       TINYINT(1)      NOT NULL DEFAULT 0,
+    app_swarm_validate TINYINT(1)   NOT NULL DEFAULT 0,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP
 );
@@ -147,15 +152,22 @@ CREATE TABLE requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
-    in_progress     TINYINT(1)      NOT NULL DEFAULT 0,
-    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
+                                            -- authoring | approved | swarm_ready | development | met | deferred
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
+    deferred_at     TIMESTAMP       NULL,
     project_fk      INT             NULL,
     category_fk     INT             NOT NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
+                                            -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
+    sort_order      SMALLINT        NULL DEFAULT NULL,
+                                            -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
+    affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
+                                            -- comma-separated sub-repo override (req #2583); NULL = use category default
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
@@ -241,41 +253,33 @@ CREATE TABLE swarm_start_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE swarm_completes (
-    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    skill_name          VARCHAR(64)     NOT NULL,
-    arguments           VARCHAR(512)    NULL,
-    coordination_type   VARCHAR(16)     NULL,
-    status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
-    session_count       INT             NOT NULL DEFAULT 0,
-    tokens_input        INT             NULL,
-    tokens_cache_write  INT             NULL,
-    tokens_cache_read   INT             NULL,
-    tokens_output       INT             NULL,
-    wall_seconds        INT             NULL,
-    turn_count          INT             NULL,
-    complete_summary    TEXT            NULL,
-    telemetry           TEXT            NULL,
-    started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    completed_at        TIMESTAMP       NULL,
-    creator_fk          VARCHAR(64)     NOT NULL,
-    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_swarm_completes_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE TABLE swarm_complete_sessions (
-    swarm_complete_fk   INT             NOT NULL,
-    session_fk          INT             NOT NULL,
-    PRIMARY KEY (swarm_complete_fk, session_fk),
-    CONSTRAINT fk_scs_swarm_complete
-        FOREIGN KEY (swarm_complete_fk) REFERENCES swarm_completes (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_scs_session
+CREATE TABLE swarm_undos (
+    id                       INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    session_fk               INT             NULL,
+    swarm_start_fk_at_undo   INT             NULL,
+    req_id_at_undo           INT             NULL,
+    task_name                VARCHAR(255)    NULL,
+    branch                   VARCHAR(255)    NULL,
+    coordination_type        VARCHAR(16)     NULL,
+    reason                   TEXT            NOT NULL,
+    undone_at                TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk               VARCHAR(64)     NOT NULL,
+    create_ts                TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts                TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_swarm_undos_session
         FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_swarm_start
+        FOREIGN KEY (swarm_start_fk_at_undo) REFERENCES swarm_starts (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_req
+        FOREIGN KEY (req_id_at_undo) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_undos_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    KEY ix_swarm_undos_swarm_start_fk_at_undo (swarm_start_fk_at_undo),
+    KEY ix_swarm_undos_undone_at (undone_at)
 );
 
 -- Dev server port coordination
@@ -284,6 +288,7 @@ CREATE TABLE dev_servers (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     port            SMALLINT        NOT NULL,
     pid             INT             NOT NULL,
+    terminal_number SMALLINT        NULL,
     workspace_path  VARCHAR(512)    NOT NULL,
     session_fk      INT             NULL,
     creator_fk      VARCHAR(64)     NOT NULL,
@@ -403,6 +408,21 @@ CREATE TABLE map_run_partners (
     FOREIGN KEY (map_partner_fk)
         REFERENCES map_partners (id)
         ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- Third-party integrations (migration 036) — OAuth tokens for external services
+
+CREATE TABLE user_integrations (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    creator_fk      VARCHAR(36)     NOT NULL,
+    provider        VARCHAR(50)     NOT NULL,
+    access_token    TEXT            NOT NULL,
+    refresh_token   TEXT            NOT NULL,
+    expires_at      INT             NOT NULL,
+    athlete_data    JSON            NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_creator_provider (creator_fk, provider)
 );
 
 -- Swarm Features & Test Cases registry (req #2380)
@@ -531,3 +551,126 @@ CREATE TABLE test_results (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT uq_run_case UNIQUE KEY (test_run_fk, test_case_fk)
 );
+
+-- Req #2604: customers — recipients of build releases.
+CREATE TABLE customers (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    customer_name   VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customers_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Req #2606: Build Visualizer data model. Trunk is identified by
+-- build_projects.trunk_branch_fk (a project links to its trunk branch).
+-- No parent_branch_fk on branches: a branch originates from a Build via
+-- parent_build_fk; the parent BRANCH is builds[parent_build_fk].branch_fk.
+-- No segment columns: branches carry M.m; builds carry the computed-once
+-- M.m.B.b values. No `closed` soft-delete columns. Two circular FKs
+-- (branches.parent_build_fk <-> builds.branch_fk;
+-- build_projects.trunk_branch_fk <-> branches.project_fk) require FK checks
+-- disabled for this block (the top-of-file SET ...=1 re-enabled them after the
+-- DROP), so wrap the build tables in their own FOREIGN_KEY_CHECKS=0 guard —
+-- mirrors schema.sql's build-section guard. In migration 050 they're deferred ALTERs.
+-- ============================================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE build_projects (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    project_status  VARCHAR(16)     NOT NULL DEFAULT 'draft', -- draft|active|archived
+    trunk_branch_fk INT             NULL, -- FK declared at bottom (circular: -> branches)
+    sort_order      SMALLINT        NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_build_projects_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_build_projects_trunk_branch
+        FOREIGN KEY (trunk_branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+);
+
+CREATE TABLE branches (
+    id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    project_fk          INT             NOT NULL,
+    branch_type         VARCHAR(32)     NOT NULL,
+    name                TEXT            NULL,
+    major               INT             NOT NULL,
+    minor               INT             NOT NULL,
+    parent_build_fk     INT             NULL,
+    side                VARCHAR(16)     NULL,
+    row_order           INT             NULL,
+    label_end           VARCHAR(128)    NULL,
+    sort_order          SMALLINT        NULL,
+    external_id         VARCHAR(64)     NULL,
+    creator_fk          VARCHAR(64)     NOT NULL,
+    create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_branches_project_external (project_fk, external_id),
+    CONSTRAINT fk_branches_project
+        FOREIGN KEY (project_fk) REFERENCES build_projects (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_branches_parent_build
+        FOREIGN KEY (parent_build_fk) REFERENCES builds (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_branches_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE builds (
+    id                      INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    branch_fk               INT             NOT NULL,
+    position                SMALLINT        NOT NULL,
+    build_number            INT             NOT NULL,
+    branch_number           INT             NOT NULL DEFAULT 0,
+    major                   INT             NOT NULL DEFAULT 0,
+    minor                   INT             NOT NULL DEFAULT 0,
+    dot_color               VARCHAR(32)     NULL,
+    approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
+    external_id             VARCHAR(64)     NULL,
+    creator_fk              VARCHAR(64)     NOT NULL,
+    create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_builds_branch_external (branch_fk, external_id),
+    CONSTRAINT fk_builds_branch
+        FOREIGN KEY (branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_builds_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT uq_builds_branch_position UNIQUE KEY (branch_fk, position)
+);
+
+CREATE TABLE customer_releases (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    customer_fk     INT             NOT NULL,
+    build_fk        INT             NOT NULL,
+    release_notes   TEXT            NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customer_releases_customer
+        FOREIGN KEY (customer_fk) REFERENCES customers (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_customer_releases_build
+        FOREIGN KEY (build_fk) REFERENCES builds (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_customer_releases_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT uq_customer_releases_customer_build UNIQUE KEY (customer_fk, build_fk)
+);
+
+SET FOREIGN_KEY_CHECKS = 1;
