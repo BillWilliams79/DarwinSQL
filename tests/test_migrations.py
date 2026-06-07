@@ -83,6 +83,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # match wins under the longest-first replace order.
         'swarm_start_sessions',
         'swarm_starts',
+        # Req #2497 — swarm_complete_sessions before swarm_completes (longest-first).
+        'swarm_complete_sessions',
+        'swarm_completes',
         'requirement_sessions',
         'priority_sessions',     # pre-038 name (for RENAME TABLE in migration 038)
         'priority_card_order',
@@ -158,6 +161,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 053 — swarm_undos
         'fk_swarm_undos_swarm_start', 'fk_swarm_undos_session',
         'fk_swarm_undos_req', 'fk_swarm_undos_creator',
+        # Migration 057 — swarm_completes
+        'fk_swarm_completes_creator',
+        'fk_scs_swarm_complete', 'fk_scs_session',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -251,6 +257,8 @@ ALL_TABLE_SUFFIXES = [
     'customer_releases', 'builds', 'branches', 'build_projects',
     # Req #2719 — swarm_undos (leaf log table; FKs to session/start/req SET NULL).
     'swarm_undos',
+    # Req #2497 — junction first, then parent (FK-safe drop order).
+    'swarm_complete_sessions', 'swarm_completes',
     # Req #2422 — junction first, then parent (FK-safe drop order).
     'swarm_start_sessions', 'swarm_starts',
     'requirement_sessions', 'priority_sessions',  # pre-038 name
@@ -418,6 +426,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'build_projects', 'branches', 'builds', 'customer_releases',
             # Req #2719 — swarm-undo data type (migration 053)
             'swarm_undos',
+            # Req #2497 — swarm-complete data type (migration 057)
+            'swarm_completes', 'swarm_complete_sessions',
         ]
     }
     assert tables == expected_tables, \

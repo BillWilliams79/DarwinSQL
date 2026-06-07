@@ -1,4 +1,4 @@
--- 048_add_swarm_completes.sql
+-- 058_add_swarm_completes.sql
 --
 -- Req #2497: define a swarm-complete data type. Each /swarm-complete (and
 -- /primary-ai-swarm-complete) invocation creates one swarm_completes row
@@ -10,7 +10,7 @@
 -- no category_fk). The closeout side deviates from the launch side in
 -- exactly six fields (see CLAUDE.md / memory/swarm-completes.md):
 --   skill_name        which closeout skill ran (swarm-start has only one)
---   coordination_type planned|implemented|deployed (NULL for primary-ai)
+--   coordination_type discuss|planned|implemented|deployed (NULL for primary-ai)
 --   status            in_progress|ok|error (closeout can fail mid-flight)
 --   completed_at      finalize timestamp (launch is instantaneous)
 --   complete_summary  mirrors the swarm_sessions.complete_summary column
@@ -22,7 +22,6 @@
 --
 -- Captured at create time (when swarm-complete-record.sh fires):
 --   skill_name         swarm-complete | primary-ai-swarm-complete
---   arguments          raw $ARGUMENTS the user typed; "" stored as NULL
 --   coordination_type  from the worker manifest (planned|implemented|deployed);
 --                      NULL for /primary-ai-swarm-complete (primary has no manifest)
 --   status             defaults to 'in_progress'; finalize writes 'ok' or 'error'
@@ -42,7 +41,6 @@
 CREATE TABLE swarm_completes (
     id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     skill_name          VARCHAR(64)     NOT NULL,
-    arguments           VARCHAR(512)    NULL,
     coordination_type   VARCHAR(16)     NULL,
     status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
     session_count       INT             NOT NULL DEFAULT 0,

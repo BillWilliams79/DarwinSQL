@@ -727,6 +727,102 @@ def test_swarm_undos_columns(db_connection):
     assert columns['creator_fk']['Key'] == 'MUL'
 
 
+def test_swarm_completes_columns(db_connection):
+    """Verify swarm_completes column definitions match migration 057 (req #2497).
+
+    Close-out counterpart to swarm_starts. Expected columns:
+    - id: INT, PRI, AUTO_INCREMENT
+    - skill_name: VARCHAR(64), NOT NULL
+    - coordination_type: VARCHAR(16), NULL (NULL for primary-ai-swarm-complete)
+    - status: VARCHAR(16), NOT NULL, DEFAULT 'in_progress'
+    - session_count: INT, NOT NULL, DEFAULT 0
+    - tokens_input / tokens_cache_write / tokens_cache_read / tokens_output: INT, NULL
+    - wall_seconds: INT, NULL
+    - turn_count: INT, NULL
+    - complete_summary: TEXT, NULL
+    - telemetry: TEXT, NULL
+    - started_at: TIMESTAMP, NOT NULL, DEFAULT CURRENT_TIMESTAMP
+    - completed_at: TIMESTAMP, NULL (finalize timestamp)
+    - creator_fk: VARCHAR(64), NOT NULL, MUL
+    - create_ts / update_ts: TIMESTAMP, NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE swarm_completes")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['id', 'skill_name', 'coordination_type',
+                       'status', 'session_count',
+                       'tokens_input', 'tokens_cache_write', 'tokens_cache_read',
+                       'tokens_output', 'wall_seconds', 'turn_count',
+                       'complete_summary', 'telemetry',
+                       'started_at', 'completed_at',
+                       'creator_fk', 'create_ts', 'update_ts']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['id']['Type'] == 'int'
+    assert columns['id']['Key'] == 'PRI'
+    assert columns['id']['Extra'] == 'auto_increment'
+
+    assert columns['skill_name']['Type'] == 'varchar(64)'
+    assert columns['skill_name']['Null'] == 'NO'
+
+    assert columns['coordination_type']['Type'] == 'varchar(16)'
+    assert columns['coordination_type']['Null'] == 'YES'
+
+    assert columns['status']['Type'] == 'varchar(16)'
+    assert columns['status']['Null'] == 'NO'
+    assert columns['status']['Default'] == 'in_progress'
+
+    assert columns['session_count']['Type'] == 'int'
+    assert columns['session_count']['Null'] == 'NO'
+    assert columns['session_count']['Default'] == '0'
+
+    # Token / timing / count columns are NULL until the skill's finalize populates them.
+    for col in ('tokens_input', 'tokens_cache_write', 'tokens_cache_read',
+                'tokens_output', 'wall_seconds', 'turn_count'):
+        assert columns[col]['Type'] == 'int', col
+        assert columns[col]['Null'] == 'YES', col
+
+    assert columns['complete_summary']['Type'] == 'text'
+    assert columns['complete_summary']['Null'] == 'YES'
+
+    assert columns['telemetry']['Type'] == 'text'
+    assert columns['telemetry']['Null'] == 'YES'
+
+    assert 'timestamp' in columns['started_at']['Type']
+    assert columns['started_at']['Null'] == 'NO'
+
+    assert 'timestamp' in columns['completed_at']['Type']
+    assert columns['completed_at']['Null'] == 'YES'
+
+    assert columns['creator_fk']['Type'] == 'varchar(64)'
+    assert columns['creator_fk']['Null'] == 'NO'
+    assert columns['creator_fk']['Key'] == 'MUL'
+
+
+def test_swarm_complete_sessions_columns(db_connection):
+    """Verify swarm_complete_sessions junction table column definitions (req #2497).
+
+    Expected columns:
+    - swarm_complete_fk: INT, PRI, NOT NULL
+    - session_fk: INT, PRI, NOT NULL
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE swarm_complete_sessions")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['swarm_complete_fk', 'session_fk']
+    assert set(columns.keys()) == set(expected_fields)
+
+    assert columns['swarm_complete_fk']['Type'] == 'int'
+    assert columns['swarm_complete_fk']['Null'] == 'NO'
+    assert columns['swarm_complete_fk']['Key'] == 'PRI'
+
+    assert columns['session_fk']['Type'] == 'int'
+    assert columns['session_fk']['Null'] == 'NO'
+    assert columns['session_fk']['Key'] == 'PRI'
+
+
 def test_dev_servers_columns(db_connection):
     """Verify dev_servers column definitions match schema.sql.
 
@@ -1460,6 +1556,8 @@ def test_table_count(db_connection):
         'build_projects', 'branches', 'builds', 'customer_releases',
         # Req #2719 — swarm-undo data type
         'swarm_undos',
+        # Req #2497 — swarm-complete data type
+        'swarm_completes', 'swarm_complete_sessions',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
