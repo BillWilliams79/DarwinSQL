@@ -153,7 +153,7 @@ CREATE TABLE requirements (
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
     requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
-                                            -- authoring | approved | swarm_ready | development | met | deferred
+                                            -- authoring | approved | swarm_ready | development | met | deferred | wontfix
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     deferred_at     TIMESTAMP       NULL,
