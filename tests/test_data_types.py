@@ -489,6 +489,10 @@ def test_swarm_sessions_columns(db_connection):
     - worktree_path: VARCHAR(512), NULL
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
+    - last_transition_at: TIMESTAMP, NULL                      (req #2332)
+    - starting_secs..legacy_secs: INT, NOT NULL, DEFAULT 0     (req #2332, 8 buckets)
+    - instrumented: TINYINT, NOT NULL, DEFAULT 1               (req #2332)
+    - pre_pause_status: VARCHAR(16), NULL                      (req #2332)
     - start_summary: TEXT, NULL
     - complete_summary: TEXT, NULL
     - telemetry: TEXT, NULL
@@ -501,12 +505,22 @@ def test_swarm_sessions_columns(db_connection):
         cur.execute("DESCRIBE swarm_sessions")
         columns = {row['Field']: row for row in cur.fetchall()}
 
+    phase_buckets = ['starting_secs', 'waiting_secs', 'planning_secs', 'implementing_secs',
+                     'review_secs', 'completion_secs', 'paused_secs', 'legacy_secs']
     expected_fields = ['id', 'branch', 'task_name', 'source_type', 'source_ref',
                        'title', 'pr_url', 'swarm_status', 'worktree_path',
                        'started_at', 'completed_at',
+                       'last_transition_at'] + phase_buckets + ['instrumented', 'pre_pause_status',
                        'start_summary', 'complete_summary', 'telemetry', 'plan',
                        'creator_fk', 'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #2332 phase-accumulator columns
+    for b in phase_buckets:
+        assert columns[b]['Type'] == 'int' and columns[b]['Null'] == 'NO' and columns[b]['Default'] == '0'
+    assert columns['last_transition_at']['Type'] == 'timestamp' and columns['last_transition_at']['Null'] == 'YES'
+    assert columns['instrumented']['Type'].startswith('tinyint') and columns['instrumented']['Default'] == '1'
+    assert columns['pre_pause_status']['Type'] == 'varchar(16)' and columns['pre_pause_status']['Null'] == 'YES'
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'

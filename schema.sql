@@ -186,6 +186,19 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     worktree_path   VARCHAR(512)    NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
+    -- Phase accumulators (req #2332). On each swarm_status change db.py adds
+    -- NOW()-last_transition_at to the bucket for the phase being left.
+    last_transition_at TIMESTAMP    NULL,
+    starting_secs   INT             NOT NULL DEFAULT 0,
+    waiting_secs    INT             NOT NULL DEFAULT 0,
+    planning_secs   INT             NOT NULL DEFAULT 0,
+    implementing_secs INT           NOT NULL DEFAULT 0,
+    review_secs     INT             NOT NULL DEFAULT 0,
+    completion_secs INT             NOT NULL DEFAULT 0,
+    paused_secs     INT             NOT NULL DEFAULT 0,
+    legacy_secs     INT             NOT NULL DEFAULT 0,  -- pre-instrumentation lump (instrumented=0)
+    instrumented    TINYINT         NOT NULL DEFAULT 1,
+    pre_pause_status VARCHAR(16)    NULL,                -- status before entering 'paused' (resume-restore)
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
