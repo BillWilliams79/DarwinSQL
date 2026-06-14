@@ -1,0 +1,44 @@
+-- 060_add_session_phase_tokens.sql
+--
+-- Req #2839: per-phase TOKEN consumption on swarm_sessions, mirroring the
+-- per-phase TIME accumulators added by migration 059 (req #2332) one-to-one.
+-- Goal: identify token COST by phase and display it next to the timing numbers
+-- on the swarm stats page.
+--
+-- Approach = Option A (sample-at-transition, symmetric with the *_secs engine).
+-- On every swarm_status change the caller supplies the session's CUMULATIVE
+-- token count; db.py diffs it against the stored tokens_at_last_transition and
+-- accrues the per-type delta into the bucket for the status being LEFT —
+-- exactly parallel to how NOW()-last_transition_at accrues into STATUS_BUCKET.
+--
+-- Storage = ONE JSON column (phase_tokens), NOT 28 discrete columns. Shape:
+--   { "<phase>": { "input": N, "cache_write": N, "cache_read": N, "output": N }, ... }
+-- where <phase> keys EXACTLY mirror the timing phase set the UI already uses
+-- (starting, waiting, planning, implementing, review, paused, completion) — no
+-- more, no less. All four token types are captured because the four are priced
+-- differently and the user wants COST per phase.
+--
+-- tokens_at_last_transition is the cumulative-token baseline the engine diffs
+-- against on the next transition (the token analogue of last_transition_at).
+-- Shape: { "input": N, "cache_write": N, "cache_read": N, "output": N }.
+--
+-- Both columns are SERVER-MANAGED (db.py), like the *_secs buckets and
+-- last_transition_at. Callers only set swarm_status (+ supply cumulative_tokens);
+-- they never write these columns directly.
+--
+-- ---------------------------------------------------------------------------
+-- Step 1: add the two JSON columns (additive, both NULL-default — existing
+--         INSERTs that omit them keep working).
+-- ---------------------------------------------------------------------------
+ALTER TABLE swarm_sessions
+    ADD COLUMN phase_tokens               JSON  NULL  AFTER pre_pause_status,
+    ADD COLUMN tokens_at_last_transition  JSON  NULL  AFTER phase_tokens;
+
+-- ---------------------------------------------------------------------------
+-- Step 2: NO backfill. Pre-existing rows have no token instrumentation, so we
+--         leave phase_tokens / tokens_at_last_transition NULL — no fabricated
+--         split, exactly parallel to migration 059's legacy_secs handling
+--         (the timing engine left pre-#2332 rows as instrumented=0 lumps and
+--         did NOT invent a per-phase breakdown). The frontend renders a missing
+--         phase_tokens as "no token data" rather than zero cost.
+-- ---------------------------------------------------------------------------
