@@ -206,6 +206,12 @@ CREATE TABLE swarm_sessions (
     legacy_secs     INT             NOT NULL DEFAULT 0,
     instrumented    TINYINT         NOT NULL DEFAULT 1,
     pre_pause_status VARCHAR(16)    NULL,
+    -- Per-phase TOKEN consumption (req #2839, migration 060). Parallel to the
+    -- *_secs timing buckets: on each swarm_status change db.py diffs the supplied
+    -- cumulative token count against tokens_at_last_transition and accrues the
+    -- per-type delta into the bucket for the phase being left.
+    phase_tokens    JSON            NULL,
+    tokens_at_last_transition JSON  NULL,
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
