@@ -668,6 +668,7 @@ CREATE TABLE branches (
     label_end           VARCHAR(128)    NULL,
     sort_order          SMALLINT        NULL,
     external_id         VARCHAR(64)     NULL,
+    acceptance_test_status VARCHAR(16)  NULL DEFAULT 'pass', -- single per-branch AT pass|fail — req #2633 / migration 061
     creator_fk          VARCHAR(64)     NOT NULL,
     create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -725,6 +726,36 @@ CREATE TABLE customer_releases (
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT uq_customer_releases_customer_build UNIQUE KEY (customer_fk, build_fk)
+);
+
+-- Req #2633: Acceptance Tests (AT). Catalog + branch junction (migration 061).
+CREATE TABLE acceptance_tests (
+    id                      INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title                   VARCHAR(256)    NOT NULL,
+    description             TEXT            NULL,
+    acceptance_test_status  VARCHAR(16)     NOT NULL DEFAULT 'pass',  -- pass|fail
+    expected_wall_mins      INT             NULL,                     -- user-set expected wall clock, minutes
+    closed                  TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order              SMALLINT        NULL,
+    creator_fk              VARCHAR(64)     NOT NULL,
+    create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_acceptance_tests_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE branch_acceptance_tests (
+    branch_fk           INT         NOT NULL,
+    acceptance_test_fk  INT         NOT NULL,
+    sort_order          SMALLINT    NULL,
+    PRIMARY KEY (branch_fk, acceptance_test_fk),
+    CONSTRAINT fk_bat_branch
+        FOREIGN KEY (branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_bat_acceptance_test
+        FOREIGN KEY (acceptance_test_fk) REFERENCES acceptance_tests (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
 );
 
 SET FOREIGN_KEY_CHECKS = 1;
