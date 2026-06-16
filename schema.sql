@@ -702,6 +702,7 @@ CREATE TABLE IF NOT EXISTS branches (
     label_end           VARCHAR(128)    NULL,
     sort_order          SMALLINT        NULL,
     external_id         VARCHAR(64)     NULL,     -- iframe slug ('main', 'release-1', 'dev-a') — req #2648 / migration 051
+    acceptance_test_status VARCHAR(16)  NULL DEFAULT 'pass', -- single per-branch AT pass|fail — req #2633 / migration 061
     creator_fk          VARCHAR(64)     NOT NULL,
     create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -762,5 +763,38 @@ CREATE TABLE IF NOT EXISTS customer_releases (
 );
 -- (Req #2606 directive: `closed` soft-delete column removed from every new
 -- build-feature table. Hard delete via FK CASCADE chain only.)
+
+-- Req #2633: Acceptance Tests (AT). Catalog + branch junction. Follows the
+-- build-viz CATALOG shape (mirrors `customers`: closed + sort_order, no
+-- category_fk). branches.acceptance_test_status (added above) is the single
+-- per-branch pass|fail. Migration 061. darwin_dev only.
+CREATE TABLE IF NOT EXISTS acceptance_tests (
+    id                      INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title                   VARCHAR(256)    NOT NULL,                 -- AT name, e.g. "Sprint AT"
+    description             TEXT            NULL,
+    acceptance_test_status  VARCHAR(16)     NOT NULL DEFAULT 'pass',  -- pass|fail (default pass)
+    expected_wall_mins      INT             NULL,                     -- user-set expected wall clock, minutes
+    closed                  TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order              SMALLINT        NULL,
+    creator_fk              VARCHAR(64)     NOT NULL,
+    create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_acceptance_tests_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS branch_acceptance_tests (
+    branch_fk           INT         NOT NULL,
+    acceptance_test_fk  INT         NOT NULL,
+    sort_order          SMALLINT    NULL,   -- per-branch AT label stacking order
+    PRIMARY KEY (branch_fk, acceptance_test_fk),
+    CONSTRAINT fk_bat_branch
+        FOREIGN KEY (branch_fk) REFERENCES branches (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_bat_acceptance_test
+        FOREIGN KEY (acceptance_test_fk) REFERENCES acceptance_tests (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
 
 SET FOREIGN_KEY_CHECKS = 1;

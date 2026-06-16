@@ -1568,6 +1568,8 @@ def test_table_count(db_connection):
         'customers',
         # Req #2606 — Build Visualizer data model
         'build_projects', 'branches', 'builds', 'customer_releases',
+        # Req #2633 — Acceptance Test data type (build-viz; darwin_dev only)
+        'acceptance_tests', 'branch_acceptance_tests',
         # Req #2719 — swarm-undo data type
         'swarm_undos',
         # Req #2497 — swarm-complete data type
@@ -1623,6 +1625,50 @@ def test_branches_columns(db_connection):
     assert 'segment_minor' not in cols
     assert 'segment_initial_build_number' not in cols
     assert 'closed' not in cols
+    # Req #2633: single per-branch Acceptance Test status (pass|fail, default pass).
+    assert cols['acceptance_test_status']['Null'] == 'YES'
+    assert 'varchar(16)' in cols['acceptance_test_status']['Type'].lower()
+    assert cols['acceptance_test_status']['Default'] == 'pass'
+
+
+def test_acceptance_tests_columns(db_connection):
+    """Req #2633: acceptance_tests catalog (build-viz CATALOG shape, mirrors
+    customers: closed + sort_order, NO category_fk). Adds acceptance_test_status
+    (pass|fail default pass) + expected_wall_mins."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'acceptance_tests')
+    expected = {'id', 'title', 'description', 'acceptance_test_status',
+                'expected_wall_mins', 'closed', 'sort_order', 'creator_fk',
+                'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+    assert cols['id']['Extra'] == 'auto_increment'
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['title']['Null'] == 'NO'
+    assert cols['description']['Null'] == 'YES'
+    assert 'varchar(16)' in cols['acceptance_test_status']['Type'].lower()
+    assert cols['acceptance_test_status']['Null'] == 'NO'
+    assert cols['acceptance_test_status']['Default'] == 'pass'
+    assert cols['expected_wall_mins']['Type'] == 'int'
+    assert cols['expected_wall_mins']['Null'] == 'YES'
+    assert cols['closed']['Type'] == 'tinyint(1)'
+    assert cols['closed']['Default'] == '0'
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Build-viz catalog convention: no category_fk.
+    assert 'category_fk' not in cols
+
+
+def test_branch_acceptance_tests_columns(db_connection):
+    """Req #2633: branch_acceptance_tests junction — composite PK, sort_order for
+    per-branch label stacking, no surrogate id / creator / timestamps."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'branch_acceptance_tests')
+    assert set(cols.keys()) == {'branch_fk', 'acceptance_test_fk', 'sort_order'}
+    assert cols['branch_fk']['Key'] == 'PRI'
+    assert cols['acceptance_test_fk']['Key'] == 'PRI'
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert 'id' not in cols
+    assert 'creator_fk' not in cols
 
 
 def test_builds_columns(db_connection):
