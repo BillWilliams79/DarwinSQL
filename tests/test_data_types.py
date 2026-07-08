@@ -403,6 +403,7 @@ def test_requirements_columns(db_connection):
     - create_ts: TIMESTAMP, NULL
     - update_ts: TIMESTAMP, NULL
     - coordination_type: VARCHAR(16), NOT NULL, DEFAULT 'implemented' (mandatory, req #2745)
+    - ai_model: VARCHAR(16), NOT NULL, DEFAULT 'opus'  (req #2909 — haiku|sonnet|opus|fable)
     - sort_order: SMALLINT, NULL, DEFAULT NULL  (req #2417 — in-card hand sort)
     - affected_repos: VARCHAR(255), NULL, DEFAULT NULL  (req #2583 — per-requirement repo override)
     """
@@ -423,6 +424,9 @@ def test_requirements_columns(db_connection):
     # affected_repos; the migration may not have landed in this DB yet).
     if 'affected_repos' in columns:
         expected_fields.append('affected_repos')
+    # Tolerate both pre- and post-migration-062 state (req #2909 added ai_model).
+    if 'ai_model' in columns:
+        expected_fields.append('ai_model')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -473,6 +477,11 @@ def test_requirements_columns(db_connection):
         assert columns['affected_repos']['Null'] == 'YES'
         assert columns['affected_repos']['Default'] is None
 
+    if 'ai_model' in columns:
+        assert columns['ai_model']['Type'] == 'varchar(16)'
+        assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
+        assert columns['ai_model']['Default'] == 'opus'
+
 
 def test_swarm_sessions_columns(db_connection):
     """Verify swarm_sessions column definitions match schema.sql.
@@ -486,6 +495,7 @@ def test_swarm_sessions_columns(db_connection):
     - title: VARCHAR(256), NULL
     - pr_url: VARCHAR(512), NULL
     - swarm_status: VARCHAR(16), NOT NULL, DEFAULT 'starting'
+    - ai_model: VARCHAR(16), NOT NULL, DEFAULT 'opus'          (req #2909)
     - worktree_path: VARCHAR(512), NULL
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
@@ -493,6 +503,8 @@ def test_swarm_sessions_columns(db_connection):
     - starting_secs..legacy_secs: INT, NOT NULL, DEFAULT 0     (req #2332, 8 buckets)
     - instrumented: TINYINT, NOT NULL, DEFAULT 1               (req #2332)
     - pre_pause_status: VARCHAR(16), NULL                      (req #2332)
+    - phase_tokens: JSON, NULL                                 (req #2839, migration 060)
+    - tokens_at_last_transition: JSON, NULL                    (req #2839, migration 060)
     - start_summary: TEXT, NULL
     - complete_summary: TEXT, NULL
     - telemetry: TEXT, NULL
@@ -511,9 +523,24 @@ def test_swarm_sessions_columns(db_connection):
                        'title', 'pr_url', 'swarm_status', 'worktree_path',
                        'started_at', 'completed_at',
                        'last_transition_at'] + phase_buckets + ['instrumented', 'pre_pause_status',
+                       'phase_tokens', 'tokens_at_last_transition',
                        'start_summary', 'complete_summary', 'telemetry', 'plan',
                        'creator_fk', 'create_ts', 'update_ts']
+    # Tolerate both pre- and post-migration-062 state (req #2909 added ai_model).
+    if 'ai_model' in columns:
+        expected_fields.append('ai_model')
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #2839 token columns (migration 060)
+    assert columns['phase_tokens']['Type'] == 'json'
+    assert columns['phase_tokens']['Null'] == 'YES'
+    assert columns['tokens_at_last_transition']['Type'] == 'json'
+    assert columns['tokens_at_last_transition']['Null'] == 'YES'
+
+    if 'ai_model' in columns:
+        assert columns['ai_model']['Type'] == 'varchar(16)'
+        assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
+        assert columns['ai_model']['Default'] == 'opus'
 
     # req #2332 phase-accumulator columns
     for b in phase_buckets:
