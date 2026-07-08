@@ -427,6 +427,9 @@ def test_requirements_columns(db_connection):
     # Tolerate both pre- and post-migration-062 state (req #2909 added ai_model).
     if 'ai_model' in columns:
         expected_fields.append('ai_model')
+    # Tolerate both pre- and post-migration-063 state (req #2916 added effort).
+    if 'effort' in columns:
+        expected_fields.append('effort')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -482,6 +485,11 @@ def test_requirements_columns(db_connection):
         assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
         assert columns['ai_model']['Default'] == 'opus'
 
+    if 'effort' in columns:
+        assert columns['effort']['Type'] == 'varchar(16)'
+        assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
+        assert columns['effort']['Default'] == 'xhigh'
+
 
 def test_swarm_sessions_columns(db_connection):
     """Verify swarm_sessions column definitions match schema.sql.
@@ -529,6 +537,9 @@ def test_swarm_sessions_columns(db_connection):
     # Tolerate both pre- and post-migration-062 state (req #2909 added ai_model).
     if 'ai_model' in columns:
         expected_fields.append('ai_model')
+    # Tolerate both pre- and post-migration-063 state (req #2916 added effort).
+    if 'effort' in columns:
+        expected_fields.append('effort')
     assert set(columns.keys()) == set(expected_fields)
 
     # req #2839 token columns (migration 060)
@@ -541,6 +552,11 @@ def test_swarm_sessions_columns(db_connection):
         assert columns['ai_model']['Type'] == 'varchar(16)'
         assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
         assert columns['ai_model']['Default'] == 'opus'
+
+    if 'effort' in columns:
+        assert columns['effort']['Type'] == 'varchar(16)'
+        assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
+        assert columns['effort']['Default'] == 'xhigh'
 
     # req #2332 phase-accumulator columns
     for b in phase_buckets:

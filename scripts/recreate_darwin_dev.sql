@@ -166,6 +166,8 @@ CREATE TABLE requirements (
                                             -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
     ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
                                             -- haiku | sonnet | opus | fable (req #2909; default: opus)
+    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
+                                            -- low | medium | high | xhigh | ultracode (req #2916; default: xhigh)
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
@@ -195,6 +197,8 @@ CREATE TABLE swarm_sessions (
     swarm_status    VARCHAR(16)     NOT NULL DEFAULT 'starting',
     ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
                                             -- haiku | sonnet | opus | fable (req #2909; captured at launch, default: opus)
+    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
+                                            -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
     worktree_path   VARCHAR(512)    NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
