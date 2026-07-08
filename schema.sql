@@ -154,6 +154,8 @@ CREATE TABLE IF NOT EXISTS requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
                                             -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
+    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
+                                            -- haiku | sonnet | opus | fable (req #2909; default: opus, pre-#2909 rows assumed opus)
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
@@ -183,6 +185,8 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     title           VARCHAR(256)    NULL,
     pr_url          VARCHAR(512)    NULL,
     swarm_status    VARCHAR(16)     NOT NULL DEFAULT 'starting',
+    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
+                                            -- haiku | sonnet | opus | fable (req #2909; captured at launch, default: opus)
     worktree_path   VARCHAR(512)    NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
