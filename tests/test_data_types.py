@@ -652,6 +652,8 @@ def test_swarm_starts_columns(db_connection):
     - autonomy_filter: VARCHAR(16), NULL
     - auto_start: TINYINT(1), NOT NULL, DEFAULT 0
     - session_count: INT, NOT NULL, DEFAULT 0
+    - ai_model: VARCHAR(16), NOT NULL, DEFAULT 'opus' (req #2949)
+    - effort: VARCHAR(16), NOT NULL, DEFAULT 'high' (req #2949)
     - tokens_input / tokens_cache_write / tokens_cache_read / tokens_output: INT, NULL
     - wall_seconds: INT, NULL
     - turn_count: INT, NULL
@@ -666,7 +668,7 @@ def test_swarm_starts_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = ['id', 'arguments', 'autonomy_filter',
-                       'auto_start', 'session_count',
+                       'auto_start', 'session_count', 'ai_model', 'effort',
                        'tokens_input', 'tokens_cache_write', 'tokens_cache_read',
                        'tokens_output', 'wall_seconds', 'turn_count',
                        'start_summary', 'telemetry',
@@ -699,6 +701,15 @@ def test_swarm_starts_columns(db_connection):
     assert columns['session_count']['Type'] == 'int'
     assert columns['session_count']['Null'] == 'NO'
     assert columns['session_count']['Default'] == '0'
+
+    # req #2949 — normalized, queryable copy of the telemetry blob's model/effort.
+    assert columns['ai_model']['Type'] == 'varchar(16)'
+    assert columns['ai_model']['Null'] == 'NO'
+    assert columns['ai_model']['Default'] == 'opus'
+
+    assert columns['effort']['Type'] == 'varchar(16)'
+    assert columns['effort']['Null'] == 'NO'
+    assert columns['effort']['Default'] == 'high'
 
     # Token / timing / count columns are NULL until skill-finalize populates them.
     for col in ('tokens_input', 'tokens_cache_write', 'tokens_cache_read',
@@ -811,6 +822,8 @@ def test_swarm_completes_columns(db_connection):
     - coordination_type: VARCHAR(16), NULL (NULL for primary-ai-swarm-complete)
     - status: VARCHAR(16), NOT NULL, DEFAULT 'in_progress'
     - session_count: INT, NOT NULL, DEFAULT 0
+    - ai_model: VARCHAR(16), NOT NULL, DEFAULT 'opus' (req #2949)
+    - effort: VARCHAR(16), NOT NULL, DEFAULT 'high' (req #2949)
     - tokens_input / tokens_cache_write / tokens_cache_read / tokens_output: INT, NULL
     - wall_seconds: INT, NULL
     - turn_count: INT, NULL
@@ -826,7 +839,7 @@ def test_swarm_completes_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = ['id', 'skill_name', 'coordination_type',
-                       'status', 'session_count',
+                       'status', 'session_count', 'ai_model', 'effort',
                        'tokens_input', 'tokens_cache_write', 'tokens_cache_read',
                        'tokens_output', 'wall_seconds', 'turn_count',
                        'complete_summary', 'telemetry',
@@ -851,6 +864,15 @@ def test_swarm_completes_columns(db_connection):
     assert columns['session_count']['Type'] == 'int'
     assert columns['session_count']['Null'] == 'NO'
     assert columns['session_count']['Default'] == '0'
+
+    # req #2949 — normalized, queryable copy of the telemetry blob's model/effort.
+    assert columns['ai_model']['Type'] == 'varchar(16)'
+    assert columns['ai_model']['Null'] == 'NO'
+    assert columns['ai_model']['Default'] == 'opus'
+
+    assert columns['effort']['Type'] == 'varchar(16)'
+    assert columns['effort']['Null'] == 'NO'
+    assert columns['effort']['Default'] == 'high'
 
     # Token / timing / count columns are NULL until the skill's finalize populates them.
     for col in ('tokens_input', 'tokens_cache_write', 'tokens_cache_read',
