@@ -91,6 +91,11 @@ def seed_test_profile(db_connection, test_creator_fk):
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #2943: swarm_starts + machines. machine_fk is ON DELETE RESTRICT on
+        # dev_servers/swarm_sessions/swarm_starts, so machines must be deleted
+        # AFTER those three (all cleared just above) to satisfy the constraint.
+        cur.execute("DELETE FROM swarm_starts WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM machines WHERE creator_fk = %s", (test_creator_fk,))
         # Req #2380: features/test_cases/test_plans RESTRICT on categories,
         # so delete these BEFORE categories. test_results and test_runs also
         # clean up explicitly to handle tests that commit mid-run.

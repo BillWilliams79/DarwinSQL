@@ -4,6 +4,8 @@ Test FK constraints, NOT NULL constraints, unique constraints, and defaults.
 Tests verify that database constraints prevent invalid data entry.
 Each test uses transactions with rollback to keep darwin_dev test DB clean.
 """
+import uuid
+
 import pymysql
 import pytest
 
@@ -1041,4 +1043,131 @@ def test_feature_test_cases_composite_pk(db_connection, test_creator_fk, test_ca
                 "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
                 (f_id, tc_id)
             )
+    db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #2943 — machines registry constraints
+# ---------------------------------------------------------------------------
+
+def _insert_machine(cur, creator_fk, hostname, title=None, platform='darwin',
+                    arch='arm64'):
+    """Insert a machines row and return its id. All-NOT-NULL fields supplied."""
+    cur.execute(
+        "INSERT INTO machines (title, hostname, platform, arch, creator_fk) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (title or hostname, hostname, platform, arch, creator_fk),
+    )
+    cur.execute("SELECT LAST_INSERT_ID() AS id")
+    return cur.fetchone()['id']
+
+
+def test_machines_hostname_unique(db_connection, test_creator_fk):
+    """uq_machines_hostname: a second machine with the same hostname → IntegrityError.
+
+    hostname is the auto-registration match key; duplicates must be rejected so
+    machine-identity.sh can rely on it to repair a wiped cache without creating a
+    duplicate row."""
+    with db_connection.cursor() as cur:
+        _insert_machine(cur, test_creator_fk, 'dup-host.local')
+        with pytest.raises(pymysql.IntegrityError):
+            _insert_machine(cur, test_creator_fk, 'dup-host.local', title='other')
+    db_connection.rollback()
+
+
+def test_machine_fk_restrict_swarm_sessions(db_connection, test_creator_fk):
+    """swarm_sessions.machine_fk is ON DELETE RESTRICT: deleting a machine that a
+    session references must fail (retire via `closed`, don't hard-delete)."""
+    with db_connection.cursor() as cur:
+        mid = _insert_machine(cur, test_creator_fk, 'restrict-sess.local')
+        cur.execute(
+            "INSERT INTO swarm_sessions (task_name, swarm_status, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('m-restrict-sess', 'active', mid, test_creator_fk),
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM machines WHERE id = %s", (mid,))
+    db_connection.rollback()
+
+
+def test_machine_fk_restrict_swarm_starts(db_connection, test_creator_fk):
+    """swarm_starts.machine_fk is ON DELETE RESTRICT."""
+    with db_connection.cursor() as cur:
+        mid = _insert_machine(cur, test_creator_fk, 'restrict-start.local')
+        cur.execute(
+            "INSERT INTO swarm_starts (arguments, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('m-restrict-start', mid, test_creator_fk),
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM machines WHERE id = %s", (mid,))
+    db_connection.rollback()
+
+
+def test_machine_fk_restrict_dev_servers(db_connection, test_creator_fk):
+    """dev_servers.machine_fk is ON DELETE RESTRICT."""
+    with db_connection.cursor() as cur:
+        mid = _insert_machine(cur, test_creator_fk, 'restrict-dev.local')
+        cur.execute(
+            "INSERT INTO dev_servers (port, pid, workspace_path, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (3000, 111, '/tmp/ws', mid, test_creator_fk),
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM machines WHERE id = %s", (mid,))
+    db_connection.rollback()
+
+
+def test_machine_fk_invalid_reference(db_connection, test_creator_fk):
+    """A swarm_session referencing a non-existent machine_fk → IntegrityError."""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO swarm_sessions (task_name, swarm_status, machine_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                ('m-bad-fk', 'active', 999999999, test_creator_fk),
+            )
+    db_connection.rollback()
+
+
+def test_dev_servers_uq_machine_port(db_connection, test_creator_fk):
+    """uq_machine_port(machine_fk, port): the SAME port is allowed on two DIFFERENT
+    machines (ports are machine-local — the whole point of req #2943), but a
+    DUPLICATE port on the SAME machine is rejected."""
+    with db_connection.cursor() as cur:
+        m1 = _insert_machine(cur, test_creator_fk, 'port-a.local')
+        m2 = _insert_machine(cur, test_creator_fk, 'port-b.local')
+        # Port 3005 on machine 1.
+        cur.execute(
+            "INSERT INTO dev_servers (port, pid, workspace_path, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (3005, 201, '/tmp/a', m1, test_creator_fk),
+        )
+        # SAME port 3005 on machine 2 → allowed (no false cross-machine contention).
+        cur.execute(
+            "INSERT INTO dev_servers (port, pid, workspace_path, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (3005, 202, '/tmp/b', m2, test_creator_fk),
+        )
+        # DUPLICATE port 3005 on machine 1 → rejected.
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO dev_servers (port, pid, workspace_path, machine_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (3005, 203, '/tmp/c', m1, test_creator_fk),
+            )
+    db_connection.rollback()
+
+
+def test_machines_creator_fk_cascade(db_connection):
+    """machines.creator_fk is ON DELETE CASCADE — deleting the owning profile
+    removes the machine (profile removal takes all owned data)."""
+    cfk = f"schema-test-mach-{uuid.uuid4().hex[:8]}"
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+                    (cfk, 'Mach Cascade', 'mc@test.com'))
+        _insert_machine(cur, cfk, 'cascade-host.local')
+        cur.execute("DELETE FROM profiles WHERE id = %s", (cfk,))
+        cur.execute("SELECT COUNT(*) AS c FROM machines WHERE creator_fk = %s", (cfk,))
+        assert cur.fetchone()['c'] == 0
     db_connection.rollback()

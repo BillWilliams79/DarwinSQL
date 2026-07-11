@@ -175,6 +175,35 @@ CREATE TABLE IF NOT EXISTS requirements (
 );
 
 -- ============================================================================
+-- Machine registry (req #2943)
+-- ============================================================================
+-- Content table: which machine (Mac mini / WSL box / …) ran a swarm_session,
+-- swarm_start, or dev_server claim. Auto-registered on first swarm activity by
+-- scripts/swarm/machine-identity.sh (matched by UNIQUE hostname). Defined BEFORE
+-- the execution tables so their machine_fk FKs resolve on a fresh schema run.
+-- No category_fk — infrastructure entity, not categorized.
+CREATE TABLE IF NOT EXISTS machines (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title        VARCHAR(256) NOT NULL,           -- friendly name; auto-registration seeds it with hostname
+    description  TEXT         NULL,
+    hostname     VARCHAR(128) NOT NULL,           -- auto-detected; the auto-match key; UNIQUE
+    platform     VARCHAR(16)  NOT NULL,           -- darwin | wsl | linux
+    arch         VARCHAR(16)  NOT NULL,           -- arm64 | x86_64
+    os_version   VARCHAR(64)  NULL,               -- sw_vers (macOS) / os-release PRETTY_NAME (Linux/WSL)
+    hw_model     VARCHAR(64)  NULL,               -- sysctl hw.model (macOS) / best-effort WSL; NULL when unavailable
+    last_seen_at TIMESTAMP    NULL,               -- auto-updated on each identity resolution
+    closed       TINYINT(1)   NOT NULL DEFAULT 0, -- retire a machine
+    sort_order   SMALLINT     NULL,
+    creator_fk   VARCHAR(64)  NOT NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_machines_hostname (hostname),
+    CONSTRAINT fk_machines_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
 -- Swarm session management
 -- ============================================================================
 
@@ -192,6 +221,7 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
     worktree_path   VARCHAR(512)    NULL,
+    machine_fk      INT             NULL,          -- req #2943; which machine ran this session
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332). On each swarm_status change db.py adds
@@ -226,7 +256,10 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_sessions_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS requirement_sessions (
@@ -252,6 +285,7 @@ CREATE TABLE IF NOT EXISTS swarm_starts (
     autonomy_filter     VARCHAR(16)     NULL,
     auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
     session_count       INT             NOT NULL DEFAULT 0,
+    machine_fk          INT             NULL,          -- req #2943; which machine ran this start
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,
@@ -266,7 +300,10 @@ CREATE TABLE IF NOT EXISTS swarm_starts (
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_swarm_starts_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_starts_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS swarm_start_sessions (
@@ -371,17 +408,23 @@ CREATE TABLE IF NOT EXISTS dev_servers (
     terminal_number SMALLINT        NULL,
     workspace_path  VARCHAR(512)    NOT NULL,
     session_fk      INT             NULL,
+    machine_fk      INT             NULL,          -- req #2943; which machine hosts this dev server
     creator_fk      VARCHAR(64)     NOT NULL,
     started_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_port (port),
+    -- req #2943: ports are machine-local; per-machine uniqueness replaces the
+    -- old global uq_port so two machines don't falsely contend for 3000-3007.
+    UNIQUE KEY uq_machine_port (machine_fk, port),
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)
-        ON UPDATE CASCADE ON DELETE SET NULL
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_dev_servers_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 -- ============================================================================

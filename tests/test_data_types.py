@@ -540,7 +540,16 @@ def test_swarm_sessions_columns(db_connection):
     # Tolerate both pre- and post-migration-063 state (req #2916 added effort).
     if 'effort' in columns:
         expected_fields.append('effort')
+    # Tolerate both pre- and post-migration-064 state (req #2943 added machine_fk).
+    if 'machine_fk' in columns:
+        expected_fields.append('machine_fk')
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #2943 machine_fk (migration 064) — nullable FK, no default.
+    if 'machine_fk' in columns:
+        assert columns['machine_fk']['Type'] == 'int'
+        assert columns['machine_fk']['Null'] == 'YES'
+        assert columns['machine_fk']['Key'] == 'MUL'
 
     # req #2839 token columns (migration 060)
     assert columns['phase_tokens']['Type'] == 'json'
@@ -662,11 +671,20 @@ def test_swarm_starts_columns(db_connection):
                        'tokens_output', 'wall_seconds', 'turn_count',
                        'start_summary', 'telemetry',
                        'started_at', 'creator_fk', 'create_ts', 'update_ts']
+    # Tolerate both pre- and post-migration-064 state (req #2943 added machine_fk).
+    if 'machine_fk' in columns:
+        expected_fields.append('machine_fk')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'
     assert columns['id']['Extra'] == 'auto_increment'
+
+    # req #2943 machine_fk (migration 064) — nullable FK, no default.
+    if 'machine_fk' in columns:
+        assert columns['machine_fk']['Type'] == 'int'
+        assert columns['machine_fk']['Null'] == 'YES'
+        assert columns['machine_fk']['Key'] == 'MUL'
 
     assert columns['arguments']['Type'] == 'varchar(512)'
     assert columns['arguments']['Null'] == 'YES'
@@ -890,6 +908,7 @@ def test_dev_servers_columns(db_connection):
     - terminal_number: SMALLINT, NULL (req #2419)
     - workspace_path: VARCHAR(512), NOT NULL
     - session_fk: INT, NULL, MUL
+    - machine_fk: INT, NULL, MUL (req #2943 — first column of uq_machine_port)
     - creator_fk: VARCHAR(64), NOT NULL, MUL
     - started_at: TIMESTAMP, NOT NULL
     - create_ts: TIMESTAMP, NULL
@@ -900,7 +919,8 @@ def test_dev_servers_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = ['id', 'port', 'pid', 'terminal_number', 'workspace_path',
-                       'session_fk', 'creator_fk', 'started_at', 'create_ts', 'update_ts']
+                       'session_fk', 'machine_fk', 'creator_fk', 'started_at',
+                       'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -909,7 +929,10 @@ def test_dev_servers_columns(db_connection):
 
     assert columns['port']['Type'] == 'smallint'
     assert columns['port']['Null'] == 'NO'
-    assert columns['port']['Key'] == 'UNI'
+    # Req #2943: port is no longer globally UNIQUE — it is the SECOND column of
+    # the composite uq_machine_port(machine_fk, port), so it reports no Key here
+    # (only the leading column of an index shows in DESCRIBE).
+    assert columns['port']['Key'] == ''
 
     assert columns['terminal_number']['Type'] == 'smallint'
     assert columns['terminal_number']['Null'] == 'YES'
@@ -923,6 +946,11 @@ def test_dev_servers_columns(db_connection):
     assert columns['session_fk']['Type'] == 'int'
     assert columns['session_fk']['Null'] == 'YES'
     assert columns['session_fk']['Key'] == 'MUL'
+
+    # Req #2943 — machine_fk: nullable FK, leading column of uq_machine_port.
+    assert columns['machine_fk']['Type'] == 'int'
+    assert columns['machine_fk']['Null'] == 'YES'
+    assert columns['machine_fk']['Key'] == 'MUL'
 
     assert columns['creator_fk']['Type'] == 'varchar(64)'
     assert columns['creator_fk']['Null'] == 'NO'
@@ -1617,6 +1645,8 @@ def test_table_count(db_connection):
         'swarm_undos',
         # Req #2497 — swarm-complete data type
         'swarm_completes', 'swarm_complete_sessions',
+        # Req #2943 — machine registry
+        'machines',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -1712,6 +1742,61 @@ def test_branch_acceptance_tests_columns(db_connection):
     assert cols['sort_order']['Type'] == 'smallint'
     assert 'id' not in cols
     assert 'creator_fk' not in cols
+
+
+def test_machines_columns(db_connection):
+    """Req #2943: machines registry — content-table baseline (id/title/description/
+    closed/sort_order/creator_fk/timestamps) PLUS the auto-detected identity
+    columns. No category_fk (infrastructure entity). hostname is UNIQUE (the
+    auto-match key). platform/arch NOT NULL; os_version/hw_model/last_seen_at NULL."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'machines')
+    expected = {'id', 'title', 'description', 'hostname', 'platform', 'arch',
+                'os_version', 'hw_model', 'last_seen_at', 'closed', 'sort_order',
+                'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    assert cols['id']['Type'] == 'int'
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['title']['Null'] == 'NO'
+
+    assert cols['description']['Type'] == 'text'
+    assert cols['description']['Null'] == 'YES'
+
+    # hostname is the auto-match key — NOT NULL + UNIQUE.
+    assert cols['hostname']['Type'] == 'varchar(128)'
+    assert cols['hostname']['Null'] == 'NO'
+    assert cols['hostname']['Key'] == 'UNI'
+
+    assert cols['platform']['Type'] == 'varchar(16)'
+    assert cols['platform']['Null'] == 'NO'
+    assert cols['arch']['Type'] == 'varchar(16)'
+    assert cols['arch']['Null'] == 'NO'
+
+    # Auto best-effort identity facts — nullable.
+    assert cols['os_version']['Type'] == 'varchar(64)'
+    assert cols['os_version']['Null'] == 'YES'
+    assert cols['hw_model']['Type'] == 'varchar(64)'
+    assert cols['hw_model']['Null'] == 'YES'
+    assert 'timestamp' in cols['last_seen_at']['Type']
+    assert cols['last_seen_at']['Null'] == 'YES'
+
+    # Content-table baseline soft-delete + hand-sort.
+    assert cols['closed']['Type'] == 'tinyint(1)'
+    assert cols['closed']['Null'] == 'NO'
+    assert cols['closed']['Default'] == '0'
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['sort_order']['Null'] == 'YES'
+
+    assert cols['creator_fk']['Type'] == 'varchar(64)'
+    assert cols['creator_fk']['Null'] == 'NO'
+    assert cols['creator_fk']['Key'] == 'MUL'
+
+    # Infrastructure entity — deliberately no category_fk.
+    assert 'category_fk' not in cols
 
 
 def test_builds_columns(db_connection):
