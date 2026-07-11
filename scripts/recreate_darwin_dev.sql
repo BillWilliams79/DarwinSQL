@@ -17,7 +17,7 @@ DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
     swarm_undos,
     swarm_start_sessions, swarm_starts,
     requirement_sessions,
-    requirements, swarm_sessions, categories, projects,
+    requirements, swarm_sessions, machines, categories, projects,
     tasks, recurring_tasks, areas, domains, profiles;
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -184,6 +184,29 @@ CREATE TABLE requirements (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- Machine registry (req #2943) — created before the execution tables that
+-- reference it via machine_fk.
+CREATE TABLE machines (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title        VARCHAR(256) NOT NULL,
+    description  TEXT         NULL,
+    hostname     VARCHAR(128) NOT NULL,
+    platform     VARCHAR(16)  NOT NULL,           -- darwin | wsl | linux
+    arch         VARCHAR(16)  NOT NULL,           -- arm64 | x86_64
+    os_version   VARCHAR(64)  NULL,
+    hw_model     VARCHAR(64)  NULL,
+    last_seen_at TIMESTAMP    NULL,
+    closed       TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order   SMALLINT     NULL,
+    creator_fk   VARCHAR(64)  NOT NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_machines_hostname (hostname),
+    CONSTRAINT fk_machines_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 -- Swarm session management
 
 CREATE TABLE swarm_sessions (
@@ -200,6 +223,7 @@ CREATE TABLE swarm_sessions (
     effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
     worktree_path   VARCHAR(512)    NULL,
+    machine_fk      INT             NULL,          -- req #2943
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332, migration 059)
@@ -229,7 +253,10 @@ CREATE TABLE swarm_sessions (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_sessions_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE requirement_sessions (
@@ -250,6 +277,7 @@ CREATE TABLE swarm_starts (
     autonomy_filter     VARCHAR(16)     NULL,
     auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
     session_count       INT             NOT NULL DEFAULT 0,
+    machine_fk          INT             NULL,          -- req #2943
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,
@@ -264,7 +292,10 @@ CREATE TABLE swarm_starts (
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_swarm_starts_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_starts_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE swarm_start_sessions (
@@ -353,17 +384,22 @@ CREATE TABLE dev_servers (
     terminal_number SMALLINT        NULL,
     workspace_path  VARCHAR(512)    NOT NULL,
     session_fk      INT             NULL,
+    machine_fk      INT             NULL,          -- req #2943
     creator_fk      VARCHAR(64)     NOT NULL,
     started_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_port (port),
+    -- req #2943: per-machine port uniqueness (ports are machine-local)
+    UNIQUE KEY uq_machine_port (machine_fk, port),
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (session_fk)
         REFERENCES swarm_sessions (id)
-        ON UPDATE CASCADE ON DELETE SET NULL
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_dev_servers_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 -- Priority card hand-sort order

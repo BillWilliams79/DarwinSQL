@@ -95,6 +95,11 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'recurring_tasks',
         'map_partners',
         'dev_servers',
+        # Req #2943 — machine registry (migration 064). No partial-match conflict
+        # with the machine_fk column or uq_machine_port key (the \b lookahead
+        # stops the regex at `machines` only when followed by _ibfk or a word
+        # boundary, not the `_fk`/`_port`/`_hostname` suffixes).
+        'machines',
         'requirements',
         'priorities',            # pre-038 name (for RENAME TABLE in migration 038)
         'categories',
@@ -164,6 +169,11 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 058 — swarm_completes
         'fk_swarm_completes_creator',
         'fk_scs_swarm_complete', 'fk_scs_session',
+        # Migration 064 — machines registry (req #2943)
+        'fk_machines_creator',
+        'fk_swarm_sessions_machine', 'fk_swarm_starts_machine',
+        'fk_dev_servers_machine',
+        'uq_machines_hostname', 'uq_machine_port',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -251,6 +261,9 @@ ALL_TABLE_SUFFIXES = [
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers',
+    # Req #2943 — machines (dropped with FK_CHECKS=0, so order is not critical;
+    # placed among the leaves for readability).
+    'machines',
     # Req #2606 — Build Visualizer (migrations 050-054). FK-safe order: leaves
     # first — customer_releases → builds → branches → build_projects (the
     # build_projects<->branches circular FK is handled by FK_CHECKS=0 in cleanup).
@@ -429,6 +442,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'swarm_undos',
             # Req #2497 — swarm-complete data type (migration 058)
             'swarm_completes', 'swarm_complete_sessions',
+            # Req #2943 — machine registry (migration 064)
+            'machines',
         ]
     }
     assert tables == expected_tables, \
