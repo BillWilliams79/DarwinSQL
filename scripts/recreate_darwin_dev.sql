@@ -277,6 +277,8 @@ CREATE TABLE swarm_starts (
     autonomy_filter     VARCHAR(16)     NULL,
     auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
     session_count       INT             NOT NULL DEFAULT 0,
+    ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',  -- req #2949
+    effort              VARCHAR(16)     NOT NULL DEFAULT 'high',  -- req #2949
     machine_fk          INT             NULL,          -- req #2943
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
@@ -316,6 +318,8 @@ CREATE TABLE swarm_completes (
     coordination_type   VARCHAR(16)     NULL,
     status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
     session_count       INT             NOT NULL DEFAULT 0,
+    ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',  -- req #2949
+    effort              VARCHAR(16)     NOT NULL DEFAULT 'high',  -- req #2949
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,

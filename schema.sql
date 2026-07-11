@@ -279,12 +279,16 @@ CREATE TABLE IF NOT EXISTS requirement_sessions (
 -- (a launch can span categories), no title (arguments string is the label).
 -- Token / wall / turn / summary / telemetry columns are NULL until skill-finalize
 -- captures them at end-of-run; populated via update_swarm_start.
+-- ai_model/effort (req #2949, migration 065): normalized, queryable copy of
+-- the same fact buried in the telemetry JSON blob — mirrors swarm_sessions.
 CREATE TABLE IF NOT EXISTS swarm_starts (
     id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     arguments           VARCHAR(512)    NULL,
     autonomy_filter     VARCHAR(16)     NULL,
     auto_start          TINYINT(1)      NOT NULL DEFAULT 0,
     session_count       INT             NOT NULL DEFAULT 0,
+    ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',
+    effort              VARCHAR(16)     NOT NULL DEFAULT 'high',
     machine_fk          INT             NULL,          -- req #2943; which machine ran this start
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
@@ -327,12 +331,16 @@ CREATE TABLE IF NOT EXISTS swarm_start_sessions (
 -- complete_summary (mirrors swarm_sessions.complete_summary). Token / wall / turn
 -- / summary / telemetry columns are NULL until the skill's finalize step writes
 -- them via update_swarm_complete.
+-- ai_model/effort (req #2949, migration 065): normalized, queryable copy of
+-- the same fact buried in the telemetry JSON blob — mirrors swarm_starts.
 CREATE TABLE IF NOT EXISTS swarm_completes (
     id                  INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     skill_name          VARCHAR(64)     NOT NULL,
     coordination_type   VARCHAR(16)     NULL,
     status              VARCHAR(16)     NOT NULL DEFAULT 'in_progress',
     session_count       INT             NOT NULL DEFAULT 0,
+    ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',
+    effort              VARCHAR(16)     NOT NULL DEFAULT 'high',
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,
