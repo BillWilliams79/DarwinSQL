@@ -1118,6 +1118,54 @@ def test_machine_fk_restrict_dev_servers(db_connection, test_creator_fk):
     db_connection.rollback()
 
 
+def test_machine_fk_restrict_requirements(db_connection, test_creator_fk, test_category_id):
+    """requirements.machine_fk is ON DELETE RESTRICT (req #2978, migration 066).
+
+    A machine PINNED BY a requirement cannot be hard-deleted — retire it via
+    closed=1 instead. This is the fourth referencing table alongside the three
+    execution tables from req #2943, and the MCP delete_machine guard message
+    names it.
+    """
+    with db_connection.cursor() as cur:
+        mid = _insert_machine(cur, test_creator_fk, 'restrict-req.local')
+        cur.execute(
+            "INSERT INTO requirements (title, machine_fk, creator_fk, category_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            ('m-restrict-req', mid, test_creator_fk, test_category_id),
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM machines WHERE id = %s", (mid,))
+    db_connection.rollback()
+
+
+def test_requirement_machine_fk_defaults_null(db_connection, test_creator_fk, test_category_id):
+    """A requirement created without machine_fk is NULL = "Any machine" (req #2978).
+
+    This is what makes migration 066 backfill-free: every pre-existing and every
+    newly-created requirement is "Any" unless explicitly pinned.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('m-default-any', test_creator_fk, test_category_id),
+        )
+        cur.execute("SELECT machine_fk FROM requirements WHERE id = LAST_INSERT_ID()")
+        assert cur.fetchone()['machine_fk'] is None
+    db_connection.rollback()
+
+
+def test_requirement_machine_fk_invalid_reference(db_connection, test_creator_fk, test_category_id):
+    """A requirement referencing a non-existent machine_fk → IntegrityError."""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO requirements (title, machine_fk, creator_fk, category_fk) "
+                "VALUES (%s, %s, %s, %s)",
+                ('m-req-bad-fk', 999999999, test_creator_fk, test_category_id),
+            )
+    db_connection.rollback()
+
+
 def test_machine_fk_invalid_reference(db_connection, test_creator_fk):
     """A swarm_session referencing a non-existent machine_fk → IntegrityError."""
     with db_connection.cursor() as cur:

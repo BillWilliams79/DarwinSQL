@@ -138,42 +138,6 @@ CREATE TABLE IF NOT EXISTS categories (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS requirements (
-    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256)    NOT NULL,
-    description     TEXT            NULL,
-    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
-                                            -- authoring | approved | swarm_ready | development | met | deferred | wontfix
-    started_at      TIMESTAMP       NULL,
-    completed_at    TIMESTAMP       NULL,
-    deferred_at     TIMESTAMP       NULL,
-    project_fk      INT             NULL,
-    category_fk     INT             NOT NULL,
-    creator_fk      VARCHAR(64)     NOT NULL,
-    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
-                                            -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
-    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
-                                            -- haiku | sonnet | opus | fable (req #2909; default: opus, pre-#2909 rows assumed opus)
-    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
-                                            -- low | medium | high | xhigh | ultracode (req #2916; default: xhigh, pre-#2916 rows assumed high)
-    sort_order      SMALLINT        NULL DEFAULT NULL,
-                                            -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
-    affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
-                                            -- comma-separated sub-repo override (req #2583); NULL = use category default
-    FOREIGN KEY (project_fk)
-        REFERENCES projects (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_requirements_category
-        FOREIGN KEY (category_fk)
-        REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    FOREIGN KEY (creator_fk)
-        REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
 -- ============================================================================
 -- Machine registry (req #2943)
 -- ============================================================================
@@ -200,6 +164,48 @@ CREATE TABLE IF NOT EXISTS machines (
     UNIQUE KEY uq_machines_hostname (hostname),
     CONSTRAINT fk_machines_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS requirements (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NULL,
+    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
+                                            -- authoring | approved | swarm_ready | development | met | deferred | wontfix
+    started_at      TIMESTAMP       NULL,
+    completed_at    TIMESTAMP       NULL,
+    deferred_at     TIMESTAMP       NULL,
+    project_fk      INT             NULL,
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
+                                            -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
+    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
+                                            -- haiku | sonnet | opus | fable (req #2909; default: opus, pre-#2909 rows assumed opus)
+    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
+                                            -- low | medium | high | xhigh | ultracode (req #2916; default: xhigh, pre-#2916 rows assumed high)
+    sort_order      SMALLINT        NULL DEFAULT NULL,
+                                            -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
+    affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
+                                            -- comma-separated sub-repo override (req #2583); NULL = use category default
+    machine_fk      INT             NULL DEFAULT NULL,
+                                            -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
+    FOREIGN KEY (project_fk)
+        REFERENCES projects (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_requirements_category
+        FOREIGN KEY (category_fk)
+        REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_requirements_machine
+        FOREIGN KEY (machine_fk)
+        REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    FOREIGN KEY (creator_fk)
+        REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
