@@ -1681,6 +1681,9 @@ def test_table_count(db_connection):
         'swarm_completes', 'swarm_complete_sessions',
         # Req #2943 — machine registry
         'machines',
+        # Req #2997 — agents registry (ownership of architecture documents)
+        'agents', 'instructions', 'agent_instructions',
+        'architecture_documents', 'agent_documents',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -1868,3 +1871,157 @@ def test_customer_releases_columns(db_connection):
     assert cols['release_notes']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
     assert 'closed' not in cols
+
+
+# ============================================================================
+# Req #2997 — Agents registry column tests
+#
+# Agent .md files are thin charter stubs; their durable knowledge lives in these
+# five tables and is read at boot via darwin://agents/<Agent Name>.
+# ============================================================================
+
+def test_agents_columns(db_connection):
+    """agents: narrow and FIXED by design (req #2997) — the user does not
+    anticipate many new agent-level fields, so there is no JSON column, no
+    key-value attribute table, and no spare fields. All growth pressure lands in
+    instruction/document ROWS instead.
+
+    No category_fk (infrastructure entity, like machines). name AND file_name are
+    both UNIQUE so either resolves an agent unambiguously."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agents')
+    expected = {'id', 'name', 'file_name', 'overview', 'ai_model', 'effort',
+                'location', 'closed', 'sort_order', 'creator_fk',
+                'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+    assert 'category_fk' not in cols
+
+    assert cols['id']['Type'] == 'int'
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    # The MCP lookup key — matches the charter stub's H1.
+    assert cols['name']['Type'] == 'varchar(128)'
+    assert cols['name']['Null'] == 'NO'
+    assert cols['name']['Key'] == 'UNI'
+
+    assert cols['file_name']['Type'] == 'varchar(128)'
+    assert cols['file_name']['Null'] == 'NO'
+    assert cols['file_name']['Key'] == 'UNI'
+
+    # Short delegation trigger, mirrored into stub frontmatter `description`.
+    assert cols['overview']['Type'] == 'text'
+    assert cols['overview']['Null'] == 'YES'
+
+    # ai_model is VARCHAR, not an enum: it holds a RESOLVED model id
+    # ('opus[1m]'), which changes with every model release. effort uses Darwin's
+    # stable low|medium|high|xhigh|ultracode vocabulary.
+    assert cols['ai_model']['Type'] == 'varchar(32)'
+    assert cols['ai_model']['Null'] == 'NO'
+    assert cols['ai_model']['Default'] == 'opus[1m]'
+    assert cols['effort']['Type'] == 'varchar(16)'
+    assert cols['effort']['Null'] == 'NO'
+    assert cols['effort']['Default'] == 'high'
+
+    assert cols['location']['Type'] == 'varchar(512)'
+    assert cols['location']['Null'] == 'YES'
+
+    assert cols['closed']['Type'] == 'tinyint(1)'
+    assert cols['closed']['Null'] == 'NO'
+    assert cols['closed']['Default'] == '0'
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['creator_fk']['Type'] == 'varchar(64)'
+    assert cols['creator_fk']['Null'] == 'NO'
+    assert cols['creator_fk']['Key'] == 'MUL'
+
+
+def test_instructions_columns(db_connection):
+    """instructions: reusable named blocks of BINDING text (req #2997). Its own
+    data type precisely so ONE row can bind many agents — the common grooming
+    duty is a single row referenced by every architect."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'instructions')
+    expected = {'id', 'name', 'content', 'closed', 'sort_order', 'creator_fk',
+                'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    assert cols['id']['Key'] == 'PRI'
+    # name is the idempotent-seed key.
+    assert cols['name']['Type'] == 'varchar(256)'
+    assert cols['name']['Null'] == 'NO'
+    assert cols['name']['Key'] == 'UNI'
+    assert cols['content']['Type'] == 'text'
+    assert cols['content']['Null'] == 'NO'
+    assert cols['closed']['Default'] == '0'
+    assert cols['creator_fk']['Null'] == 'NO'
+
+
+def test_agent_instructions_columns(db_connection):
+    """agent_instructions: plain junction (req #2997). Composite PK, sort_order
+    drives boot load order."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agent_instructions')
+    assert set(cols.keys()) == {'agent_fk', 'instruction_fk', 'sort_order'}
+    assert cols['agent_fk']['Null'] == 'NO'
+    assert cols['agent_fk']['Key'] == 'PRI'
+    assert cols['instruction_fk']['Null'] == 'NO'
+    assert cols['instruction_fk']['Key'] == 'PRI'
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['sort_order']['Null'] == 'YES'
+
+
+def test_architecture_documents_columns(db_connection):
+    """architecture_documents: THE ONE registry of documents (req #2997).
+    agent_documents is a junction of RELATIONSHIPS, not a second document list.
+
+    `location` is the repo-relative path an agent Reads at boot; `url` is the
+    clickable form for the Phase 2 UI. Both nullable — a document may be
+    registered before either is settled."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'architecture_documents')
+    expected = {'id', 'name', 'doc_type', 'location', 'url', 'closed',
+                'sort_order', 'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['name']['Type'] == 'varchar(256)'
+    assert cols['name']['Null'] == 'NO'
+    assert cols['name']['Key'] == 'UNI'
+    assert cols['doc_type']['Type'] == 'varchar(16)'
+    assert cols['doc_type']['Null'] == 'NO'
+    assert cols['doc_type']['Default'] == 'markdown'
+    assert cols['location']['Type'] == 'varchar(512)'
+    assert cols['location']['Null'] == 'YES'
+    assert cols['url']['Type'] == 'varchar(1024)'
+    assert cols['url']['Null'] == 'YES'
+    assert cols['closed']['Default'] == '0'
+
+
+def test_agent_documents_columns(db_connection):
+    """agent_documents: the many-to-many relationship rows (req #2997).
+
+    owned_document_fk is the mechanism behind 'at most one owned agent per
+    document': a VIRTUAL generated column equal to document_fk only on an 'owned'
+    row (NULL otherwise), carrying a UNIQUE key. MySQL has no partial index, and
+    NULLs are distinct in a UNIQUE key — so unlimited non-owned links coexist
+    while a second 'owned' claim raises IntegrityError."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agent_documents')
+    expected = {'agent_fk', 'document_fk', 'relationship', 'notes',
+                'sort_order', 'owned_document_fk'}
+    assert set(cols.keys()) == expected
+
+    assert cols['agent_fk']['Null'] == 'NO'
+    assert cols['agent_fk']['Key'] == 'PRI'
+    assert cols['document_fk']['Null'] == 'NO'
+    assert cols['document_fk']['Key'] == 'PRI'
+    assert cols['relationship']['Type'] == 'varchar(24)'
+    assert cols['relationship']['Null'] == 'NO'
+    assert cols['relationship']['Default'] == 'referenced'
+    assert cols['notes']['Type'] == 'varchar(512)'
+    assert cols['notes']['Null'] == 'YES'
+
+    # The ownership-uniqueness machinery: VIRTUAL (computed on read, no row
+    # storage) and UNIQUE.
+    assert 'VIRTUAL GENERATED' in cols['owned_document_fk']['Extra'].upper()
+    assert cols['owned_document_fk']['Key'] == 'UNI'
