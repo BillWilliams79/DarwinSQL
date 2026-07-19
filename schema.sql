@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 34 tables after all migrations.
+-- This file reflects the final state of all 44 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -859,6 +859,100 @@ CREATE TABLE IF NOT EXISTS branch_acceptance_tests (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_bat_acceptance_test
         FOREIGN KEY (acceptance_test_fk) REFERENCES acceptance_tests (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- ============================================================================
+-- Agents registry (req #2997, migration 067)
+-- Agent .md files are thin charter stubs; their durable knowledge lives here
+-- and is read at boot via darwin://agents/<Agent Name>. The DB is canon —
+-- scripts/swarm/reconcile-agent-stubs.sh mirrors overview/ai_model/effort into
+-- stub frontmatter at session boundaries.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS agents (
+    id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(128) NOT NULL,                    -- human-readable, e.g. "AWS Architect"; MCP lookup key
+    file_name   VARCHAR(128) NOT NULL,                    -- stub basename, e.g. "aws-architect.md"
+    overview    TEXT         NULL,                        -- short delegation trigger; mirrored to stub `description`
+    ai_model    VARCHAR(32)  NOT NULL DEFAULT 'opus[1m]', -- resolved model id, NOT the haiku|sonnet|opus|fable family enum
+    effort      VARCHAR(16)  NOT NULL DEFAULT 'high',     -- low|medium|high|xhigh|ultracode
+    location    VARCHAR(512) NULL,                        -- repo-relative stub path
+    closed      TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order  SMALLINT     NULL,
+    creator_fk  VARCHAR(64)  NOT NULL,
+    create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_agents_name (name),
+    UNIQUE KEY uq_agents_file_name (file_name),
+    CONSTRAINT fk_agents_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS instructions (
+    id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(256) NOT NULL,   -- UNIQUE; idempotent-seed key
+    content     TEXT         NOT NULL,   -- binding text; one row can bind many agents
+    closed      TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order  SMALLINT     NULL,
+    creator_fk  VARCHAR(64)  NOT NULL,
+    create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_instructions_name (name),
+    CONSTRAINT fk_instructions_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS agent_instructions (
+    agent_fk        INT      NOT NULL,
+    instruction_fk  INT      NOT NULL,
+    sort_order      SMALLINT NULL,       -- boot load order
+    PRIMARY KEY (agent_fk, instruction_fk),
+    CONSTRAINT fk_ai_agent
+        FOREIGN KEY (agent_fk) REFERENCES agents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_ai_instruction
+        FOREIGN KEY (instruction_fk) REFERENCES instructions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS architecture_documents (
+    id          INT           NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(256)  NOT NULL,  -- UNIQUE; idempotent-seed key
+    doc_type    VARCHAR(16)   NOT NULL DEFAULT 'markdown',  -- markdown|html|text
+    location    VARCHAR(512)  NULL,      -- repo-relative path the agent Reads
+    url         VARCHAR(1024) NULL,      -- clickable link (GitHub blob / site path)
+    closed      TINYINT(1)    NOT NULL DEFAULT 0,
+    sort_order  SMALLINT      NULL,
+    creator_fk  VARCHAR(64)   NOT NULL,
+    create_ts   TIMESTAMP     NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP     NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_architecture_documents_name (name),
+    CONSTRAINT fk_architecture_documents_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- owned_document_fk: a VIRTUAL generated column that equals document_fk only on
+-- an 'owned' row, NULL otherwise. The UNIQUE key over it enforces AT MOST ONE
+-- 'owned' agent per document (MySQL has no partial index; NULLs are distinct in
+-- a UNIQUE key, so non-owned links coexist freely).
+CREATE TABLE IF NOT EXISTS agent_documents (
+    agent_fk           INT          NOT NULL,
+    document_fk        INT          NOT NULL,
+    relationship       VARCHAR(24)  NOT NULL DEFAULT 'referenced',  -- owned|groomed|referenced|design_language|guardian
+    notes              VARCHAR(512) NULL,
+    sort_order         SMALLINT     NULL,
+    owned_document_fk  INT          AS (IF(relationship = 'owned', document_fk, NULL)) VIRTUAL,
+    PRIMARY KEY (agent_fk, document_fk),
+    UNIQUE KEY uq_agent_documents_owner (owned_document_fk),
+    CONSTRAINT fk_ad_agent
+        FOREIGN KEY (agent_fk) REFERENCES agents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_ad_document
+        FOREIGN KEY (document_fk) REFERENCES architecture_documents (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 

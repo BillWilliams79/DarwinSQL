@@ -1,13 +1,15 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 34 tables in FK-dependency order
+-- All 44 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
     customers,
+    agent_documents, agent_instructions,
+    architecture_documents, instructions, agents,
     test_results, test_runs, test_plan_cases, test_plans,
     feature_test_cases, test_cases, features,
     user_integrations,
@@ -813,3 +815,87 @@ CREATE TABLE branch_acceptance_tests (
 );
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- Agents registry (req #2997, migration 067). Production tables, mirrored here
+-- so a rebuilt darwin_dev matches schema.sql column-for-column.
+CREATE TABLE agents (
+    id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(128) NOT NULL,
+    file_name   VARCHAR(128) NOT NULL,
+    overview    TEXT         NULL,
+    ai_model    VARCHAR(32)  NOT NULL DEFAULT 'opus[1m]',
+    effort      VARCHAR(16)  NOT NULL DEFAULT 'high',
+    location    VARCHAR(512) NULL,
+    closed      TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order  SMALLINT     NULL,
+    creator_fk  VARCHAR(64)  NOT NULL,
+    create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_agents_name (name),
+    UNIQUE KEY uq_agents_file_name (file_name),
+    CONSTRAINT fk_agents_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE instructions (
+    id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(256) NOT NULL,
+    content     TEXT         NOT NULL,
+    closed      TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order  SMALLINT     NULL,
+    creator_fk  VARCHAR(64)  NOT NULL,
+    create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_instructions_name (name),
+    CONSTRAINT fk_instructions_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE agent_instructions (
+    agent_fk        INT      NOT NULL,
+    instruction_fk  INT      NOT NULL,
+    sort_order      SMALLINT NULL,
+    PRIMARY KEY (agent_fk, instruction_fk),
+    CONSTRAINT fk_ai_agent
+        FOREIGN KEY (agent_fk) REFERENCES agents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_ai_instruction
+        FOREIGN KEY (instruction_fk) REFERENCES instructions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE architecture_documents (
+    id          INT           NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    name        VARCHAR(256)  NOT NULL,
+    doc_type    VARCHAR(16)   NOT NULL DEFAULT 'markdown',
+    location    VARCHAR(512)  NULL,
+    url         VARCHAR(1024) NULL,
+    closed      TINYINT(1)    NOT NULL DEFAULT 0,
+    sort_order  SMALLINT      NULL,
+    creator_fk  VARCHAR(64)   NOT NULL,
+    create_ts   TIMESTAMP     NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts   TIMESTAMP     NULL ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_architecture_documents_name (name),
+    CONSTRAINT fk_architecture_documents_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE agent_documents (
+    agent_fk           INT          NOT NULL,
+    document_fk        INT          NOT NULL,
+    relationship       VARCHAR(24)  NOT NULL DEFAULT 'referenced',
+    notes              VARCHAR(512) NULL,
+    sort_order         SMALLINT     NULL,
+    owned_document_fk  INT          AS (IF(relationship = 'owned', document_fk, NULL)) VIRTUAL,
+    PRIMARY KEY (agent_fk, document_fk),
+    UNIQUE KEY uq_agent_documents_owner (owned_document_fk),
+    CONSTRAINT fk_ad_agent
+        FOREIGN KEY (agent_fk) REFERENCES agents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_ad_document
+        FOREIGN KEY (document_fk) REFERENCES architecture_documents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);

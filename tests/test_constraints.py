@@ -1219,3 +1219,237 @@ def test_machines_creator_fk_cascade(db_connection):
         cur.execute("SELECT COUNT(*) AS c FROM machines WHERE creator_fk = %s", (cfk,))
         assert cur.fetchone()['c'] == 0
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #2997 — agents registry constraints
+#
+# The rule this requirement exists to enforce: AT MOST ONE 'owned' agent per
+# architecture document. It is a DB constraint, not a convention — these tests
+# are what prove that.
+# ---------------------------------------------------------------------------
+
+def _insert_agent(cur, creator_fk, name=None):
+    """Insert an agents row and return its id."""
+    name = name or f"Test Agent {uuid.uuid4().hex[:8]}"
+    cur.execute(
+        "INSERT INTO agents (name, file_name, creator_fk) VALUES (%s, %s, %s)",
+        (name, f"{name.lower().replace(' ', '-')}.md", creator_fk),
+    )
+    return cur.lastrowid
+
+
+def _insert_document(cur, creator_fk, name=None):
+    """Insert an architecture_documents row and return its id."""
+    name = name or f"Test Doc {uuid.uuid4().hex[:8]}"
+    cur.execute(
+        "INSERT INTO architecture_documents (name, doc_type, location, creator_fk) "
+        "VALUES (%s, 'markdown', %s, %s)",
+        (name, f"memory/{uuid.uuid4().hex[:8]}.md", creator_fk),
+    )
+    return cur.lastrowid
+
+
+def test_agents_name_unique(db_connection, test_creator_fk):
+    """uq_agents_name: `name` is the MCP lookup key — a duplicate would make
+    darwin://agents/<name> ambiguous, so the DB forbids it."""
+    with db_connection.cursor() as cur:
+        _insert_agent(cur, test_creator_fk, 'Duplicate Name Architect')
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO agents (name, file_name, creator_fk) VALUES (%s, %s, %s)",
+                ('Duplicate Name Architect', 'other-file.md', test_creator_fk),
+            )
+    db_connection.rollback()
+
+
+def test_agents_file_name_unique(db_connection, test_creator_fk):
+    """uq_agents_file_name: file_name is the fallback lookup key and must also
+    resolve unambiguously."""
+    with db_connection.cursor() as cur:
+        _insert_agent(cur, test_creator_fk, 'File Name Architect')
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO agents (name, file_name, creator_fk) VALUES (%s, %s, %s)",
+                ('Some Other Architect', 'file-name-architect.md', test_creator_fk),
+            )
+    db_connection.rollback()
+
+
+def test_agents_model_effort_defaults(db_connection, test_creator_fk):
+    """The standard header pin: an agent created without ai_model/effort lands on
+    opus[1m] / high (req #2997), replacing the stale per-agent claude-opus-4-6
+    pins the ownership survey found."""
+    with db_connection.cursor() as cur:
+        aid = _insert_agent(cur, test_creator_fk)
+        cur.execute("SELECT ai_model, effort, closed FROM agents WHERE id = %s", (aid,))
+        row = cur.fetchone()
+        assert row['ai_model'] == 'opus[1m]'
+        assert row['effort'] == 'high'
+        assert row['closed'] == 0
+    db_connection.rollback()
+
+
+def test_agent_documents_single_owner_on_insert(db_connection, test_creator_fk):
+    """uq_agent_documents_owner: a SECOND agent claiming 'owned' on the same
+    document is rejected. This is the core ownership rule of req #2997."""
+    with db_connection.cursor() as cur:
+        a1 = _insert_agent(cur, test_creator_fk)
+        a2 = _insert_agent(cur, test_creator_fk)
+        doc = _insert_document(cur, test_creator_fk)
+
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'owned')", (a1, doc))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+                "VALUES (%s, %s, 'owned')", (a2, doc))
+    db_connection.rollback()
+
+
+def test_agent_documents_single_owner_on_update(db_connection, test_creator_fk):
+    """The ownership rule must not be bypassable by linking as 'groomed' and then
+    UPDATEing to 'owned' — the generated column is recomputed on update, so the
+    UNIQUE key catches this path too."""
+    with db_connection.cursor() as cur:
+        a1 = _insert_agent(cur, test_creator_fk)
+        a2 = _insert_agent(cur, test_creator_fk)
+        doc = _insert_document(cur, test_creator_fk)
+
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'owned')", (a1, doc))
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'groomed')", (a2, doc))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "UPDATE agent_documents SET relationship = 'owned' "
+                "WHERE agent_fk = %s AND document_fk = %s", (a2, doc))
+    db_connection.rollback()
+
+
+def test_agent_documents_multiple_non_owned_allowed(db_connection, test_creator_fk):
+    """NULLs are distinct in a MySQL UNIQUE key, so any number of non-'owned'
+    links may coexist on one document. Many architects may reference a document;
+    only one may own it."""
+    with db_connection.cursor() as cur:
+        doc = _insert_document(cur, test_creator_fk)
+        for rel in ('groomed', 'referenced', 'design_language', 'guardian'):
+            cur.execute(
+                "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+                "VALUES (%s, %s, %s)", (_insert_agent(cur, test_creator_fk), doc, rel))
+        cur.execute("SELECT COUNT(*) AS c FROM agent_documents WHERE document_fk = %s",
+                    (doc,))
+        assert cur.fetchone()['c'] == 4
+    db_connection.rollback()
+
+
+def test_agent_documents_ownership_transfer(db_connection, test_creator_fk):
+    """Ownership is transferable: once the incumbent's link is removed, another
+    agent may claim 'owned'. The constraint blocks CONCURRENT owners, not
+    reassignment."""
+    with db_connection.cursor() as cur:
+        a1 = _insert_agent(cur, test_creator_fk)
+        a2 = _insert_agent(cur, test_creator_fk)
+        doc = _insert_document(cur, test_creator_fk)
+
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'owned')", (a1, doc))
+        cur.execute(
+            "DELETE FROM agent_documents WHERE agent_fk = %s AND document_fk = %s",
+            (a1, doc))
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'owned')", (a2, doc))
+        cur.execute(
+            "SELECT agent_fk FROM agent_documents "
+            "WHERE document_fk = %s AND relationship = 'owned'", (doc,))
+        assert cur.fetchone()['agent_fk'] == a2
+    db_connection.rollback()
+
+
+def test_agent_documents_cascade_from_agent(db_connection, test_creator_fk):
+    """Deleting an agent cascades its links away; the DOCUMENT row survives
+    (documents are a shared catalog, not agent-private data)."""
+    with db_connection.cursor() as cur:
+        aid = _insert_agent(cur, test_creator_fk)
+        doc = _insert_document(cur, test_creator_fk)
+        cur.execute(
+            "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
+            "VALUES (%s, %s, 'owned')", (aid, doc))
+
+        cur.execute("DELETE FROM agents WHERE id = %s", (aid,))
+        cur.execute("SELECT COUNT(*) AS c FROM agent_documents WHERE agent_fk = %s",
+                    (aid,))
+        assert cur.fetchone()['c'] == 0
+        cur.execute("SELECT COUNT(*) AS c FROM architecture_documents WHERE id = %s",
+                    (doc,))
+        assert cur.fetchone()['c'] == 1
+    db_connection.rollback()
+
+
+def test_agent_instructions_cascade_and_sharing(db_connection, test_creator_fk):
+    """One instruction row may bind MANY agents — this is how the common grooming
+    duty reaches every architect. Deleting one agent must not disturb the others'
+    bindings."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO instructions (name, content, creator_fk) VALUES (%s, %s, %s)",
+            (f"shared-{uuid.uuid4().hex[:8]}", 'binding text', test_creator_fk))
+        instr = cur.lastrowid
+        a1 = _insert_agent(cur, test_creator_fk)
+        a2 = _insert_agent(cur, test_creator_fk)
+        for aid in (a1, a2):
+            cur.execute(
+                "INSERT INTO agent_instructions (agent_fk, instruction_fk, sort_order) "
+                "VALUES (%s, %s, 1)", (aid, instr))
+
+        cur.execute("DELETE FROM agents WHERE id = %s", (a1,))
+        cur.execute("SELECT COUNT(*) AS c FROM agent_instructions WHERE instruction_fk = %s",
+                    (instr,))
+        assert cur.fetchone()['c'] == 1, "surviving agent's binding must remain"
+        cur.execute("SELECT COUNT(*) AS c FROM instructions WHERE id = %s", (instr,))
+        assert cur.fetchone()['c'] == 1, "shared instruction row must survive"
+    db_connection.rollback()
+
+
+def test_instructions_name_unique(db_connection, test_creator_fk):
+    """uq_instructions_name: `name` is the idempotent-seed key, so the seeder can
+    upsert rather than duplicate on every run."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO instructions (name, content, creator_fk) VALUES (%s, %s, %s)",
+            ('dup-instruction-name', 'a', test_creator_fk))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO instructions (name, content, creator_fk) VALUES (%s, %s, %s)",
+                ('dup-instruction-name', 'b', test_creator_fk))
+    db_connection.rollback()
+
+
+def test_architecture_documents_name_unique(db_connection, test_creator_fk):
+    """uq_architecture_documents_name: the document registry's upsert key."""
+    with db_connection.cursor() as cur:
+        _insert_document(cur, test_creator_fk, 'Duplicate Doc Name')
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO architecture_documents (name, doc_type, creator_fk) "
+                "VALUES (%s, 'markdown', %s)", ('Duplicate Doc Name', test_creator_fk))
+    db_connection.rollback()
+
+
+def test_agents_creator_fk_cascade(db_connection):
+    """agents.creator_fk is ON DELETE CASCADE — removing the owning profile takes
+    its agents with it."""
+    cfk = f"schema-test-agent-{uuid.uuid4().hex[:8]}"
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+                    (cfk, 'Agent Cascade', 'ac@test.com'))
+        _insert_agent(cur, cfk)
+        cur.execute("DELETE FROM profiles WHERE id = %s", (cfk,))
+        cur.execute("SELECT COUNT(*) AS c FROM agents WHERE creator_fk = %s", (cfk,))
+        assert cur.fetchone()['c'] == 0
+    db_connection.rollback()

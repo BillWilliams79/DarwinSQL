@@ -100,6 +100,14 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # stops the regex at `machines` only when followed by _ibfk or a word
         # boundary, not the `_fk`/`_port`/`_hostname` suffixes).
         'machines',
+        # Req #2997 — agents registry (migration 067). Longest-first ordering:
+        # agent_instructions and agent_documents must precede `agents` and
+        # `instructions`, or the shorter names would match inside them first.
+        'agent_instructions',
+        'agent_documents',
+        'architecture_documents',
+        'instructions',
+        'agents',
         'requirements',
         'priorities',            # pre-038 name (for RENAME TABLE in migration 038)
         'categories',
@@ -174,6 +182,13 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_swarm_sessions_machine', 'fk_swarm_starts_machine',
         'fk_dev_servers_machine',
         'uq_machines_hostname', 'uq_machine_port',
+        # Migration 067 — agents registry (req #2997)
+        'fk_agents_creator', 'fk_instructions_creator',
+        'fk_architecture_documents_creator',
+        'fk_ai_agent', 'fk_ai_instruction',
+        'fk_ad_agent', 'fk_ad_document',
+        'uq_agents_name', 'uq_agents_file_name', 'uq_instructions_name',
+        'uq_architecture_documents_name', 'uq_agent_documents_owner',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -264,6 +279,10 @@ ALL_TABLE_SUFFIXES = [
     # Req #2943 — machines (dropped with FK_CHECKS=0, so order is not critical;
     # placed among the leaves for readability).
     'machines',
+    # Req #2997 — agents registry. FK-safe order: junctions first, then the
+    # catalogs they reference.
+    'agent_documents', 'agent_instructions',
+    'architecture_documents', 'instructions', 'agents',
     # Req #2606 — Build Visualizer (migrations 050-054). FK-safe order: leaves
     # first — customer_releases → builds → branches → build_projects (the
     # build_projects<->branches circular FK is handled by FK_CHECKS=0 in cleanup).
@@ -444,6 +463,9 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'swarm_completes', 'swarm_complete_sessions',
             # Req #2943 — machine registry (migration 064)
             'machines',
+            # Req #2997 — agents registry (migration 067)
+            'agents', 'instructions', 'agent_instructions',
+            'architecture_documents', 'agent_documents',
         ]
     }
     assert tables == expected_tables, \
