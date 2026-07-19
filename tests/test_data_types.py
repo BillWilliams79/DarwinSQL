@@ -430,6 +430,9 @@ def test_requirements_columns(db_connection):
     # Tolerate both pre- and post-migration-063 state (req #2916 added effort).
     if 'effort' in columns:
         expected_fields.append('effort')
+    # Tolerate both pre- and post-migration-066 state (req #2978 added machine_fk).
+    if 'machine_fk' in columns:
+        expected_fields.append('machine_fk')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -489,6 +492,15 @@ def test_requirements_columns(db_connection):
         assert columns['effort']['Type'] == 'varchar(16)'
         assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
         assert columns['effort']['Default'] == 'xhigh'
+
+    # req #2978 machine_fk (migration 066) — nullable FK, no default. Unlike
+    # coordination_type / ai_model / effort this one is deliberately NULLable:
+    # NULL is the meaningful "Any machine" value, not a missing setting.
+    if 'machine_fk' in columns:
+        assert columns['machine_fk']['Type'] == 'int'
+        assert columns['machine_fk']['Null'] == 'YES'
+        assert columns['machine_fk']['Key'] == 'MUL'
+        assert columns['machine_fk']['Default'] is None
 
 
 def test_swarm_sessions_columns(db_connection):
