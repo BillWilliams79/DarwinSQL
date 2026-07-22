@@ -183,10 +183,10 @@ CREATE TABLE IF NOT EXISTS requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
                                             -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
-    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
-                                            -- haiku | sonnet | opus | fable (req #2909; default: opus, pre-#2909 rows assumed opus)
-    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
-                                            -- low | medium | high | xhigh | ultracode (req #2916; default: xhigh, pre-#2916 rows assumed high)
+    ai_model        VARCHAR(16)     NOT NULL,
+                                            -- haiku | sonnet | opus | fable (req #2909; NO column default — caller must provide, req #3007; pre-#2909 rows assumed opus)
+    effort          VARCHAR(16)     NOT NULL,
+                                            -- low | medium | high | xhigh | ultracode (req #2916; NO column default — caller must provide, req #3007; pre-#2916 rows assumed high)
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
@@ -224,8 +224,8 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     swarm_status    VARCHAR(16)     NOT NULL DEFAULT 'starting',
     ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
                                             -- haiku | sonnet | opus | fable (req #2909; captured at launch, default: opus)
-    effort          VARCHAR(16)     NOT NULL DEFAULT 'xhigh',
-                                            -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
+    effort          VARCHAR(16)     NOT NULL DEFAULT 'high',
+                                            -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default bumped to high, req #3007)
     worktree_path   VARCHAR(512)    NULL,
     machine_fk      INT             NULL,          -- req #2943; which machine ran this session
     started_at      TIMESTAMP       NULL,

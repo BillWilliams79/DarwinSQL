@@ -486,12 +486,14 @@ def test_requirements_columns(db_connection):
     if 'ai_model' in columns:
         assert columns['ai_model']['Type'] == 'varchar(16)'
         assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
-        assert columns['ai_model']['Default'] == 'opus'
+        # req #3007: NO column default — the caller must provide ai_model.
+        assert columns['ai_model']['Default'] is None
 
     if 'effort' in columns:
         assert columns['effort']['Type'] == 'varchar(16)'
         assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
-        assert columns['effort']['Default'] == 'xhigh'
+        # req #3007: NO column default — the caller must provide effort.
+        assert columns['effort']['Default'] is None
 
     # req #2978 machine_fk (migration 066) — nullable FK, no default. Unlike
     # coordination_type / ai_model / effort this one is deliberately NULLable:
@@ -577,7 +579,7 @@ def test_swarm_sessions_columns(db_connection):
     if 'effort' in columns:
         assert columns['effort']['Type'] == 'varchar(16)'
         assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
-        assert columns['effort']['Default'] == 'xhigh'
+        assert columns['effort']['Default'] == 'high'
 
     # req #2332 phase-accumulator columns
     for b in phase_buckets:
