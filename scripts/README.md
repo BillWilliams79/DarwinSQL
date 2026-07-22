@@ -9,7 +9,9 @@
 | `seed_darwin_dev.py` | Create darwin_dev database, all 12 tables, and seed E2E test users |
 | `seed_e2e_workers.py` | Seed 8 parallel E2E worker profiles |
 | `recreate_darwin_dev.sql` | Drop and recreate all 12 darwin_dev tables from scratch |
-| `add-api-route.sh` | Add a new /darwin/{table} route to Darwin API Gateway (ANY + OPTIONS, CORS, Lambda policy, deploy) |
+| `add-api-route.sh` | Add a new /darwin/{table} route to Darwin API Gateway (ANY + OPTIONS, CORS, verifies Lambda wildcard coverage, deploy) |
+| `verify-lambda-policy.sh` | Live-gated check that the RestApi-MySql-Lambda resource policy is minimal + every route still authorized (req #3002) |
+| `get-e2e-token.sh` | Print a fresh Cognito IdToken for the E2E test user (used by verify-lambda-policy.sh) |
 
 ## Guardrails
 
@@ -64,7 +66,10 @@ Requires darwinroot AWS credentials (`~/.darwin-credentials/aws_credentials.sh`)
 # Dry run — print commands without executing
 ./DarwinSQL/scripts/add-api-route.sh --dry-run <table_name>
 
-# Create route (ANY + OPTIONS methods, Lambda policy, deploy to eng)
+# Create route (ANY + OPTIONS methods, deploy to eng). Step 9 verifies the
+# apigateway-{database}-wildcard resource-policy statement covers the route and
+# adds NO per-table statement; it errors out if the wildcard is missing (a real
+# authorization gap). No per-table lambda:AddPermission is ever emitted (req #3002).
 ./DarwinSQL/scripts/add-api-route.sh <table_name>
 
 # List existing resources

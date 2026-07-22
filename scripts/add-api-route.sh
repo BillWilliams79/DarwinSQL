@@ -15,14 +15,27 @@
 #
 # Req #2380 changes (2026-04-21):
 #   - --database={darwin|darwin_dev}: select prod or dev parent resource.
-#     darwin_dev skips the Lambda resource policy step because the existing
-#     apigateway-darwin_dev-wildcard statement covers all /darwin_dev/* routes.
 #   - --no-deploy: suppress the per-route create-deployment. Used when batching
 #     many route creations so a single final deploy covers them all.
-#   - /darwin/ table routes no longer need per-table Lambda permission statements
-#     after req #2380 consolidated /darwin/* to a wildcard (Step 4 of req #2380).
-#     Step 9 is retained for operational completeness when the wildcard is absent,
-#     but add-permission will NO-OP safely via --no-skip-if-exists check below.
+#
+# Req #3002 changes (2026-07-22, root fix):
+#   - Step 9 no longer calls lambda:AddPermission for either database. Both
+#     /darwin/* and /darwin_dev/* are authorized by a single per-database wildcard
+#     resource-policy statement (apigateway-{database}-wildcard, req #2380). A
+#     per-table lambda:AddPermission call always SUCCEEDS with a brand-new Sid
+#     (lambda:AddPermission only raises ResourceConflictException on a duplicate
+#     Sid, never because a wildcard already covers the route) — so the old "will
+#     NO-OP safely" claim was false, and every route added since April 2026 had
+#     silently deposited a redundant ~350-byte statement toward the Lambda's
+#     20 KB resource-policy ceiling (shared by 6 APIs).
+#   - Step 9 now VERIFIES wildcard coverage via source-ARN pattern match
+#     (aws lambda get-policy, read-only) before skipping. If the wildcard is
+#     confirmed present, the route needs no additional statement — zero AWS
+#     mutation, zero bytes added. If the wildcard is NOT found, that is a real
+#     authorization gap: the script exits with an error rather than silently
+#     adding a per-table statement or silently continuing. Fixing a genuine gap
+#     requires an AWS Architect consult (data-architect-charter.md), not a
+#     script-level workaround.
 
 set -eo pipefail
 
@@ -210,42 +223,49 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 9: Lambda resource policy
+# Step 9: Lambda resource policy — verify wildcard coverage, add nothing
 #
-# Skipped for /darwin_dev/: apigateway-darwin_dev-wildcard already covers all
-# /darwin_dev/* source ARNs.
-#
-# For /darwin/: after req #2380 consolidated to apigateway-darwin-wildcard, a
-# per-table statement is redundant. We still attempt add-permission for
-# operational completeness (in case the wildcard is reverted), but we tolerate
-# the "already exists or covered" case by checking for ResourceConflictException.
+# Both /darwin/* and /darwin_dev/* are authorized by a single per-database
+# wildcard statement (apigateway-{database}-wildcard, req #2380). This tool
+# never emits a per-table statement. Instead it VERIFIES the wildcard actually
+# covers this route (read-only aws lambda get-policy + source-ARN match) before
+# skipping. A missing wildcard is a real authorization gap — the script exits
+# with an error rather than silently adding a per-table statement or silently
+# continuing. There is no --skip-permission flag: the verification IS the logic.
 # ---------------------------------------------------------------------------
-if [ "$DATABASE" = "darwin_dev" ]; then
-    echo "Step 9: SKIP (darwin_dev covered by apigateway-darwin_dev-wildcard)."
+echo "Step 9: Verifying Lambda resource-policy wildcard coverage..."
+WILDCARD_SID="apigateway-${DATABASE}-wildcard"
+WILDCARD_ARN="arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*/${DATABASE}/*"
+
+if ! POLICY_JSON=$(aws lambda get-policy \
+    --function-name "$LAMBDA_ARN" \
+    --query Policy --output text 2>/tmp/get-policy-err); then
+    echo "ERROR: could not read the Lambda resource policy for $LAMBDA_ARN — cannot" >&2
+    echo "       verify wildcard coverage for /${DATABASE}/${TABLE_NAME}. Aborting" >&2
+    echo "       rather than assuming coverage or adding a per-table statement." >&2
+    cat /tmp/get-policy-err >&2
+    exit 1
+fi
+if [ -z "$POLICY_JSON" ]; then
+    echo "ERROR: Lambda resource policy for $LAMBDA_ARN came back empty — cannot" >&2
+    echo "       verify wildcard coverage for /${DATABASE}/${TABLE_NAME}. Aborting" >&2
+    echo "       rather than assuming coverage or adding a per-table statement." >&2
+    exit 1
+fi
+
+WILDCARD_COVERS=$(echo "$POLICY_JSON" | jq -r \
+    --arg sid "$WILDCARD_SID" --arg arn "$WILDCARD_ARN" \
+    '[.Statement[] | select(.Sid == $sid) | select(.Condition.ArnLike."AWS:SourceArn" == $arn)] | length')
+
+if [ "$WILDCARD_COVERS" -gt 0 ]; then
+    echo "    OK: ${WILDCARD_SID} covers /${DATABASE}/* — no per-table statement needed."
 else
-    echo "Step 9: Adding Lambda resource policy (darwin per-table)..."
-    STATEMENT_ID="apigateway-${DATABASE}-${TABLE_NAME}"
-    SOURCE_ARN="arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*/*/${DATABASE}/${TABLE_NAME}"
-    if [ "$DRY_RUN" -eq 1 ]; then
-        echo "[DRY-RUN] aws lambda add-permission --statement-id $STATEMENT_ID --source-arn $SOURCE_ARN"
-    else
-        # Tolerate ResourceConflictException (wildcard already covers or statement
-        # exists from a prior run) — continue on that case only.
-        if ! aws lambda add-permission \
-            --function-name "$LAMBDA_ARN" \
-            --statement-id "$STATEMENT_ID" \
-            --action lambda:InvokeFunction \
-            --principal apigateway.amazonaws.com \
-            --source-arn "$SOURCE_ARN" 2>/tmp/add-permission-err; then
-            if grep -q 'ResourceConflictException' /tmp/add-permission-err 2>/dev/null; then
-                echo "    (existing statement or wildcard — ok, continuing)"
-            else
-                echo "    ERROR from add-permission:" >&2
-                cat /tmp/add-permission-err >&2
-                exit 1
-            fi
-        fi
-    fi
+    echo "ERROR: ${WILDCARD_SID} (source ARN ${WILDCARD_ARN}) was NOT found in the" >&2
+    echo "       Lambda resource policy. This is a real authorization gap for" >&2
+    echo "       /${DATABASE}/${TABLE_NAME}, not something to skip past. Consult the" >&2
+    echo "       AWS Architect (see memory/data-architect-charter.md, 'API routes'" >&2
+    echo "       section) to repair or reintroduce the wildcard before proceeding." >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
