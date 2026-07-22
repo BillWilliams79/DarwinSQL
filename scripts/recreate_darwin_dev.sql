@@ -189,10 +189,10 @@ CREATE TABLE requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
                                             -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
-    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
-                                            -- haiku | sonnet | opus | fable (req #2909; default: opus)
-    effort          VARCHAR(16)     NOT NULL DEFAULT 'high',
-                                            -- low | medium | high | xhigh | ultracode (req #2916; default: xhigh)
+    ai_model        VARCHAR(16)     NOT NULL,
+                                            -- haiku | sonnet | opus | fable (req #2909; NO column default — caller must provide, req #3007)
+    effort          VARCHAR(16)     NOT NULL,
+                                            -- low | medium | high | xhigh | ultracode (req #2916; NO column default — caller must provide, req #3007)
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
