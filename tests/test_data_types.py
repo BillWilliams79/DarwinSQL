@@ -1686,6 +1686,8 @@ def test_table_count(db_connection):
         # Req #2997 — agents registry (ownership of architecture documents)
         'agents', 'instructions', 'agent_instructions',
         'architecture_documents', 'agent_documents',
+        # Req #3031 — agent context telemetry (run header + per-agent rows)
+        'agent_telemetry_runs', 'agent_telemetry_rows',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -2027,3 +2029,60 @@ def test_agent_documents_columns(db_connection):
     # storage) and UNIQUE.
     assert 'VIRTUAL GENERATED' in cols['owned_document_fk']['Extra'].upper()
     assert cols['owned_document_fk']['Key'] == 'UNI'
+
+
+# ============================================================================
+# Req #3031 — Agent context telemetry column tests (migration 069)
+# ============================================================================
+
+def test_agent_telemetry_runs_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agent_telemetry_runs')
+    expected = {'id', 'captured_at', 'label', 'agent_count', 'harness_version',
+                'source_note', 'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['captured_at']['Null'] == 'NO'
+    assert cols['label']['Type'] == 'varchar(256)'
+    assert cols['label']['Null'] == 'NO'
+    assert cols['agent_count']['Null'] == 'NO'
+    assert cols['agent_count']['Default'] == '0'
+    assert cols['harness_version']['Type'] == 'varchar(64)'
+    assert cols['harness_version']['Null'] == 'YES'
+    assert cols['source_note']['Type'] == 'text'
+    assert cols['source_note']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Log/infra table — no title/status/closed/category_fk/sort_order on the header.
+    assert 'title' not in cols
+    assert 'closed' not in cols
+    assert 'category_fk' not in cols
+
+
+def test_agent_telemetry_rows_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agent_telemetry_rows')
+    expected = {'id', 'run_fk', 'agent_name', 'role', 'session_kind',
+                'boot_time_ms', 'cc_base_tokens', 'claude_md_tokens',
+                'charter_stub_tokens', 'boot_payload_tokens', 'autoload_tokens',
+                'docs_loaded', 'docs_expected', 'start_work_context_tokens',
+                'footnote', 'sort_order', 'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['run_fk']['Null'] == 'NO'
+    assert cols['run_fk']['Key'] == 'MUL'          # indexed FK
+    assert cols['agent_name']['Type'] == 'varchar(128)'
+    assert cols['agent_name']['Null'] == 'NO'
+    assert cols['role']['Type'] == 'varchar(16)'
+    assert cols['role']['Null'] == 'NO'
+    assert cols['role']['Default'] == 'architect'
+    assert cols['session_kind']['Null'] == 'NO'
+    assert cols['session_kind']['Default'] == 'subagent'
+    # ACTUAL-token columns are nullable (phase may be n/a — PrimaryAI, Code Reviewer).
+    for c in ('boot_time_ms', 'cc_base_tokens', 'claude_md_tokens',
+              'charter_stub_tokens', 'boot_payload_tokens', 'autoload_tokens',
+              'docs_loaded', 'docs_expected', 'start_work_context_tokens'):
+        assert cols[c]['Null'] == 'YES', c
+        assert cols[c]['Type'] in ('int', 'int(11)'), (c, cols[c]['Type'])
+    assert cols['footnote']['Type'] == 'varchar(512)'
+    assert cols['footnote']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'

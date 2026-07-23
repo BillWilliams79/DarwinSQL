@@ -59,6 +59,11 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        # Req #3031 — agent context telemetry (migration 069). Listed first
+        # (longest-first): agent_telemetry_rows/runs must precede the shorter
+        # `agents` token so the longer match wins.
+        'agent_telemetry_rows',
+        'agent_telemetry_runs',
         # Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044).
         # Listed longest-first within this group to avoid partial matches
         # (e.g., 'test_cases' inside 'feature_test_cases' is blocked by the
@@ -189,6 +194,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_ad_agent', 'fk_ad_document',
         'uq_agents_name', 'uq_agents_file_name', 'uq_instructions_name',
         'uq_architecture_documents_name', 'uq_agent_documents_owner',
+        # Migration 069 — agent context telemetry (req #3031)
+        'fk_agent_telemetry_runs_creator',
+        'fk_agent_telemetry_rows_run', 'fk_agent_telemetry_rows_creator',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -266,6 +274,8 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3031 — agent context telemetry. FK-safe: rows (child) before runs.
+    'agent_telemetry_rows', 'agent_telemetry_runs',
     # Req #2380 validation registry — FK-safe drop order (leaves first).
     # test_results → test_runs CASCADE; test_runs → test_plans RESTRICT;
     # feature_test_cases/test_plan_cases CASCADE from both sides;
@@ -466,6 +476,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # Req #2997 — agents registry (migration 067)
             'agents', 'instructions', 'agent_instructions',
             'architecture_documents', 'agent_documents',
+            # Req #3031 — agent context telemetry (migration 069)
+            'agent_telemetry_runs', 'agent_telemetry_rows',
         ]
     }
     assert tables == expected_tables, \

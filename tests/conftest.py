@@ -96,6 +96,11 @@ def seed_test_profile(db_connection, test_creator_fk):
         # AFTER those three (all cleared just above) to satisfy the constraint.
         cur.execute("DELETE FROM swarm_starts WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM machines WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #3031: agent context telemetry. rows CASCADE from runs, so deleting
+        # runs is sufficient; rows deleted first defensively for tests that commit
+        # rows without a run parent.
+        cur.execute("DELETE FROM agent_telemetry_rows WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM agent_telemetry_runs WHERE creator_fk = %s", (test_creator_fk,))
         # Req #2997: agents registry. Junctions CASCADE from both parents, so
         # deleting agents + instructions + architecture_documents is sufficient;
         # agents is deleted first so its links go before the shared catalogs.
