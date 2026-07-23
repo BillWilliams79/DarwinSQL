@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 44 tables in FK-dependency order
+-- All 46 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS customer_releases, builds, branches, build_projects,
+DROP TABLE IF EXISTS agent_telemetry_rows, agent_telemetry_runs,
+    customer_releases, builds, branches, build_projects,
     customers,
     agent_documents, agent_instructions,
     architecture_documents, instructions, agents,
@@ -899,3 +900,52 @@ CREATE TABLE agent_documents (
         FOREIGN KEY (document_fk) REFERENCES architecture_documents (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
+
+-- Agent Context Telemetry (req #3031, migration 069) — run header + N per-agent
+-- rows (parent/child, run is the container -> CASCADE). ACTUAL-token captures.
+CREATE TABLE agent_telemetry_runs (
+    id               INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    captured_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    label            VARCHAR(256) NOT NULL,
+    agent_count      INT          NOT NULL DEFAULT 0,
+    harness_version  VARCHAR(64)  NULL,
+    source_note      TEXT         NULL,
+    creator_fk       VARCHAR(64)  NOT NULL,
+    create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts        TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_agent_telemetry_runs_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_agent_telemetry_runs_captured_at ON agent_telemetry_runs (captured_at);
+
+CREATE TABLE agent_telemetry_rows (
+    id                          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    run_fk                      INT          NOT NULL,
+    agent_name                  VARCHAR(128) NOT NULL,
+    role                        VARCHAR(16)  NOT NULL DEFAULT 'architect',
+    session_kind                VARCHAR(16)  NOT NULL DEFAULT 'subagent',
+    boot_time_ms                INT          NULL,
+    cc_base_tokens              INT          NULL,
+    claude_md_tokens            INT          NULL,
+    charter_stub_tokens         INT          NULL,
+    boot_payload_tokens         INT          NULL,
+    autoload_tokens             INT          NULL,
+    docs_loaded                 INT          NULL,
+    docs_expected               INT          NULL,
+    start_work_context_tokens   INT          NULL,
+    footnote                    VARCHAR(512) NULL,
+    sort_order                  SMALLINT     NULL,
+    creator_fk                  VARCHAR(64)  NOT NULL,
+    create_ts                   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts                   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_agent_telemetry_rows_run
+        FOREIGN KEY (run_fk) REFERENCES agent_telemetry_runs (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_rows_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_agent_telemetry_rows_run_fk ON agent_telemetry_rows (run_fk);
