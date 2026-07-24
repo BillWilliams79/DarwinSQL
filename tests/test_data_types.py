@@ -1941,7 +1941,7 @@ def test_agents_columns(db_connection):
 
 def test_instructions_columns(db_connection):
     """instructions: reusable named blocks of BINDING text (req #2997). Its own
-    data type precisely so ONE row can bind many agents — the common grooming
+    data type precisely so ONE row can bind many agents — the common curating
     duty is a single row referenced by every architect."""
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'instructions')
@@ -2019,7 +2019,7 @@ def test_agent_documents_columns(db_connection):
     assert cols['agent_fk']['Key'] == 'PRI'
     assert cols['document_fk']['Null'] == 'NO'
     assert cols['document_fk']['Key'] == 'PRI'
-    assert cols['relationship']['Type'] == 'varchar(24)'
+    assert cols['relationship']['Type'] == "set('owned','curated','autoload','referenced')"
     assert cols['relationship']['Null'] == 'NO'
     assert cols['relationship']['Default'] == 'referenced'
     assert cols['notes']['Type'] == 'varchar(512)'

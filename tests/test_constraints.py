@@ -1309,9 +1309,9 @@ def test_agent_documents_single_owner_on_insert(db_connection, test_creator_fk):
 
 
 def test_agent_documents_single_owner_on_update(db_connection, test_creator_fk):
-    """The ownership rule must not be bypassable by linking as 'groomed' and then
-    UPDATEing to 'owned' — the generated column is recomputed on update, so the
-    UNIQUE key catches this path too."""
+    """The ownership rule must not be bypassable by linking as 'curated' and then
+    UPDATEing to 'owned' — the generated column is recomputed on update (via
+    FIND_IN_SET), so the UNIQUE key catches this path too."""
     with db_connection.cursor() as cur:
         a1 = _insert_agent(cur, test_creator_fk)
         a2 = _insert_agent(cur, test_creator_fk)
@@ -1322,7 +1322,7 @@ def test_agent_documents_single_owner_on_update(db_connection, test_creator_fk):
             "VALUES (%s, %s, 'owned')", (a1, doc))
         cur.execute(
             "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
-            "VALUES (%s, %s, 'groomed')", (a2, doc))
+            "VALUES (%s, %s, 'curated')", (a2, doc))
         with pytest.raises(pymysql.IntegrityError):
             cur.execute(
                 "UPDATE agent_documents SET relationship = 'owned' "
@@ -1336,7 +1336,9 @@ def test_agent_documents_multiple_non_owned_allowed(db_connection, test_creator_
     only one may own it."""
     with db_connection.cursor() as cur:
         doc = _insert_document(cur, test_creator_fk)
-        for rel in ('groomed', 'referenced', 'design_language', 'guardian'):
+        # Non-'owned' links, including a multi-role SET value — none set the
+        # owned_document_fk virtual column, so all coexist on one document.
+        for rel in ('curated', 'autoload', 'referenced', 'curated,autoload'):
             cur.execute(
                 "INSERT INTO agent_documents (agent_fk, document_fk, relationship) "
                 "VALUES (%s, %s, %s)", (_insert_agent(cur, test_creator_fk), doc, rel))
@@ -1392,7 +1394,7 @@ def test_agent_documents_cascade_from_agent(db_connection, test_creator_fk):
 
 
 def test_agent_instructions_cascade_and_sharing(db_connection, test_creator_fk):
-    """One instruction row may bind MANY agents — this is how the common grooming
+    """One instruction row may bind MANY agents — this is how the common curating
     duty reaches every architect. Deleting one agent must not disturb the others'
     bindings."""
     with db_connection.cursor() as cur:
