@@ -1394,7 +1394,7 @@ def test_agent_documents_cascade_from_agent(db_connection, test_creator_fk):
 
 
 def test_agent_instructions_cascade_and_sharing(db_connection, test_creator_fk):
-    """One instruction row may bind MANY agents — this is how the common grooming
+    """One instruction row may bind MANY agents — this is how the common curating
     duty reaches every architect. Deleting one agent must not disturb the others'
     bindings."""
     with db_connection.cursor() as cur:

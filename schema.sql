@@ -865,9 +865,8 @@ CREATE TABLE IF NOT EXISTS branch_acceptance_tests (
 -- ============================================================================
 -- Agents registry (req #2997, migration 067)
 -- Agent .md files are thin charter stubs; their durable knowledge lives here
--- and is read at boot via darwin://agents/<Agent Name>. The DB is canon —
--- scripts/swarm/reconcile-agent-stubs.sh mirrors overview/ai_model/effort into
--- stub frontmatter at session boundaries.
+-- and is read at boot via darwin://agents/<Agent Name>. The DB is canon;
+-- ai_model/effort are also kept in the stub frontmatter by hand (no reconciler).
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS agents (
