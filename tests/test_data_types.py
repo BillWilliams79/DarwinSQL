@@ -2019,7 +2019,7 @@ def test_agent_documents_columns(db_connection):
     assert cols['agent_fk']['Key'] == 'PRI'
     assert cols['document_fk']['Null'] == 'NO'
     assert cols['document_fk']['Key'] == 'PRI'
-    assert cols['relationship']['Type'] == 'varchar(24)'
+    assert cols['relationship']['Type'] == "set('owned','curated','autoload','referenced')"
     assert cols['relationship']['Null'] == 'NO'
     assert cols['relationship']['Default'] == 'referenced'
     assert cols['notes']['Type'] == 'varchar(512)'
