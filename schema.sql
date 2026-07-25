@@ -891,10 +891,12 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS instructions (
     id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    name        VARCHAR(256) NOT NULL,   -- UNIQUE; idempotent-seed key
+    name        VARCHAR(256) NOT NULL,   -- UNIQUE; an English title (req #3068)
     content     TEXT         NOT NULL,   -- binding text; one row can bind many agents
     closed      TINYINT(1)   NOT NULL DEFAULT 0,
-    sort_order  SMALLINT     NULL,
+    -- NO sort_order (migration 072). Browse order is chosen in the UI; the only
+    -- ordering that means anything is `agent_instructions.sort_order` below, the
+    -- per-(agent, instruction) BOOT LOAD ORDER.
     creator_fk  VARCHAR(64)  NOT NULL,
     create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,

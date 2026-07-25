@@ -844,7 +844,7 @@ CREATE TABLE instructions (
     name        VARCHAR(256) NOT NULL,
     content     TEXT         NOT NULL,
     closed      TINYINT(1)   NOT NULL DEFAULT 0,
-    sort_order  SMALLINT     NULL,
+    -- NO sort_order (migration 072) — see schema.sql.
     creator_fk  VARCHAR(64)  NOT NULL,
     create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
