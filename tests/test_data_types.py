@@ -1942,12 +1942,19 @@ def test_agents_columns(db_connection):
 def test_instructions_columns(db_connection):
     """instructions: reusable named blocks of BINDING text (req #2997). Its own
     data type precisely so ONE row can bind many agents — the common curating
-    duty is a single row referenced by every architect."""
+    duty is a single row referenced by every architect.
+
+    NO sort_order: migration 072 (req #3063) dropped the catalog-order column
+    after measuring it byte-identical to agent_instructions.sort_order on all 78
+    live rows and driving nothing once the browse-sort control shipped. The
+    junction column — the BOOT LOAD ORDER — is asserted separately below and is
+    the only instruction ordering left in the schema."""
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'instructions')
-    expected = {'id', 'name', 'content', 'closed', 'sort_order', 'creator_fk',
+    expected = {'id', 'name', 'content', 'closed', 'creator_fk',
                 'create_ts', 'update_ts'}
     assert set(cols.keys()) == expected
+    assert 'sort_order' not in cols
 
     assert cols['id']['Key'] == 'PRI'
     # name is the idempotent-seed key.
@@ -1962,7 +1969,8 @@ def test_instructions_columns(db_connection):
 
 def test_agent_instructions_columns(db_connection):
     """agent_instructions: plain junction (req #2997). Composite PK; its
-    sort_order — NOT instructions.sort_order — drives boot load order.
+    sort_order is the boot load order — and since migration 072 dropped
+    instructions.sort_order, it is the ONLY instruction ordering in the schema.
 
     The ABSENCE of an `id` column is load-bearing, not incidental (req #3049).
     Lambda-Rest's PUT requires `id`, so the Darwin UI cannot update a link: a

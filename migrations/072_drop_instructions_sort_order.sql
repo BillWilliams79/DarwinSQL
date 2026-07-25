@@ -1,0 +1,72 @@
+-- 072_drop_instructions_sort_order.sql
+--
+-- Req #3063 — drop `instructions.sort_order`, the "catalog order" column.
+-- DDL. User-approved 2026-07-25.
+--
+-- WHY IT GOES
+--
+-- The column was meant to hand-order the registry browse list, and was documented
+-- as explicitly NOT the boot load order — that is `agent_instructions.sort_order`,
+-- set per (agent, instruction) pair. `agentRegistryUtils.js` carries a standing
+-- banner warning that conflating the two is "the likeliest defect in this area".
+--
+-- Measured before removing, not assumed: on all 78 live production rows the
+-- catalog value equals every one of that row's junction load slots. Zero
+-- divergence. Note WHY, because it matters for the risk assessment: that is a
+-- SEEDING ARTIFACT, not a structural identity. 72 rows have exactly one binding,
+-- and the handful of shared `common-*` rows happen to sit at the same slot on all
+-- 12 architects. The two columns answer different questions — one instruction
+-- bound to 12 agents has twelve load positions and one catalog position — they
+-- simply never diverged because nobody ever set them apart.
+--
+-- So the column is not redundant data. It is a second fact nobody wants: since
+-- the sort menu shipped (Agent Count / Name / Last updated, req #3063) it drives
+-- nothing visible and survives only as a tiebreak. An editable field with no
+-- observable effect, whose sole remaining contribution was a documented trap.
+-- Removing it removes the trap outright.
+--
+-- WHAT IS NOT AFFECTED
+--
+-- `agent_instructions.sort_order` is UNTOUCHED. It is the boot load order, it is
+-- what `list_instructions_for_agent` orders by, and it is what the up/down arrows
+-- on /agents/:id move. Every helper that manipulates it — nextInstructionSortOrder,
+-- repairInstructionOrders, planInstructionSwap, setAgentInstructionOrder — keeps
+-- working unchanged. If you are reading this while debugging load order, this
+-- migration is not your culprit.
+--
+-- ROLLBACK
+--   ALTER TABLE instructions ADD COLUMN sort_order SMALLINT NULL AFTER closed;
+-- The values are recoverable from `agent_instructions.sort_order` for every row
+-- as of this migration, precisely because they had not diverged:
+--   UPDATE instructions i
+--     JOIN (SELECT instruction_fk, MIN(sort_order) s
+--             FROM agent_instructions GROUP BY instruction_fk) j
+--       ON j.instruction_fk = i.id
+--      SET i.sort_order = j.s;
+--
+-- APPLY ORDER: darwin_dev first, verify, THEN production behind an RDS snapshot.
+--
+-- ⛔ ON PRODUCTION, THIS MUST RUN **AFTER** THE DARWIN FRONTEND DEPLOY, NOT BEFORE.
+--
+-- The bundle deployed before req #3063 requests this column BY NAME in the REST
+-- URL: `devopsQueries.js` carried `defaultFields: '...,sort_order,...'` with
+-- `fieldsInKey: true` and `defaultSort: 'sort_order:asc'`. Run this DDL while that
+-- bundle is still live and Lambda-Rest emits `SELECT ... sort_order` /
+-- `ORDER BY sort_order` against a table that no longer has the column — MySQL
+-- raises 1054 Unknown column and /agents/instructions returns 500 for every user
+-- who has not reloaded.
+--
+-- NOTE for /swarm-complete: its Step 4.5 (DB migration check) runs BETWEEN the
+-- merge and Step 5.5 (deploy). Applying this file at 4.5 opens exactly that
+-- outage window. Apply 071 at 4.5 if you like — it is DML and harmless to either
+-- bundle — but hold 072 until after 5.5 reports success.
+--
+-- Deferring this file to a later session is FREE: production just keeps an unused
+-- nullable column that nothing reads once the new bundle is live.
+
+ALTER TABLE instructions DROP COLUMN sort_order;
+
+-- Verification: expect an empty result (column gone).
+-- SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'instructions'
+--    AND COLUMN_NAME = 'sort_order';
