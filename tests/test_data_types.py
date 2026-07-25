@@ -1961,10 +1961,21 @@ def test_instructions_columns(db_connection):
 
 
 def test_agent_instructions_columns(db_connection):
-    """agent_instructions: plain junction (req #2997). Composite PK, sort_order
-    drives boot load order."""
+    """agent_instructions: plain junction (req #2997). Composite PK; its
+    sort_order — NOT instructions.sort_order — drives boot load order.
+
+    The ABSENCE of an `id` column is load-bearing, not incidental (req #3049).
+    Lambda-Rest's PUT requires `id`, so the Darwin UI cannot update a link: a
+    load-order change is a DELETE + re-POST, and every insert must use an array
+    body because the single-object POST path re-reads `WHERE id = ...` and fails
+    after committing. Adding an `id` here would silently invalidate that whole
+    strategy, so assert it explicitly rather than leaving it implied by the
+    column set.
+    """
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'agent_instructions')
+    assert 'id' not in cols, \
+        'agent_instructions must have no id column — see Darwin/src/Agents/actions/instructionsApi.js'
     assert set(cols.keys()) == {'agent_fk', 'instruction_fk', 'sort_order'}
     assert cols['agent_fk']['Null'] == 'NO'
     assert cols['agent_fk']['Key'] == 'PRI'
