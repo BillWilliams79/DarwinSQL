@@ -19,6 +19,7 @@ Migration 016 retroactively tracks those table definitions. Tests must apply
 import os
 import glob
 import re
+import pymysql
 import pytest
 
 
@@ -194,6 +195,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_ad_agent', 'fk_ad_document',
         'uq_agents_name', 'uq_agents_file_name', 'uq_instructions_name',
         'uq_architecture_documents_name', 'uq_agent_documents_owner',
+        # Migration 073 — agent_instructions per-agent load-slot guard (req #3075)
+        'uq_agent_instructions_slot',
         # Migration 069 — agent context telemetry (req #3031)
         'fk_agent_telemetry_runs_creator',
         'fk_agent_telemetry_rows_run', 'fk_agent_telemetry_rows_creator',
@@ -930,3 +933,128 @@ def test_migration_040_drops_scheduled_column(db_connection, migration_test_pref
         # Cleanup
         cur.execute(f"DROP TABLE {table_name}")
         db_connection.commit()
+
+
+def test_migration_073_repairs_duplicate_slots_then_adds_the_key(
+        db_connection, migration_test_prefix):
+    """Migration 073 (req #3075) — the band-preserving repair, exercised for real.
+
+    NON-TOLERANT on purpose. `test_migration_sequence_applies` replays every
+    migration with tolerant=True, which silently swallows any non-CREATE failure —
+    so it can prove 073 does not break the replay, but it can NOT prove the repair
+    runs or is correct. This test applies the actual file text through the same
+    prefix-rewrite machinery with tolerant=False, against seeded collisions.
+
+    The seeded shapes, and what each one is here to catch:
+      agent 1  the production shape — per-agent band 1..6, shared band 100..102,
+               one collider at slot 1. Asserts the collider lands at 7 (first free
+               slot in its own band) and that NOTHING else is renumbered.
+      agent 2  TWO separate colliding groups on one agent. A per-group "next free
+               slot" formulation hands both movers slot 3; only a per-agent GLOBAL
+               ordinal keeps them distinct. This is the case that dictated the
+               shape of the migration.
+      agent 3  a three-way collision.
+      agent 4  several NULL slots — must survive untouched and unconstrained.
+      agent 5  already clean and SPARSE — must not be renumbered, because the
+               banded layout is deliberate (see repairInstructionOrders).
+      agent 6  shares a slot VALUE with agent 5, which stays legal: agent_fk leads
+               the key.
+    """
+    table = f"{migration_test_prefix}_agent_instructions"
+
+    seed = [
+        (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5), (1, 6, 6),
+        (1, 83, 100), (1, 85, 101), (1, 86, 102), (1, 84, 1),
+        (2, 10, 1), (2, 11, 1), (2, 12, 2), (2, 13, 2),
+        (3, 20, 5), (3, 21, 5), (3, 22, 5),
+        (4, 30, None), (4, 31, None), (4, 32, 1),
+        (5, 40, 2), (5, 41, 9), (5, 42, 100),
+        (6, 40, 2),
+    ]
+
+    with db_connection.cursor() as cur:
+        # Standalone: migration 073 touches only agent_instructions, so the FK
+        # parents are not needed and their absence keeps the fixture honest about
+        # what the migration actually reads.
+        cur.execute(f"""
+            CREATE TABLE {table} (
+                agent_fk       INT      NOT NULL,
+                instruction_fk INT      NOT NULL,
+                sort_order     SMALLINT NULL,
+                PRIMARY KEY (agent_fk, instruction_fk)
+            )
+        """)
+        cur.executemany(
+            f"INSERT INTO {table} (agent_fk, instruction_fk, sort_order) "
+            "VALUES (%s, %s, %s)", seed)
+        db_connection.commit()
+
+        sql = _read_migration_file(os.path.join(
+            _get_migrations_dir(), '073_agent_instructions_unique_slot.sql'))
+        _apply_migration(cur, sql, migration_test_prefix, tolerant=False)
+        db_connection.commit()
+
+        cur.execute(f"SELECT agent_fk, instruction_fk, sort_order FROM {table}")
+        after = {(r['agent_fk'], r['instruction_fk']): r['sort_order']
+                 for r in cur.fetchall()}
+
+    assert len(after) == len(seed), 'the repair must not add or drop rows'
+
+    # No duplicate NUMBERED slot survives anywhere.
+    numbered = [k for k, v in after.items() if v is not None]
+    slots = [(agent, after[(agent, instr)]) for agent, instr in numbered]
+    assert len(slots) == len(set(slots)), f'duplicate slot survived: {after}'
+
+    # agent 1 — the collider moves to the first free slot in its own band; every
+    # other row, in BOTH bands, keeps its stored value.
+    assert after[(1, 84)] == 7
+    for instr in (1, 2, 3, 4, 5, 6):
+        assert after[(1, instr)] == instr, 'per-agent band was renumbered'
+    assert (after[(1, 83)], after[(1, 85)], after[(1, 86)]) == (100, 101, 102), \
+        'shared band was disturbed'
+
+    # agent 2 — keepers hold; the two movers take DISTINCT free slots.
+    assert (after[(2, 10)], after[(2, 12)]) == (1, 2)
+    assert sorted((after[(2, 11)], after[(2, 13)])) == [3, 4]
+
+    # agent 3 — lowest instruction_fk keeps the slot, matching the tie-break both
+    # readers land on for a colliding pair (declared as `id ASC` in darwin-mcp;
+    # emergent from a stable sort over clustered-PK order in the Darwin UI).
+    assert after[(3, 20)] == 5
+    assert sorted((after[(3, 21)], after[(3, 22)])) == [1, 2]
+
+    # agent 4 — NULLs are left alone.
+    assert (after[(4, 30)], after[(4, 31)], after[(4, 32)]) == (None, None, 1)
+
+    # agent 5 — clean and sparse, untouched. agent 6 shares the value 2 with it.
+    assert (after[(5, 40)], after[(5, 41)], after[(5, 42)]) == (2, 9, 100)
+    assert after[(6, 40)] == 2
+
+    # The key is live on the repaired table, and still permits many NULLs.
+    with db_connection.cursor() as cur:
+        cur.execute(f"SHOW INDEX FROM {table} WHERE Key_name = "
+                    f"'{migration_test_prefix}_uq_agent_instructions_slot'")
+        index = sorted(cur.fetchall(), key=lambda r: r['Seq_in_index'])
+        assert [r['Column_name'] for r in index] == ['agent_fk', 'sort_order']
+        assert all(r['Non_unique'] == 0 for r in index)
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(f"UPDATE {table} SET sort_order = 5 "
+                        "WHERE agent_fk = 3 AND instruction_fk = 21")
+        db_connection.rollback()
+
+        cur.execute(f"UPDATE {table} SET sort_order = NULL "
+                    "WHERE agent_fk = 4 AND instruction_fk = 32")
+        db_connection.commit()
+
+    # Re-running the repair is a no-op — it must converge in one pass.
+    with db_connection.cursor() as cur:
+        repair_only = sql.split('ALTER TABLE')[0]
+        _apply_migration(cur, repair_only, migration_test_prefix, tolerant=False)
+        db_connection.commit()
+        cur.execute(f"SELECT agent_fk, instruction_fk, sort_order FROM {table}")
+        again = {(r['agent_fk'], r['instruction_fk']): r['sort_order']
+                 for r in cur.fetchall()}
+    expected = dict(after)
+    expected[(4, 32)] = None
+    assert again == expected, 'the repair is not idempotent'

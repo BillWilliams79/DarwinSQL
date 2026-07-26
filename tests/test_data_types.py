@@ -1979,6 +1979,12 @@ def test_agent_instructions_columns(db_connection):
     after committing. Adding an `id` here would silently invalidate that whole
     strategy, so assert it explicitly rather than leaving it implied by the
     column set.
+
+    sort_order STAYS NULLABLE under migration 073 (req #3075). The new
+    uq_agent_instructions_slot key constrains NUMBERED slots only; NULL means "no
+    slot claimed" and MySQL UNIQUE permits many NULLs per agent. Making the column
+    NOT NULL would invent a slot for a link that deliberately has none and would
+    break link_agent_instruction's COALESCE contract (req #3049).
     """
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'agent_instructions')
@@ -1991,6 +1997,29 @@ def test_agent_instructions_columns(db_connection):
     assert cols['instruction_fk']['Key'] == 'PRI'
     assert cols['sort_order']['Type'] == 'smallint'
     assert cols['sort_order']['Null'] == 'YES'
+    # DESCRIBE reports Key only for the LEADING column of an index, and
+    # uq_agent_instructions_slot leads on agent_fk (already 'PRI') — so
+    # sort_order's Key stays blank even with the new key in place. The key
+    # itself is asserted by SHOW INDEX in the next test, which is the reliable
+    # place to look for it.
+    assert cols['sort_order']['Key'] == ''
+
+
+def test_agent_instructions_slot_key_exists(db_connection):
+    """migration 073 (req #3075): the per-agent load-slot uniqueness guard.
+
+    Asserted as an index shape rather than only as behaviour because the KEY is
+    the whole deliverable — the behavioural half lives in test_constraints.py.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW INDEX FROM agent_instructions "
+                    "WHERE Key_name = 'uq_agent_instructions_slot'")
+        rows = sorted(cur.fetchall(), key=lambda r: r['Seq_in_index'])
+
+    assert rows, 'uq_agent_instructions_slot is missing — migration 073 not applied'
+    assert [r['Column_name'] for r in rows] == ['agent_fk', 'sort_order'], \
+        'agent_fk must lead: the invariant is per-agent, not global'
+    assert all(r['Non_unique'] == 0 for r in rows), 'the key must be UNIQUE'
 
 
 def test_architecture_documents_columns(db_connection):

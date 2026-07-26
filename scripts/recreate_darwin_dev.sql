@@ -857,8 +857,12 @@ CREATE TABLE instructions (
 CREATE TABLE agent_instructions (
     agent_fk        INT      NOT NULL,
     instruction_fk  INT      NOT NULL,
-    sort_order      SMALLINT NULL,
+    sort_order      SMALLINT NULL,       -- boot load order
     PRIMARY KEY (agent_fk, instruction_fk),
+    -- req #3075, migration 073: one agent may not load two instructions at the
+    -- same NUMBERED slot. NULL claims no slot, and MySQL UNIQUE permits many
+    -- NULLs — that is the intended scope, not a gap.
+    UNIQUE KEY uq_agent_instructions_slot (agent_fk, sort_order),
     CONSTRAINT fk_ai_agent
         FOREIGN KEY (agent_fk) REFERENCES agents (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
