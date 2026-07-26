@@ -1,4 +1,4 @@
--- 074_add_machine_model_effort_to_agent_telemetry_runs.sql
+-- 075_add_machine_model_effort_to_agent_telemetry_runs.sql
 --
 -- Req #3098: capture WHICH machine, WHICH Claude model, and WHAT effort level
 -- ran each agent-context telemetry capture.

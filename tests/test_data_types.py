@@ -1688,6 +1688,8 @@ def test_table_count(db_connection):
         'architecture_documents', 'agent_documents',
         # Req #3031 — agent context telemetry (run header + per-agent rows)
         'agent_telemetry_runs', 'agent_telemetry_rows',
+        # Req #3096 — per-document actual-token rows (child of agent_telemetry_rows)
+        'agent_telemetry_row_docs',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -2100,7 +2102,7 @@ def test_agent_telemetry_runs_columns(db_connection):
     assert cols['harness_version']['Null'] == 'YES'
     assert cols['source_note']['Type'] == 'text'
     assert cols['source_note']['Null'] == 'YES'
-    # req #3098, migration 074 — fixed default for both backfill and future rows.
+    # req #3098, migration 075 — fixed default for both backfill and future rows.
     assert cols['ai_model']['Type'] == 'varchar(16)'
     assert cols['ai_model']['Null'] == 'NO'
     assert cols['ai_model']['Default'] == 'opus'
@@ -2144,3 +2146,31 @@ def test_agent_telemetry_rows_columns(db_connection):
     assert cols['footnote']['Type'] == 'varchar(512)'
     assert cols['footnote']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
+
+
+# ============================================================================
+# Req #3096 — Per-document actual-token rows (migration 074)
+# ============================================================================
+
+def test_agent_telemetry_row_docs_columns(db_connection):
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'agent_telemetry_row_docs')
+    expected = {'id', 'row_fk', 'doc_path', 'actual_tokens', 'sort_order',
+                'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['row_fk']['Null'] == 'NO'
+    assert cols['row_fk']['Key'] == 'MUL'          # indexed FK
+    assert cols['doc_path']['Type'] == 'varchar(512)'
+    assert cols['doc_path']['Null'] == 'NO'
+    # actual_tokens is NOT NULL — unlike the parent row's phase-nullable token
+    # columns, a doc row only exists once it has been measured.
+    assert cols['actual_tokens']['Null'] == 'NO'
+    assert cols['actual_tokens']['Type'] in ('int', 'int(11)')
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['sort_order']['Null'] == 'YES'
+    assert cols['creator_fk']['Null'] == 'NO'
+    # Log/infra table like its parent — no title/status/closed/category_fk.
+    assert 'title' not in cols
+    assert 'closed' not in cols
+    assert 'category_fk' not in cols
