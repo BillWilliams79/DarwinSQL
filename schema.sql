@@ -982,12 +982,21 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_runs (
     agent_count      INT          NOT NULL DEFAULT 0,
     harness_version  VARCHAR(64)  NULL,
     source_note      TEXT         NULL,
+    ai_model         VARCHAR(16)  NOT NULL DEFAULT 'opus',
+                                            -- req #3098, migration 075; fixed default for both backfill and future rows (capture-log row, not an editable setting)
+    effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
+                                            -- req #3098, migration 075; see ai_model comment
+    machine_fk       INT          NULL,
+                                            -- req #3098, migration 075; which machine ran the capture (NULL = unknown)
     creator_fk       VARCHAR(64)  NOT NULL,
     create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts        TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_agent_telemetry_runs_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_runs_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE INDEX ix_agent_telemetry_runs_captured_at ON agent_telemetry_runs (captured_at);

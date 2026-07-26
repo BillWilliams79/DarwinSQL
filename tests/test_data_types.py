@@ -2089,7 +2089,8 @@ def test_agent_telemetry_runs_columns(db_connection):
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'agent_telemetry_runs')
     expected = {'id', 'captured_at', 'label', 'agent_count', 'harness_version',
-                'source_note', 'creator_fk', 'create_ts', 'update_ts'}
+                'source_note', 'ai_model', 'effort', 'machine_fk',
+                'creator_fk', 'create_ts', 'update_ts'}
     assert set(cols.keys()) == expected
     assert cols['id']['Key'] == 'PRI'
     assert cols['captured_at']['Null'] == 'NO'
@@ -2101,6 +2102,15 @@ def test_agent_telemetry_runs_columns(db_connection):
     assert cols['harness_version']['Null'] == 'YES'
     assert cols['source_note']['Type'] == 'text'
     assert cols['source_note']['Null'] == 'YES'
+    # req #3098, migration 075 — fixed default for both backfill and future rows.
+    assert cols['ai_model']['Type'] == 'varchar(16)'
+    assert cols['ai_model']['Null'] == 'NO'
+    assert cols['ai_model']['Default'] == 'opus'
+    assert cols['effort']['Type'] == 'varchar(16)'
+    assert cols['effort']['Null'] == 'NO'
+    assert cols['effort']['Default'] == 'high'
+    assert cols['machine_fk']['Null'] == 'YES'
+    assert cols['machine_fk']['Key'] == 'MUL'          # indexed FK
     assert cols['creator_fk']['Null'] == 'NO'
     # Log/infra table — no title/status/closed/category_fk/sort_order on the header.
     assert 'title' not in cols

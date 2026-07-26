@@ -914,12 +914,18 @@ CREATE TABLE agent_telemetry_runs (
     agent_count      INT          NOT NULL DEFAULT 0,
     harness_version  VARCHAR(64)  NULL,
     source_note      TEXT         NULL,
+    ai_model         VARCHAR(16)  NOT NULL DEFAULT 'opus',
+    effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
+    machine_fk       INT          NULL,
     creator_fk       VARCHAR(64)  NOT NULL,
     create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts        TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_agent_telemetry_runs_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_runs_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE INDEX ix_agent_telemetry_runs_captured_at ON agent_telemetry_runs (captured_at);

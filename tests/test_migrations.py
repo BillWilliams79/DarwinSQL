@@ -207,6 +207,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_agent_telemetry_rows_run', 'fk_agent_telemetry_rows_creator',
         # Migration 074 — per-document actual-token rows (req #3096)
         'fk_agent_telemetry_row_docs_row', 'fk_agent_telemetry_row_docs_creator',
+        # Migration 075 — machine/model/effort on agent telemetry runs (req #3098)
+        'fk_agent_telemetry_runs_machine',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
