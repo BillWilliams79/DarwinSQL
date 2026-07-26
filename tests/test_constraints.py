@@ -1455,3 +1455,164 @@ def test_agents_creator_fk_cascade(db_connection):
         cur.execute("SELECT COUNT(*) AS c FROM agents WHERE creator_fk = %s", (cfk,))
         assert cur.fetchone()['c'] == 0
     db_connection.rollback()
+
+
+# ===========================================================================
+# Req #3075 — agent_instructions per-agent load-slot uniqueness (migration 073)
+# ===========================================================================
+#
+# `agent_instructions.sort_order` is the BOOT LOAD ORDER, and since migration 072
+# it is the only instruction ordering left in the schema. Before migration 073
+# nothing stopped two instructions from claiming the same slot on one agent — the
+# composite PK (agent_fk, instruction_fk) is satisfied by both rows — so the agent
+# booted with those two rules in arbitrary relative order, with no error and a
+# payload that still looked well-formed. Production `darwin` was carrying exactly
+# one such pair (agent 5, slot 1) when this key was added.
+
+
+def _insert_instruction(cur, creator_fk, name=None):
+    """Insert an instructions row and return its id."""
+    name = name or f"Test Instruction {uuid.uuid4().hex[:8]}"
+    cur.execute(
+        "INSERT INTO instructions (name, content, creator_fk) VALUES (%s, %s, %s)",
+        (name, 'binding text', creator_fk))
+    return cur.lastrowid
+
+
+def test_agent_instructions_duplicate_slot_rejected_on_insert(
+        db_connection, test_creator_fk):
+    """uq_agent_instructions_slot: THE guard. One agent, one numbered slot, one
+    instruction. This is the insert path `nextInstructionSortOrder` feeds when two
+    concurrent binds both compute max+1 from the same pre-write cache."""
+    with db_connection.cursor() as cur:
+        agent = _insert_agent(cur, test_creator_fk)
+        first = _insert_instruction(cur, test_creator_fk)
+        second = _insert_instruction(cur, test_creator_fk)
+
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 1)", (agent, first))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                        "sort_order) VALUES (%s, %s, 1)", (agent, second))
+    db_connection.rollback()
+
+
+def test_agent_instructions_duplicate_slot_rejected_on_update(
+        db_connection, test_creator_fk):
+    """The guard must not be bypassable by inserting at a free slot and then
+    UPDATEing onto an occupied one — the same shape as the agent_documents
+    owner-key update test. This is the path a reorder takes when it moves a row
+    onto a slot it did not first vacate."""
+    with db_connection.cursor() as cur:
+        agent = _insert_agent(cur, test_creator_fk)
+        first = _insert_instruction(cur, test_creator_fk)
+        second = _insert_instruction(cur, test_creator_fk)
+
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 1)", (agent, first))
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 2)", (agent, second))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("UPDATE agent_instructions SET sort_order = 1 "
+                        "WHERE agent_fk = %s AND instruction_fk = %s",
+                        (agent, second))
+    db_connection.rollback()
+
+
+def test_agent_instructions_slot_is_per_agent_not_global(
+        db_connection, test_creator_fk):
+    """agent_fk LEADS the key on purpose. Every agent has its own slot 1 — the
+    banded scheme puts per-agent rules at 1..N on all of them — so a global
+    UNIQUE(sort_order) would have been catastrophically wrong."""
+    with db_connection.cursor() as cur:
+        agent_a = _insert_agent(cur, test_creator_fk)
+        agent_b = _insert_agent(cur, test_creator_fk)
+        instruction = _insert_instruction(cur, test_creator_fk)
+
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 1)", (agent_a, instruction))
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 1)", (agent_b, instruction))
+
+        cur.execute("SELECT COUNT(*) AS c FROM agent_instructions "
+                    "WHERE instruction_fk = %s AND sort_order = 1", (instruction,))
+        assert cur.fetchone()['c'] == 2
+    db_connection.rollback()
+
+
+def test_agent_instructions_multiple_null_slots_allowed(
+        db_connection, test_creator_fk):
+    """NULL claims NO slot, and MySQL UNIQUE treats NULLs as distinct — so one
+    agent may hold any number of unordered links. That is the deliberate scope of
+    the invariant, not a hole in it: forcing NOT NULL would invent a slot for a
+    link that has none and would break link_agent_instruction's COALESCE contract
+    (req #3049), where an omitted sort_order must leave the stored value alone.
+
+    Unnumbered links stay deterministically ordered anyway: darwin-mcp sorts
+    NULLs last then by id, and the Darwin UI's stable sort leaves them in the
+    junction's clustered-PK order."""
+    with db_connection.cursor() as cur:
+        agent = _insert_agent(cur, test_creator_fk)
+        first = _insert_instruction(cur, test_creator_fk)
+        second = _insert_instruction(cur, test_creator_fk)
+        third = _insert_instruction(cur, test_creator_fk)
+
+        for instruction in (first, second, third):
+            cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                        "sort_order) VALUES (%s, %s, NULL)", (agent, instruction))
+
+        cur.execute("SELECT COUNT(*) AS c FROM agent_instructions "
+                    "WHERE agent_fk = %s AND sort_order IS NULL", (agent,))
+        assert cur.fetchone()['c'] == 3
+    db_connection.rollback()
+
+
+def test_agent_instructions_banded_sparse_slots_allowed(
+        db_connection, test_creator_fk):
+    """The live layout must remain legal: per-agent rules at 1..N, the shared
+    `common-*` rows together at 100+, and the 4..99 gap kept free for extension.
+    UNIQUE forbids duplicates, not sparseness — nothing here pushes toward a 1..N
+    renumber, which is what `repairInstructionOrders` exists to avoid."""
+    with db_connection.cursor() as cur:
+        agent = _insert_agent(cur, test_creator_fk)
+        for slot in (1, 2, 3, 100, 101, 102):
+            instruction = _insert_instruction(cur, test_creator_fk)
+            cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                        "sort_order) VALUES (%s, %s, %s)", (agent, instruction, slot))
+
+        cur.execute("SELECT sort_order FROM agent_instructions "
+                    "WHERE agent_fk = %s ORDER BY sort_order", (agent,))
+        assert [r['sort_order'] for r in cur.fetchall()] == [1, 2, 3, 100, 101, 102]
+    db_connection.rollback()
+
+
+def test_agent_instructions_delete_then_repost_swap_is_legal(
+        db_connection, test_creator_fk):
+    """The reorder path, replayed exactly as the UI performs it.
+
+    `setAgentInstructionOrder` DELETEs EVERY row in the write set and only then
+    re-creates them all in one array-body POST — it never holds two rows of one
+    agent at the same numbered slot, not even transiently. That sequencing is the
+    reason a plain UNIQUE key is safe here, so it is pinned as a test rather than
+    left as a claim in a comment."""
+    with db_connection.cursor() as cur:
+        agent = _insert_agent(cur, test_creator_fk)
+        first = _insert_instruction(cur, test_creator_fk)
+        second = _insert_instruction(cur, test_creator_fk)
+
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 1), (%s, %s, 2)",
+                    (agent, first, agent, second))
+
+        # DELETE both, then re-POST both swapped — the real write sequence.
+        cur.execute("DELETE FROM agent_instructions WHERE agent_fk = %s AND "
+                    "instruction_fk IN (%s, %s)", (agent, first, second))
+        cur.execute("INSERT INTO agent_instructions (agent_fk, instruction_fk, "
+                    "sort_order) VALUES (%s, %s, 2), (%s, %s, 1)",
+                    (agent, first, agent, second))
+
+        cur.execute("SELECT instruction_fk, sort_order FROM agent_instructions "
+                    "WHERE agent_fk = %s ORDER BY sort_order", (agent,))
+        assert [(r['instruction_fk'], r['sort_order']) for r in cur.fetchall()] == \
+            [(second, 1), (first, 2)]
+    db_connection.rollback()
