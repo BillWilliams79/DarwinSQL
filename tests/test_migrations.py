@@ -200,6 +200,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 069 — agent context telemetry (req #3031)
         'fk_agent_telemetry_runs_creator',
         'fk_agent_telemetry_rows_run', 'fk_agent_telemetry_rows_creator',
+        # Migration 074 — machine/model/effort on agent telemetry runs (req #3098)
+        'fk_agent_telemetry_runs_machine',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
