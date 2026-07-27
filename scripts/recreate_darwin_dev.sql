@@ -307,6 +307,10 @@ CREATE TABLE swarm_sessions (
     -- per-type delta into the bucket for the phase being left.
     phase_tokens    JSON            NULL,
     tokens_at_last_transition JSON  NULL,
+    -- Cost rollup (req #3117, migration 077) — flat sums of the *_secs buckets
+    -- and phase_tokens[*].output, readable from a projected list read.
+    wall_secs_total INT             NULL,
+    output_tokens_total INT         NULL,
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
