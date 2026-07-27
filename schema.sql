@@ -316,6 +316,13 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     --   tokens_at_last_transition: { input,cache_write,cache_read,output } baseline.
     phase_tokens    JSON            NULL,
     tokens_at_last_transition JSON  NULL,
+    -- Cost ROLLUP (req #3117, migration 077). Flat sums of the two blocks above,
+    -- stamped server-side by darwin-mcp on every genuine swarm_status change.
+    -- They exist because list reads DROP phase_tokens (req #3078) — a rollup the
+    -- render path cannot read is no rollup at all (req #3080 design rule 5).
+    -- NULL = not yet computed (pre-backfill); 0 = computed and genuinely zero.
+    wall_secs_total INT             NULL,   -- sum of the 8 *_secs buckets
+    output_tokens_total INT         NULL,   -- sum of phase_tokens[*].output
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,

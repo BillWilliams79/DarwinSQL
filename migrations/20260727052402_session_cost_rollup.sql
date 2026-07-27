@@ -1,0 +1,61 @@
+-- 20260727052402_session_cost_rollup.sql
+--
+-- Req #3117 (epic: Swarm Orchestration Feature, plan step 40 / wave 3): the two
+-- flat cost columns that let a plan page render cost from a BOUNDED read.
+--
+-- THE NAMED FAILURE (req #3080 design rule 5). The manual plan-page POC (req
+-- #3083) assembled its Cost column by fetching every session of every
+-- requirement — ~86 per-requirement MCP reads, 2-3 minutes per regeneration.
+-- It had to ship with the feature disabled behind a `PLANPAGE_COSTS` toggle to
+-- keep the page current at all. The rule that came out of it: cost/telemetry
+-- rollups are PRECOMPUTED AND STORED server-side, never assembled by
+-- per-requirement fan-out at render time.
+--
+-- WHY FLAT INT COLUMNS AND NOT A VIEW OR THE EXISTING BLOBS. The two summable
+-- facts already live on the row: the eight `*_secs` phase accumulators (req
+-- #2332) and the `phase_tokens` JSON (req #2839). But since req #3078 every
+-- `swarm_sessions` LIST read is PROJECTED at the gateway and deliberately drops
+-- `phase_tokens` — carrying the blobs made an unfiltered read ~8.1 MB against
+-- 848 rows, past Lambda's 6 MB response ceiling, so the read returned 502 rather
+-- than a big payload. A rollup that can only be computed from a dropped column
+-- is a rollup the render path cannot have. Two INTs survive the projection at
+-- ~8 bytes a row.
+--
+--   wall_secs_total     = starting + waiting + planning + implementing + review
+--                         + completion + paused + legacy seconds
+--   output_tokens_total = sum of phase_tokens[*].output
+--
+-- NULL vs 0 IS LOAD-BEARING. NULL means "not computed yet" — a session that
+-- predates this migration and has not been backfilled. 0 means "computed, and
+-- the answer is zero" (a session with no instrumentation samples). The UI
+-- renders both as an em-dash today, but conflating them in the DATA would make
+-- the backfill unable to tell what it still has to do, so the columns are
+-- NULLable with no default rather than `NOT NULL DEFAULT 0`.
+--
+-- Both columns are SERVER-MANAGED: darwin-mcp's `update_swarm_session` stamps
+-- them on every genuine `swarm_status` transition and rejects any caller that
+-- tries to write them directly, exactly like the `*_secs` buckets.
+--
+-- PROJECTED-TABLE ORDERING (memory/database.md § Projected tables). This alters
+-- one of the four tables darwin-mcp reads with an explicit `fields=` list, and
+-- `services/common.py::TABLE_COLUMNS` names both new columns in the same change.
+-- Lambda-Rest validates `fields=` against `DESC <table>` on the LIVE database and
+-- 400s the WHOLE read on an unknown name, so this DDL must land on production
+-- BEFORE the daemon restarts on the new code.
+--
+-- APPLY HISTORY — read this before matching artifacts up. This migration was
+-- authored as `077_session_cost_rollup.sql` and APPLIED to darwin_dev and then
+-- production under that name, before req #3121 merged and froze the legacy
+-- integer era at 076. The DDL below is byte-identical to what ran; only the
+-- FILENAME changed, and load_sql.py keeps no ledger, so nothing needs re-applying.
+-- Two artifacts still carry the old id and are correct as recorded:
+--   * the pre-DDL RDS snapshot is `darwin-pre-migration-077-20260726-221156`
+--     (taken 2026-07-27T05:12Z, status=available) — NOT a `...-20260727052402-...`
+--     one, and that is the snapshot to restore from if this migration ever needs
+--     rolling back;
+--   * this file is the LAST migration authored under the integer scheme, which
+--     is why 077 exists nowhere in migrations/ despite having been applied.
+
+ALTER TABLE swarm_sessions
+    ADD COLUMN wall_secs_total     INT NULL AFTER tokens_at_last_transition,
+    ADD COLUMN output_tokens_total INT NULL AFTER wall_secs_total;

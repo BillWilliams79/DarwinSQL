@@ -563,7 +563,24 @@ def test_swarm_sessions_columns(db_connection):
     # Tolerate both pre- and post-migration-064 state (req #2943 added machine_fk).
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
+    # Req #3117, migration 077 — the two flat cost-rollup columns. Tolerated the
+    # same way its predecessors are, so this file stays runnable against a
+    # database that has not taken 077 yet (the dev-before-production window).
+    for rollup in ('wall_secs_total', 'output_tokens_total'):
+        if rollup in columns:
+            expected_fields.append(rollup)
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #3117 rollup columns (migration 077) — NULLable INTs with NO default.
+    # The nullability is the contract, not an accident: NULL means "not computed
+    # yet" (a session predating the backfill) and 0 means "computed, and zero"
+    # (no instrumentation samples). A `NOT NULL DEFAULT 0` would erase the
+    # distinction the backfill uses to know what work remains.
+    for rollup in ('wall_secs_total', 'output_tokens_total'):
+        if rollup in columns:
+            assert columns[rollup]['Type'] == 'int'
+            assert columns[rollup]['Null'] == 'YES'
+            assert columns[rollup]['Default'] is None
 
     # req #2943 machine_fk (migration 064) — nullable FK, no default.
     if 'machine_fk' in columns:
