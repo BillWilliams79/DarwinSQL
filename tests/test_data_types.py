@@ -2135,7 +2135,10 @@ def test_agent_telemetry_rows_columns(db_connection):
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'agent_telemetry_rows')
     expected = {'id', 'run_fk', 'agent_name', 'role', 'session_kind',
-                'boot_time_ms', 'cc_base_tokens', 'claude_md_tokens',
+                'boot_time_ms', 'cc_base_tokens',
+                'system_prompt_tokens', 'system_tools_tokens', 'mcp_tools_tokens',
+                'skills_tokens', 'custom_agents_tokens',
+                'claude_md_tokens',
                 'charter_stub_tokens', 'boot_payload_tokens', 'autoload_tokens',
                 'docs_loaded', 'docs_expected', 'start_work_context_tokens',
                 'footnote', 'sort_order', 'creator_fk', 'create_ts', 'update_ts'}
@@ -2153,7 +2156,11 @@ def test_agent_telemetry_rows_columns(db_connection):
     # ACTUAL-token columns are nullable (phase may be n/a — PrimaryAI, Code Reviewer).
     for c in ('boot_time_ms', 'cc_base_tokens', 'claude_md_tokens',
               'charter_stub_tokens', 'boot_payload_tokens', 'autoload_tokens',
-              'docs_loaded', 'docs_expected', 'start_work_context_tokens'):
+              'docs_loaded', 'docs_expected', 'start_work_context_tokens',
+              # ground-truth CC-base breakdown (req #3095, migration 074) — nullable,
+              # a row's breakdown may not have been captured
+              'system_prompt_tokens', 'system_tools_tokens', 'mcp_tools_tokens',
+              'skills_tokens', 'custom_agents_tokens'):
         assert cols[c]['Null'] == 'YES', c
         assert cols[c]['Type'] in ('int', 'int(11)'), (c, cols[c]['Type'])
     assert cols['footnote']['Type'] == 'varchar(512)'

@@ -975,6 +975,11 @@ CREATE TABLE agent_telemetry_rows (
     session_kind                VARCHAR(16)  NOT NULL DEFAULT 'subagent',
     boot_time_ms                INT          NULL,
     cc_base_tokens              INT          NULL,
+    system_prompt_tokens        INT          NULL,   -- harness instructions (req #3095, migration 074)
+    system_tools_tokens         INT          NULL,   -- built-in tool schemas (req #3095, migration 074)
+    mcp_tools_tokens            INT          NULL,   -- MCP tools/resources listing (req #3095, migration 074)
+    skills_tokens               INT          NULL,   -- available-skills listing (req #3095, migration 074)
+    custom_agents_tokens        INT          NULL,   -- other-custom-agent listing (req #3095, migration 074)
     claude_md_tokens            INT          NULL,
     charter_stub_tokens         INT          NULL,
     boot_payload_tokens         INT          NULL,
