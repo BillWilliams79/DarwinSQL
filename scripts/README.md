@@ -4,6 +4,7 @@
 
 | Script | Purpose |
 |--------|---------|
+| `new-migration.sh` | **Allocate a new migration file.** The only sanctioned way to create one — stamps a unique `YYYYMMDDHHMMSS_description.sql` from the UTC clock instead of `max(NNN)+1` off a stale clone, which produced three duplicate prefixes on main (046, 050, 074). Never hand-pick a migration filename (req #3121) |
 | `cleanup_darwin_dev.py` | Remove orphaned test data from darwin_dev |
 | `cleanup_e2e.py` | Comprehensive E2E test data cleanup (darwin or darwin_dev) |
 | `seed_darwin_dev.py` | Create darwin_dev database, its tables, and seed E2E test users |
