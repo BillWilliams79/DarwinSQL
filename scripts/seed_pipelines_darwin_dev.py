@@ -88,12 +88,69 @@ RECONSTRUCTED_TIME_GATE = ('3', '2026-07-24 06:31:38')
 # Step 7 links no requirements at all ("record the all-passing regression
 # baseline"), so it has nothing to derive state from — the single case
 # pipeline_steps.completed_at exists for. Stamp from baseline_2c.recorded.
+#
+# A req-less step NOT listed here loads with completed_at NULL and derives
+# Scheduled forever, so `main` names any such step in the generated header rather
+# than letting it pass silently — the plan can grow one at any time.
 MANUAL_COMPLETION = {'7': '2026-07-26 01:30:00'}
+
+# Requirement statuses that count as finished when deriving a step's state
+# (design rule 1). Used only to REPORT the fixture's derived-vs-stored parity in
+# the header — nothing here is written to the database.
+TERMINAL_STATUSES = ('met', 'deferred', 'wontfix')
 
 
 def step_id(plan_step):
     """plan step id -> pipeline_steps.id."""
     return STEP_BASE + int(plan_step)
+
+
+def steps_phrase(step_ids):
+    """"step 7" / "steps 1, 12, 13" — a readable list for the header prose."""
+    if not step_ids:
+        return ''
+    return '%s %s' % ('step' if len(step_ids) == 1 else 'steps', ', '.join(step_ids))
+
+
+def wrap_comment(text, width=52):
+    """Greedy word-wrap for a header comment body. The plan grows, so any line
+    built from its contents must be able to run past one line without the
+    generated SQL developing a 300-character comment."""
+    lines, current = [], ''
+    for word in text.split():
+        candidate = word if not current else current + ' ' + word
+        if len(candidate) > width and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def derived_state(row, statuses):
+    """Design rule 1, applied to one plan row.
+
+    Mirrors the RULES in `pipelineModel.js::deriveStepState`, translated to the
+    plan's vocabulary (the engine says `running`; the plan's stored `state` field
+    says `active`, and this function exists only to compare against that field).
+
+    `statuses` maps requirement id -> requirement_status. Requirements that do
+    not resolve are DROPPED, matching the engine's `.filter(Boolean)` — so a step
+    whose only link is unresolvable falls through to the req-less branch rather
+    than reporting Scheduled. A req-less step has nothing to derive from; it is
+    Complete exactly when it carries a manual completion stamp.
+    """
+    linked = [statuses.get(rid) for rid in row['reqs']]
+    linked = [s for s in linked if s]
+    if not linked:
+        return 'done' if row['step'] in MANUAL_COMPLETION else 'pending'
+    if any(s == 'development' for s in linked):
+        return 'active'
+    if all(s in TERMINAL_STATUSES for s in linked):
+        return 'done'
+    return 'pending'
 
 
 def sh(*args):
@@ -143,7 +200,21 @@ def main():
     plan = json.loads(match.group(1))
     rows = plan['rows']
 
-    live = {r['id']: r for r in mcp_read('darwin://requirements') if isinstance(r, dict)}
+    # ABORT on a truncated read rather than generating from it. Every list read is
+    # enforced against a 1 MB payload budget (req #3078) and truncates with a
+    # visible `{"_truncated": ...}` marker instead of silently — but a marker is
+    # only useful if someone looks. Nothing downstream can catch a bad generation
+    # here: a requirement lost to truncation would take the `'authoring'` fallback
+    # below, and the fixture would LOAD CLEAN and derive the wrong step state.
+    # Same guard the two swarm backfill scripts carry.
+    requirement_rows = mcp_read('darwin://requirements')
+    truncated = [r for r in requirement_rows if isinstance(r, dict) and '_truncated' in r]
+    if truncated:
+        raise SystemExit(
+            'darwin://requirements came back TRUNCATED (%s) — refusing to generate a '
+            'fixture from a partial requirements read. Read the requirements in '
+            'bounded slices, or narrow the projection, and re-run.' % truncated[0]['_truncated'])
+    live = {r['id']: r for r in requirement_rows if isinstance(r, dict) and 'id' in r}
 
     # ---- epics: first-appearance order in the plan ----------------------
     epic_names = []
@@ -173,6 +244,25 @@ def main():
             req_feature.setdefault(rid, (row['feature'], row['epic']))
     req_feature.update(CROSS_EPIC)
     req_ids = sorted(req_feature)
+
+    # ---- shape facts the header REPORTS ---------------------------------
+    # Computed, never spelled out in prose: the plan grows, and a header that
+    # names "steps 1, 12, 13, 19, 33" or "33 of 34 rows" from a previous
+    # generation is a generated file lying about its own contents.
+    by_step = {row['step']: row for row in rows}
+    # `.strip()` matters: a whitespace-only title is falsy to the fallback below
+    # but TRUTHY to a bare `not row.get('title')`, so it would load an empty step
+    # name with nothing in the header naming it — the one case this warning is
+    # for.
+    untitled_steps = [row['step'] for row in rows if not (row.get('title') or '').strip()]
+    reqless_steps = [row['step'] for row in rows if not row['reqs']]
+    unstamped_reqless = [s for s in reqless_steps if s not in MANUAL_COMPLETION]
+    multi_req_steps = [(row['step'], len(row['reqs'])) for row in rows if len(row['reqs']) > 1]
+    step_to_step_edges = sum(1 for row in rows if row['deps'] != '-'
+                             for token in row['deps'].split() if not token.startswith('T:'))
+    statuses = {rid: live.get(rid, {}).get('requirement_status') for rid in req_ids}
+    divergences = [(row['step'], row['state'], derived_state(row, statuses))
+                   for row in rows if derived_state(row, statuses) != row['state']]
 
     out = []
     w = out.append
@@ -219,15 +309,30 @@ def main():
     w('--')
     w('-- ## Mutation end-states this fixture carries (acceptance criteria)')
     w('--')
-    w('--   * req-less step        step 7 — no requirement links; completed_at is the')
+    if untitled_steps:
+        w('--   * %-20s %s — no `title` in the PLAN-JSON, so the step name'
+          % ('UNTITLED steps', steps_phrase(untitled_steps)))
+        w('--                          falls back to a truncated summary. Give them a')
+        w('--                          short name in req #%d and regenerate.' % REQ_ID)
+    w('--   * %-20s %s — no requirement links; completed_at is the'
+      % ('req-less step' + ('s' if len(reqless_steps) != 1 else ''),
+         steps_phrase(reqless_steps) or '(none in this plan)'))
     w('--                          manual stamp, the one case the column exists for.')
-    w('--   * dual-condition gate  step 3 — two dep rows of different kinds (step 1 +')
+    if unstamped_reqless:
+        w('--                          UNSTAMPED (loads NULL, derives Scheduled forever, add')
+        w('--                          to MANUAL_COMPLETION): %s.' % steps_phrase(unstamped_reqless))
+    w('--   * %-20s step %s — two dep rows of different kinds (step 1 +'
+      % ('dual-condition gate', RECONSTRUCTED_TIME_GATE[0]))
     w('--                          a wall-clock row). RECONSTRUCTED from req #3080 stage 0')
     w('--                          (s0.4); the live PLAN-JSON has no T: tokens because the')
     w('--                          normalization dropped them. The ONLY dep row here not')
     w('--                          present in the live plan.')
-    w('--   * multi-req steps      steps 1, 12, 13, 19, 33 — launch units of 5, 7, 5, 3 and')
-    w('--                          2 requirements (design rule 2).')
+    w('--   * %-20s launch units of >1 requirement, as step(count)' % 'multi-req steps')
+    w('--                          pairs (design rule 2):')
+    # step(count), not two parallel lists: a wrapped list of ids over a wrapped
+    # list of counts would make the reader zip them across a line break.
+    for line in wrap_comment(', '.join('%s(%d)' % pair for pair in multi_req_steps) + '.'):
+        w('--                          ' + line)
     w('--   * cross-epic step      step 19 — #3105 sits under a different epic than the')
     w('--                          step\'s dominant label, which is why labels attach at')
     w('--                          the requirement (design rule 10).')
@@ -241,21 +346,52 @@ def main():
       % ', '.join(f'{k}->{v}' for k, v in sorted(MACHINE_MAP.items())))
     w('-- become NULL ("Any").')
     w('--')
-    w('-- ## KNOWN DIVERGENCE — derived state vs the plan\'s stored `state` (STEP 19)')
+    w('-- ## DERIVED STATE vs the plan\'s stored `state`')
     w('--')
-    w('-- Deriving state from this fixture reproduces the plan\'s own `state` field for 33')
-    w('-- of 34 rows. Step 19 is the exception: the plan says done, the derivation says')
-    w('-- Running, because the step links #3083 — the TRACKING requirement — and a')
-    w('-- tracking requirement stays in `development` for the entire life of the plan it')
-    w('-- describes. The fixture is NOT adjusted to match. It stores no state at all, by')
-    w('-- design, and hand-correcting the inputs to make a rule come out right is exactly')
-    w('-- the move design rule 1 forbids.')
-    w('--')
-    w('-- The divergence is a REAL INPUT for the derivation engine (req #3112) and the')
-    w('-- Primary doctrine (req #3116): a plan\'s own tracking requirement is a container,')
-    w('-- not work, and a step that links one will pin itself Running forever unless the')
-    w('-- rule excludes it. Recorded here rather than smoothed away so the engine work')
-    w('-- has the case in hand.')
+    w('-- Deriving state from this fixture reproduces the plan\'s own `state` field for %d'
+      % (len(rows) - len(divergences)))
+    w('-- of %d rows.' % len(rows))
+    # EVERY claim below is gated on having actually found the thing it claims.
+    # The numbers used to be hardcoded; the CAUSAL prose was too, and a confident
+    # wrong explanation costs more than a stale count — an unconditional "the rest
+    # is plan lag" would mislabel a second tracking requirement, or a requirement
+    # that fell out of the live read, as drift.
+    if not divergences:
+        w('--')
+        w('-- No divergences this generation: every step\'s derived state matches the')
+        w('-- plan\'s own `state` field. Nothing to explain.')
+    else:
+        w('--')
+        w('-- The exceptions, computed at generation time:')
+        w('--')
+        for step, stored, derived in divergences:
+            w('--   step %-3s plan says %-8s derivation says %s' % (step, stored, derived))
+        w('--')
+        w('-- The fixture is NOT adjusted to match. It stores no state at all, by design,')
+        w('-- and hand-correcting the inputs to make a rule come out right is exactly the')
+        w('-- move design rule 1 forbids. Causes found in THIS list:')
+        w('--')
+        tracker_steps = [s for s, _, _ in divergences
+                         if REQ_ID in (by_step[s]['reqs'] if s in by_step else [])]
+        if tracker_steps:
+            w('--   * TRACKING REQUIREMENT — %s link#%d, this plan\'s own tracking'
+              % (steps_phrase(tracker_steps), REQ_ID))
+            w('--     requirement, which stays in `development` for the entire life of the')
+            w('--     plan it describes, so the step pins itself Running forever. A REAL')
+            w('--     INPUT for the derivation engine (req #3112) and the Primary doctrine')
+            w('--     (req #3116) — a tracking requirement is a container, not work —')
+            w('--     carried by req #3123. Recorded rather than smoothed away.')
+        others = [s for s, _, _ in divergences if s not in tracker_steps]
+        if others:
+            w('--   * PLAN LAG — %s. Here the DERIVATION is the correct value: the stored'
+              % steps_phrase(others))
+            w('--     `state` field is hand-maintained and drifts the moment a session')
+            w('--     starts or closes. That lag is the exact failure design rule 1 names')
+            w('--     (plan row 13 read "Scheduled" while five sessions ran), so these rows')
+            w('--     are the product FIXING the problem rather than describing it.')
+            w('--     Read them as such only after ruling out a second tracking')
+            w('--     requirement or a requirement missing from the live read — this')
+            w('--     generator classifies by the plan\'s own tracker id and nothing more.')
     w('')
     w('-- The plan text carries em-dashes, ellipses and other non-ASCII; declare the')
     w('-- connection charset so a loader that does not default to utf8mb4 cannot mangle')
@@ -269,7 +405,8 @@ def main():
     w('--')
     w('-- pipeline_step_deps goes FIRST and explicitly: dep_step_fk is ON DELETE')
     w('-- RESTRICT, so deleting the pipeline while step-to-step edges exist is refused')
-    w('-- (this plan has 30 of them). That two-phase teardown is the documented contract')
+    w('-- (this plan has %d of them). That two-phase teardown is the documented contract'
+      % step_to_step_edges)
     w('-- from migration 076 — not a quirk of this file.')
     w('-- ---------------------------------------------------------------------------')
     w('DELETE FROM pipeline_step_deps WHERE step_fk IN '
@@ -423,16 +560,27 @@ def main():
     w('-- requirement statuses upserted above, and storing it is exactly the hand-edited')
     w('-- field that let plan row 13 read "Scheduled" while five sessions ran.')
     w('--')
-    w('-- title is the plan summary cut to VARCHAR(256) at a word boundary; `notes` holds')
-    w('-- the full untruncated text, including the evidence and disposition prose.')
+    w('-- title is the plan row\'s OWN `title` field — a short name ("Session Drain",')
+    w('-- "Bounded MCP Reads"), 11-36 chars across this plan. `notes` holds the full')
+    w('-- `summary` prose: the evidence, the disposition, the corrections.')
+    w('--')
+    w('-- Until req #3119 this loaded `short_title(summary)` into title and left the')
+    w('-- plan\'s real `title` unread, so every step name was a truncated paragraph and')
+    w('-- the visualizer\'s Step: Title mode showed 40 chars of description. A title is')
+    w('-- a NAME, not the first line of the description — and the plan has carried the')
+    w('-- names all along.')
     w('-- ---------------------------------------------------------------------------')
     w('INSERT INTO pipeline_steps (id, pipeline_fk, title, run, notes, completed_at, '
       'creator_fk) VALUES')
     values = []
     for row in rows:
         summary = ' '.join(row['summary'].split())
-        title = short_title(summary)
-        notes = summary if title != summary else None
+        # A row without its own title is a plan-authoring defect, not something to
+        # paper over silently — but the fixture still has to load, so fall back to
+        # the old truncation and NAME the row in the header so it gets fixed.
+        plan_title = (row.get('title') or '').strip()
+        title = short_title(plan_title) if plan_title else short_title(summary)
+        notes = summary
         values.append('  (%d, %d, %s, %s, %s, %s, %s)' % (
             step_id(row['step']), PIPELINE_ID, q(title), q(row.get('run', 'auto')),
             q(notes), q(MANUAL_COMPLETION.get(row['step'])), q(CREATOR)))
