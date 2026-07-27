@@ -6,12 +6,15 @@
 |--------|---------|
 | `cleanup_darwin_dev.py` | Remove orphaned test data from darwin_dev |
 | `cleanup_e2e.py` | Comprehensive E2E test data cleanup (darwin or darwin_dev) |
-| `seed_darwin_dev.py` | Create darwin_dev database, all 12 tables, and seed E2E test users |
+| `seed_darwin_dev.py` | Create darwin_dev database, its tables, and seed E2E test users |
 | `seed_e2e_workers.py` | Seed 8 parallel E2E worker profiles |
-| `recreate_darwin_dev.sql` | Drop and recreate all 12 darwin_dev tables from scratch |
+| `recreate_darwin_dev.sql` | Drop and recreate all 52 darwin_dev tables from scratch (req #3111) |
 | `add-api-route.sh` | Add a new /darwin/{table} route to Darwin API Gateway (ANY + OPTIONS, CORS, verifies Lambda wildcard coverage, deploy) |
 | `verify-lambda-policy.sh` | Live-gated check that the RestApi-MySql-Lambda resource policy is minimal + every route still authorized (req #3002) |
 | `get-e2e-token.sh` | Print a fresh Cognito IdToken for the E2E test user (used by verify-lambda-policy.sh) |
+| `load_sql.py` | Apply a .sql file to a Darwin DB in one transaction. This machine has no `mysql` CLI; the splitter is quote-aware because fixture literals contain `;` and `#` (req #3111) |
+| `seed_pipelines_darwin_dev.py` | Generate `seed_pipelines_darwin_dev.sql` from the LIVE req #3083 PLAN-JSON — the Substrate Rebuild plan as pipelines data (req #3111) |
+| `seed_pipelines_darwin_dev.sql` | GENERATED. darwin_dev ONLY — production stays empty until the live-plan cutover. Regenerate, never hand-edit |
 
 ## Guardrails
 

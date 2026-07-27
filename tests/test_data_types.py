@@ -433,6 +433,12 @@ def test_requirements_columns(db_connection):
     # Tolerate both pre- and post-migration-066 state (req #2978 added machine_fk).
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
+    # Req #3111, migration 076 — the story tier of Epic > Feature > Story.
+    # Asserted unconditionally: 076 lands in darwin_dev and production together
+    # (coordination_type=deployed), so there is no window in which a live
+    # database legitimately lacks it — unlike the tolerated columns above, which
+    # were added by dev-first migrations that could lag.
+    expected_fields.append('feature_fk')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -1377,6 +1383,7 @@ def test_features_columns(db_connection):
         columns = {row['Field']: row for row in cur.fetchall()}
 
     expected_fields = ['id', 'title', 'description', 'feature_status',
+                       'epic_fk',   # req #3111, migration 076 — parent epic
                        'category_fk', 'creator_fk', 'closed', 'sort_order',
                        'create_ts', 'update_ts']
     assert set(columns.keys()) == set(expected_fields), \
@@ -1690,6 +1697,12 @@ def test_table_count(db_connection):
         'agent_telemetry_runs', 'agent_telemetry_rows',
         # Req #3096 — per-document actual-token rows (child of agent_telemetry_rows)
         'agent_telemetry_row_docs',
+        # Req #3111 — Swarm Orchestration schema foundation (migration 076).
+        # epics tops the agile hierarchy (Epic > Feature > Story); the four
+        # pipeline tables are the execution artifact.
+        'epics',
+        'pipelines', 'pipeline_steps',
+        'pipeline_step_requirements', 'pipeline_step_deps',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -2181,3 +2194,243 @@ def test_agent_telemetry_row_docs_columns(db_connection):
     assert 'title' not in cols
     assert 'closed' not in cols
     assert 'category_fk' not in cols
+
+
+# ============================================================================
+# Req #3111 — Swarm Orchestration schema foundation (migration 076)
+#
+# The absent columns are load-bearing and are asserted as such: pipeline_steps
+# carries no state column (state is DERIVED from linked requirements — req #3080
+# design rule 1), no seq/sort_order (display order is computed at render —
+# rule 3), and no epic/feature column (labels attach at the requirement —
+# rule 10). A test that only checked what exists would let any of those creep
+# back in.
+# ============================================================================
+
+def test_epics_columns(db_connection):
+    """epics is a CONTENT table: full baseline, no status enum (MVP discipline —
+    an epic is open until its features are done; a second hand-maintained
+    lifecycle buys nothing)."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'epics')
+    expected = {'id', 'title', 'description', 'category_fk', 'creator_fk',
+                'closed', 'sort_order', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    assert cols['id']['Type'] == 'int'
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['title']['Null'] == 'NO'
+
+    # NULL-able, unlike features.description which is NOT NULL: an epic's title
+    # is frequently the whole story ("Swarm Substrate Rebuild").
+    assert cols['description']['Type'] == 'text'
+    assert cols['description']['Null'] == 'YES'
+
+    assert cols['category_fk']['Type'] == 'int'
+    assert cols['category_fk']['Null'] == 'NO'
+    assert cols['category_fk']['Key'] == 'MUL'
+
+    assert cols['creator_fk']['Type'] == 'varchar(64)'
+    assert cols['creator_fk']['Null'] == 'NO'
+    assert cols['creator_fk']['Key'] == 'MUL'
+
+    assert cols['closed']['Type'] == 'tinyint(1)'
+    assert cols['closed']['Null'] == 'NO'
+    assert cols['closed']['Default'] == '0'
+
+    assert cols['sort_order']['Type'] == 'smallint'
+    assert cols['sort_order']['Null'] == 'YES'
+
+    # No lifecycle enum — deliberate.
+    assert 'epic_status' not in cols
+    assert 'status' not in cols
+
+
+def test_features_epic_fk_column(db_connection):
+    """features.epic_fk — the middle tier. NULL-able because features predate
+    epics and an unfiled feature is legitimate."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'features')
+    assert 'epic_fk' in cols
+    assert cols['epic_fk']['Type'] == 'int'
+    assert cols['epic_fk']['Null'] == 'YES'
+    assert cols['epic_fk']['Default'] is None
+    assert cols['epic_fk']['Key'] == 'MUL'          # indexed FK
+
+
+def test_requirements_feature_fk_column(db_connection):
+    """requirements.feature_fk — the story tier, and the ONLY place epic/feature
+    labels attach (req #3080 design rule 10). NULL-able: the overwhelming
+    majority of Darwin's requirements have no feature and never will."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'requirements')
+    assert 'feature_fk' in cols
+    assert cols['feature_fk']['Type'] == 'int'
+    assert cols['feature_fk']['Null'] == 'YES'
+    assert cols['feature_fk']['Default'] is None
+    assert cols['feature_fk']['Key'] == 'MUL'       # indexed FK
+
+
+def test_pipelines_columns(db_connection):
+    """pipelines is an EXECUTION table: status enum + started_at/completed_at,
+    and NO closed / sort_order / category_fk (a plan spans categories)."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'pipelines')
+    expected = {'id', 'title', 'description', 'pipeline_status', 'machine_fk',
+                'creator_fk', 'started_at', 'completed_at', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    assert cols['title']['Type'] == 'varchar(256)'
+    assert cols['title']['Null'] == 'NO'
+
+    assert cols['description']['Type'] == 'text'    # the goal
+    assert cols['description']['Null'] == 'YES'
+
+    # draft|active|paused|completed|aborted — STORED, human/Primary-controlled.
+    # This is the one hand-set lifecycle in the feature and that is deliberate:
+    # it is a declaration of intent about the plan, not an observation about
+    # work, so there is nothing to derive it from (contrast pipeline_steps).
+    assert cols['pipeline_status']['Type'] == 'varchar(16)'
+    assert cols['pipeline_status']['Null'] == 'NO'
+    assert cols['pipeline_status']['Default'] == 'draft'
+
+    assert cols['machine_fk']['Type'] == 'int'
+    assert cols['machine_fk']['Null'] == 'YES'      # NULL = any machine
+    assert cols['machine_fk']['Key'] == 'MUL'
+
+    assert cols['creator_fk']['Null'] == 'NO'
+
+    # started_at is NULL-able here, deviating from the execution-table baseline
+    # (swarm_sessions/test_runs use NOT NULL DEFAULT CURRENT_TIMESTAMP). Those
+    # rows are born running; a pipeline is born `draft` and may sit unstarted for
+    # days, so a creation-time stamp in started_at would be a lie.
+    assert cols['started_at']['Type'] == 'timestamp'
+    assert cols['started_at']['Null'] == 'YES'
+    assert cols['started_at']['Default'] is None
+    assert cols['completed_at']['Type'] == 'timestamp'
+    assert cols['completed_at']['Null'] == 'YES'
+    assert cols['completed_at']['Default'] is None
+
+    # Execution table — no soft-delete flag, no hand-sort, no category.
+    assert 'closed' not in cols
+    assert 'sort_order' not in cols
+    assert 'category_fk' not in cols
+
+
+def test_pipeline_steps_columns(db_connection):
+    """pipeline_steps — the LAUNCH UNIT. What is ABSENT is the design.
+
+    No state column (rule 1): the POC's step 13 launched five sessions while the
+    plan still read "Scheduled", because the launch and the plan edit were two
+    separate manual actions. A column that can disagree with reality is the bug.
+
+    No seq/sort_order (rule 3): display order is topological, then state bands,
+    then streams — recomputed every render. Stored row order is insertion
+    history and must never drive display.
+
+    No epic/feature (rule 10): a launch unit may legitimately cross epics, so
+    the label attaches to the requirement and the step derives its dominant one.
+
+    No gate_expr (rule 4): dependencies are rows in pipeline_step_deps.
+    """
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'pipeline_steps')
+    expected = {'id', 'pipeline_fk', 'title', 'run', 'notes', 'completed_at',
+                'creator_fk', 'create_ts', 'update_ts'}
+    assert set(cols.keys()) == expected
+
+    # Stable step identity: assigned once by AUTO_INCREMENT, never renumbered,
+    # never reused (rule 4).
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    assert cols['pipeline_fk']['Type'] == 'int'
+    assert cols['pipeline_fk']['Null'] == 'NO'
+    assert cols['pipeline_fk']['Key'] == 'MUL'      # indexed FK
+
+    assert cols['title']['Type'] == 'varchar(256)'  # the step summary
+    assert cols['title']['Null'] == 'NO'
+
+    assert cols['run']['Type'] == 'varchar(8)'      # auto|manual
+    assert cols['run']['Null'] == 'NO'
+    assert cols['run']['Default'] == 'auto'
+
+    # Evidence / findings / dispositions. Must hold prose a status enum cannot
+    # express, e.g. "gate passed WITH exceptions: 3709/3713, 4 pre-existing
+    # failures dispositioned into #3061".
+    assert cols['notes']['Type'] == 'text'
+    assert cols['notes']['Null'] == 'YES'
+
+    # The ONE stored timing value, scoped precisely: the manual-completion stamp
+    # for a step with ZERO linked requirements (fixture case: plan step 7).
+    # A requirement-backed step derives its state and leaves this NULL.
+    assert cols['completed_at']['Type'] == 'timestamp'
+    assert cols['completed_at']['Null'] == 'YES'
+    assert cols['completed_at']['Default'] is None
+
+    assert cols['creator_fk']['Null'] == 'NO'
+
+    # The absent columns — each one a design rule with teeth.
+    for banned in ('state', 'status', 'step_status', 'seq', 'sort_order',
+                   'epic_fk', 'feature_fk', 'gate_expr', 'kind', 'machine_fk',
+                   'requirement_fk', 'started_at', 'closed'):
+        assert banned not in cols, f'pipeline_steps must not carry {banned}'
+
+
+def test_pipeline_step_requirements_columns(db_connection):
+    """Junction: composite PK, no id, no creator_fk, no timestamps."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'pipeline_step_requirements')
+    assert set(cols.keys()) == {'step_fk', 'requirement_fk'}
+    assert cols['step_fk']['Type'] == 'int'
+    assert cols['step_fk']['Null'] == 'NO'
+    assert cols['step_fk']['Key'] == 'PRI'
+    assert cols['requirement_fk']['Type'] == 'int'
+    assert cols['requirement_fk']['Null'] == 'NO'
+    assert cols['requirement_fk']['Key'] == 'PRI'
+
+
+def test_pipeline_step_deps_columns(db_connection):
+    """One row = one condition on one step. Convention (application-enforced):
+    exactly one of dep_step_fk / time_at is set. A dual-condition gate is two
+    rows on one step — the real s0.4 case waited on a requirement AND a 2-hour
+    wall-clock gate, two independent wait mechanisms."""
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'pipeline_step_deps')
+    assert set(cols.keys()) == {'id', 'step_fk', 'dep_step_fk', 'time_at'}
+
+    assert cols['id']['Key'] == 'PRI'
+    assert cols['id']['Extra'] == 'auto_increment'
+
+    assert cols['step_fk']['Type'] == 'int'
+    assert cols['step_fk']['Null'] == 'NO'
+    assert cols['step_fk']['Key'] == 'MUL'          # leads uq_pipeline_step_deps
+
+    # Both condition columns are NULL-able — the row carries one or the other.
+    assert cols['dep_step_fk']['Type'] == 'int'
+    assert cols['dep_step_fk']['Null'] == 'YES'
+    assert cols['time_at']['Type'] == 'timestamp'
+    assert cols['time_at']['Null'] == 'YES'
+    assert cols['time_at']['Default'] is None
+
+    # Edges inherit the step's ownership; they are not independently owned.
+    assert 'creator_fk' not in cols
+
+
+def test_pipeline_step_deps_unique_key(db_connection):
+    """UNIQUE(step_fk, dep_step_fk) forbids duplicate step-to-step edges, with
+    step_fk LEADING so the key also serves lookups by step."""
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW INDEX FROM pipeline_step_deps "
+                    "WHERE Key_name = 'uq_pipeline_step_deps'")
+        idx = {r['Seq_in_index']: r for r in cur.fetchall()}
+    assert idx, 'uq_pipeline_step_deps missing'
+    assert idx[1]['Column_name'] == 'step_fk'
+    assert idx[2]['Column_name'] == 'dep_step_fk'
+    assert all(r['Non_unique'] == 0 for r in idx.values())

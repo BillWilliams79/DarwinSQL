@@ -1,6 +1,6 @@
 -- Darwin Database Schema — Current State
 -- Database: darwin
--- This file reflects the final state of all 44 tables after all migrations.
+-- This file reflects the final state of all 52 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 
@@ -167,6 +167,61 @@ CREATE TABLE IF NOT EXISTS machines (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- ============================================================================
+-- Agile hierarchy: Epic > Feature > Story(requirement)  (req #3111, migration 076)
+-- ============================================================================
+-- `epics` and `features` are defined HERE, above `requirements`, so that
+-- requirements.feature_fk resolves on a fresh end-to-end run of this file — the
+-- same reason `machines` sits above the execution tables. The rest of the
+-- validation family (test_cases, test_plans, test_runs, test_results and their
+-- junctions) stays in the "Swarm Features & Test Cases registry" section below.
+--
+-- Labels attach at the REQUIREMENT level, never at a pipeline step (req #3080
+-- design rule 10): a launch unit may legitimately span epics, and a step derives
+-- its dominant label at render time instead of storing a wrong one.
+
+CREATE TABLE IF NOT EXISTS epics (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title        VARCHAR(256) NOT NULL,
+    description  TEXT         NULL,
+    category_fk  INT          NOT NULL,
+    creator_fk   VARCHAR(64)  NOT NULL,
+    closed       TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order   SMALLINT     NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_epics_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_epics_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS features (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NOT NULL,
+    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
+    epic_fk         INT             NULL DEFAULT NULL,
+                                            -- parent epic (req #3111, migration 076); NULL = unfiled
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_features_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_features_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_features_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
@@ -193,6 +248,10 @@ CREATE TABLE IF NOT EXISTS requirements (
                                             -- comma-separated sub-repo override (req #2583); NULL = use category default
     machine_fk      INT             NULL DEFAULT NULL,
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
+    feature_fk      INT             NULL DEFAULT NULL,
+                                            -- parent feature (req #3111, migration 076); NULL = unfiled.
+                                            -- The story tier of Epic > Feature > Story; SET NULL so deleting a
+                                            -- feature demotes its requirements instead of destroying history.
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
@@ -204,6 +263,10 @@ CREATE TABLE IF NOT EXISTS requirements (
         FOREIGN KEY (machine_fk)
         REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_requirements_feature
+        FOREIGN KEY (feature_fk)
+        REFERENCES features (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
@@ -576,25 +639,10 @@ CREATE TABLE IF NOT EXISTS user_integrations (
 -- Phase 2: test_plans + test_plan_cases
 -- Phase 3: test_runs + test_results
 -- ============================================================================
-
-CREATE TABLE IF NOT EXISTS features (
-    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256)    NOT NULL,
-    description     TEXT            NOT NULL,
-    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
-    category_fk     INT             NOT NULL,
-    creator_fk      VARCHAR(64)     NOT NULL,
-    closed          TINYINT(1)      NOT NULL DEFAULT 0,
-    sort_order      SMALLINT        NULL,
-    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_features_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_features_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
+-- NOTE: `features` itself is defined ABOVE, in the "Agile hierarchy" section
+-- next to `epics` — requirements.feature_fk (req #3111, migration 076) forced it
+-- above `requirements` so a fresh end-to-end run of this file resolves. Only the
+-- rest of the validation family lives here.
 
 CREATE TABLE IF NOT EXISTS test_cases (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -1060,3 +1108,102 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_row_docs (
 );
 
 CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);
+
+-- ============================================================================
+-- Swarm Orchestration — pipelines as data (req #3111, migration 076)
+-- ============================================================================
+-- A pipeline is a durable multi-requirement execution plan: data in MySQL,
+-- rendered live, interpreted by a judgment-capable Primary Claude. Req #3080
+-- rejected a coded DAG because the 2026-07-25 Substrate Rebuild plan mutated ~12
+-- times under contact with reality; what survives mutation is the artifact.
+--
+-- What is ABSENT from pipeline_steps is as much of the design as what is present:
+--   * no state/status column — a step's state is DERIVED from its linked
+--     requirements (design rule 1). The POC's step 13 launched five sessions
+--     while the plan still read "Scheduled"; a column that can disagree with
+--     reality is the bug, so the column does not exist.
+--   * no seq/sort_order — display order is computed at render: topological, then
+--     state bands (Complete > Running > Scheduled), then streams (design rule 3).
+--   * no epic/feature — labels attach at the requirement (design rule 10).
+--   * no gate_expr prose — dependencies are rows (design rule 4).
+--
+-- Defined at the end of the file: pipelines -> machines, pipeline_step_deps ->
+-- pipeline_steps, pipeline_step_requirements -> requirements, all above.
+
+CREATE TABLE IF NOT EXISTS pipelines (
+    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256) NOT NULL,
+    description     TEXT         NULL,                     -- the goal
+    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
+    creator_fk      VARCHAR(64)  NOT NULL,
+    started_at      TIMESTAMP    NULL,                     -- set on draft -> active (NULL-able: a
+                                                           -- pipeline is born `draft`, not running)
+    completed_at    TIMESTAMP    NULL,                     -- set on -> completed|aborted
+    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pipelines_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_pipelines_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_steps (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
+    pipeline_fk  INT          NOT NULL,
+    title        VARCHAR(256) NOT NULL,                             -- the step summary
+    run          VARCHAR(8)   NOT NULL DEFAULT 'auto',              -- auto|manual
+    notes        TEXT         NULL,                                 -- evidence / findings / dispositions
+    completed_at TIMESTAMP    NULL,                                 -- manual stamp ONLY for zero-requirement
+                                                                    -- steps; requirement-backed steps derive
+    creator_fk   VARCHAR(64)  NOT NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pipeline_steps_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_pipeline_steps_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_pipeline_steps_pipeline_fk ON pipeline_steps (pipeline_fk);
+
+-- Asymmetric on purpose: step_fk CASCADE (the links are the step's own data),
+-- requirement_fk RESTRICT (a requirement that appears in a plan cannot be
+-- deleted). This deviates from the junction default of CASCADE on both sides.
+CREATE TABLE IF NOT EXISTS pipeline_step_requirements (
+    step_fk        INT NOT NULL,
+    requirement_fk INT NOT NULL,
+    PRIMARY KEY (step_fk, requirement_fk),
+    CONSTRAINT fk_psr_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_psr_requirement
+        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_psr_requirement_fk ON pipeline_step_requirements (requirement_fk);
+
+-- One row = one condition on one step. Convention (application-enforced):
+-- exactly one of dep_step_fk / time_at per row. A dual-condition gate is simply
+-- two rows on one step. dep_step_fk is RESTRICT — design rule 4's teeth: a step
+-- something else gates on cannot be deleted or merged away.
+CREATE TABLE IF NOT EXISTS pipeline_step_deps (
+    id          INT       NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    step_fk     INT       NOT NULL,
+    dep_step_fk INT       NULL,          -- gate on another step
+    time_at     TIMESTAMP NULL,          -- gate on wall clock (plan's T:<ISO8601>)
+    UNIQUE KEY uq_pipeline_step_deps (step_fk, dep_step_fk),
+    CONSTRAINT fk_psd_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_psd_dep_step
+        FOREIGN KEY (dep_step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
