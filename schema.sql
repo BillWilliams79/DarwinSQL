@@ -982,12 +982,21 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_runs (
     agent_count      INT          NOT NULL DEFAULT 0,
     harness_version  VARCHAR(64)  NULL,
     source_note      TEXT         NULL,
+    ai_model         VARCHAR(16)  NOT NULL DEFAULT 'opus',
+                                            -- req #3098, migration 075; fixed default for both backfill and future rows (capture-log row, not an editable setting)
+    effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
+                                            -- req #3098, migration 075; see ai_model comment
+    machine_fk       INT          NULL,
+                                            -- req #3098, migration 075; which machine ran the capture (NULL = unknown)
     creator_fk       VARCHAR(64)  NOT NULL,
     create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts        TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_agent_telemetry_runs_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_runs_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE INDEX ix_agent_telemetry_runs_captured_at ON agent_telemetry_runs (captured_at);
@@ -1026,3 +1035,28 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_rows (
 );
 
 CREATE INDEX ix_agent_telemetry_rows_run_fk ON agent_telemetry_rows (run_fk);
+
+-- Req #3096, migration 074 — per-document actual-token breakdown, one level deeper
+-- than agent_telemetry_rows -> agent_telemetry_runs. row_fk CASCADEs (the row is
+-- the container for its own documents); no redundant run_fk (single immediate-
+-- parent FK, matching the builds -> branches precedent) and no FK to
+-- architecture_documents (doc_path is plain text, matching agent_name on the
+-- parent row — a historical snapshot table, not a live reference).
+CREATE TABLE IF NOT EXISTS agent_telemetry_row_docs (
+    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    row_fk          INT          NOT NULL,
+    doc_path        VARCHAR(512) NOT NULL,
+    actual_tokens   INT          NOT NULL,
+    sort_order      SMALLINT     NULL,
+    creator_fk      VARCHAR(64)  NOT NULL,
+    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_agent_telemetry_row_docs_row
+        FOREIGN KEY (row_fk) REFERENCES agent_telemetry_rows (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_row_docs_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);

@@ -1,12 +1,12 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 46 tables in FK-dependency order
+-- All 47 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS agent_telemetry_rows, agent_telemetry_runs,
+DROP TABLE IF EXISTS agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
     customers,
     agent_documents, agent_instructions,
@@ -914,12 +914,18 @@ CREATE TABLE agent_telemetry_runs (
     agent_count      INT          NOT NULL DEFAULT 0,
     harness_version  VARCHAR(64)  NULL,
     source_note      TEXT         NULL,
+    ai_model         VARCHAR(16)  NOT NULL DEFAULT 'opus',
+    effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
+    machine_fk       INT          NULL,
     creator_fk       VARCHAR(64)  NOT NULL,
     create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts        TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_agent_telemetry_runs_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_runs_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE INDEX ix_agent_telemetry_runs_captured_at ON agent_telemetry_runs (captured_at);
@@ -958,3 +964,24 @@ CREATE TABLE agent_telemetry_rows (
 );
 
 CREATE INDEX ix_agent_telemetry_rows_run_fk ON agent_telemetry_rows (run_fk);
+
+-- Per-document actual-token breakdown (req #3096, migration 074) — child of
+-- agent_telemetry_rows only, row_fk CASCADEs.
+CREATE TABLE agent_telemetry_row_docs (
+    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    row_fk          INT          NOT NULL,
+    doc_path        VARCHAR(512) NOT NULL,
+    actual_tokens   INT          NOT NULL,
+    sort_order      SMALLINT     NULL,
+    creator_fk      VARCHAR(64)  NOT NULL,
+    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_agent_telemetry_row_docs_row
+        FOREIGN KEY (row_fk) REFERENCES agent_telemetry_rows (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_agent_telemetry_row_docs_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);

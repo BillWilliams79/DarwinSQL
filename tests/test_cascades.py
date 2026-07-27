@@ -1345,3 +1345,118 @@ def test_delete_profile_cascades_to_telemetry(db_connection):
         cur.execute("SELECT id FROM agent_telemetry_rows WHERE creator_fk = %s", (test_creator,))
         assert cur.fetchone() is None
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #3096 — per-document actual-token rows cascade behavior (migration 074)
+# ---------------------------------------------------------------------------
+
+def test_delete_row_cascades_to_row_docs(db_connection):
+    """DELETE agent_telemetry_row → its per-document rows are deleted
+    (row is the container for its own documents; row_fk ON DELETE CASCADE)."""
+    test_creator = 'cascade-test-telem-creator-3'
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-telem-3@test.com')
+        )
+        cur.execute(
+            "INSERT INTO agent_telemetry_runs (label, creator_fk) VALUES (%s, %s)",
+            ('cascade-test-run-3', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_rows (run_fk, agent_name, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (run_id, 'AWS', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        row_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_row_docs (row_fk, doc_path, actual_tokens, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (row_id, 'memory/aws-architecture.md', 3000, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        doc_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM agent_telemetry_rows WHERE id = %s", (row_id,))
+
+        cur.execute("SELECT id FROM agent_telemetry_row_docs WHERE id = %s", (doc_id,))
+        assert cur.fetchone() is None, \
+            "telemetry row_doc should be cascade-deleted when its row is deleted"
+    db_connection.rollback()
+
+
+def test_delete_run_cascades_through_rows_to_row_docs(db_connection):
+    """DELETE agent_telemetry_run → cascades TWO levels deep to its rows' own
+    per-document rows (run -> rows -> row_docs, all ON DELETE CASCADE)."""
+    test_creator = 'cascade-test-telem-creator-4'
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-telem-4@test.com')
+        )
+        cur.execute(
+            "INSERT INTO agent_telemetry_runs (label, creator_fk) VALUES (%s, %s)",
+            ('cascade-test-run-4', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_rows (run_fk, agent_name, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (run_id, 'Frontend', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        row_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_row_docs (row_fk, doc_path, actual_tokens, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (row_id, 'memory/frontend-architecture.md', 5000, test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        doc_id = cur.fetchone()['id']
+
+        cur.execute("DELETE FROM agent_telemetry_runs WHERE id = %s", (run_id,))
+
+        cur.execute("SELECT id FROM agent_telemetry_row_docs WHERE id = %s", (doc_id,))
+        assert cur.fetchone() is None, \
+            "telemetry row_doc should be cascade-deleted two levels up when its run is deleted"
+    db_connection.rollback()
+
+
+def test_delete_profile_cascades_to_row_docs(db_connection):
+    """DELETE profile → its telemetry run_docs are deleted too
+    (creator_fk ON DELETE CASCADE, same as the run and row levels)."""
+    test_creator = 'cascade-test-telem-creator-5'
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO profiles (id, name, email) VALUES (%s, %s, %s)",
+            (test_creator, 'Cascade Test Profile', 'cascade-telem-5@test.com')
+        )
+        cur.execute(
+            "INSERT INTO agent_telemetry_runs (label, creator_fk) VALUES (%s, %s)",
+            ('cascade-test-run-5', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        run_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_rows (run_fk, agent_name, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            (run_id, 'Data', test_creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        row_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO agent_telemetry_row_docs (row_fk, doc_path, actual_tokens, creator_fk) "
+            "VALUES (%s, %s, %s, %s)",
+            (row_id, 'memory/database.md', 2000, test_creator)
+        )
+
+        cur.execute("DELETE FROM profiles WHERE id = %s", (test_creator,))
+
+        cur.execute("SELECT id FROM agent_telemetry_row_docs WHERE creator_fk = %s", (test_creator,))
+        assert cur.fetchone() is None
+    db_connection.rollback()
