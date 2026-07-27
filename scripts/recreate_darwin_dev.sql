@@ -1,18 +1,19 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 47 tables in FK-dependency order
+-- All 52 tables in FK-dependency order
 
 USE darwin_dev;
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
+DROP TABLE IF EXISTS pipeline_step_deps, pipeline_step_requirements, pipeline_steps, pipelines,
+    agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
     customers,
     agent_documents, agent_instructions,
     architecture_documents, instructions, agents,
     test_results, test_runs, test_plan_cases, test_plans,
-    feature_test_cases, test_cases, features,
+    feature_test_cases, test_cases, features, epics,
     user_integrations,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
@@ -174,6 +175,53 @@ CREATE TABLE machines (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- Agile hierarchy: Epic > Feature > Story(requirement) (req #3111, migration 076).
+-- `epics` and `features` are created here, above `requirements`, so that
+-- requirements.feature_fk resolves — the same reason `machines` sits above the
+-- execution tables. The rest of the validation family stays in the "Swarm Features
+-- & Test Cases registry" section below.
+CREATE TABLE epics (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title        VARCHAR(256) NOT NULL,
+    description  TEXT         NULL,
+    category_fk  INT          NOT NULL,
+    creator_fk   VARCHAR(64)  NOT NULL,
+    closed       TINYINT(1)   NOT NULL DEFAULT 0,
+    sort_order   SMALLINT     NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_epics_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_epics_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE features (
+    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256)    NOT NULL,
+    description     TEXT            NOT NULL,
+    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
+    epic_fk         INT             NULL DEFAULT NULL,
+                                            -- parent epic (req #3111, migration 076); NULL = unfiled
+    category_fk     INT             NOT NULL,
+    creator_fk      VARCHAR(64)     NOT NULL,
+    closed          TINYINT(1)      NOT NULL DEFAULT 0,
+    sort_order      SMALLINT        NULL,
+    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_features_category
+        FOREIGN KEY (category_fk) REFERENCES categories (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_features_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_features_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE TABLE requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
@@ -200,6 +248,8 @@ CREATE TABLE requirements (
                                             -- comma-separated sub-repo override (req #2583); NULL = use category default
     machine_fk      INT             NULL DEFAULT NULL,
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
+    feature_fk      INT             NULL DEFAULT NULL,
+                                            -- parent feature (req #3111, migration 076); NULL = unfiled
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
@@ -211,6 +261,10 @@ CREATE TABLE requirements (
         FOREIGN KEY (machine_fk)
         REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_requirements_feature
+        FOREIGN KEY (feature_fk)
+        REFERENCES features (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
@@ -537,25 +591,8 @@ CREATE TABLE user_integrations (
 );
 
 -- Swarm Features & Test Cases registry (req #2380)
-
-CREATE TABLE features (
-    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256)    NOT NULL,
-    description     TEXT            NOT NULL,
-    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',
-    category_fk     INT             NOT NULL,
-    creator_fk      VARCHAR(64)     NOT NULL,
-    closed          TINYINT(1)      NOT NULL DEFAULT 0,
-    sort_order      SMALLINT        NULL,
-    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_features_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_features_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
+-- NOTE: `features` is created ABOVE, next to `epics` — requirements.feature_fk
+-- (req #3111, migration 076) forced it above `requirements`.
 
 CREATE TABLE test_cases (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -980,3 +1017,80 @@ CREATE TABLE agent_telemetry_row_docs (
 );
 
 CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);
+
+-- ============================================================================
+-- Swarm Orchestration — pipelines as data (req #3111, migration 076)
+-- ============================================================================
+-- A durable multi-requirement execution plan held as data. pipeline_steps
+-- deliberately has NO state column (derived from linked requirements — design
+-- rule 1), NO seq column (order computed at render — rule 3), and NO epic/feature
+-- column (labels attach at the requirement — rule 10). Dependencies are rows,
+-- never prose (rule 4).
+CREATE TABLE pipelines (
+    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    title           VARCHAR(256) NOT NULL,
+    description     TEXT         NULL,                     -- the goal
+    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    machine_fk      INT          NULL DEFAULT NULL,
+    creator_fk      VARCHAR(64)  NOT NULL,
+    started_at      TIMESTAMP    NULL,
+    completed_at    TIMESTAMP    NULL,
+    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pipelines_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_pipelines_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE pipeline_steps (
+    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
+    pipeline_fk  INT          NOT NULL,
+    title        VARCHAR(256) NOT NULL,
+    run          VARCHAR(8)   NOT NULL DEFAULT 'auto',              -- auto|manual
+    notes        TEXT         NULL,                                 -- evidence / findings / dispositions
+    completed_at TIMESTAMP    NULL,                                 -- manual stamp ONLY for zero-requirement steps
+    creator_fk   VARCHAR(64)  NOT NULL,
+    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pipeline_steps_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_pipeline_steps_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_pipeline_steps_pipeline_fk ON pipeline_steps (pipeline_fk);
+
+CREATE TABLE pipeline_step_requirements (
+    step_fk        INT NOT NULL,
+    requirement_fk INT NOT NULL,
+    PRIMARY KEY (step_fk, requirement_fk),
+    CONSTRAINT fk_psr_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_psr_requirement
+        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_psr_requirement_fk ON pipeline_step_requirements (requirement_fk);
+
+CREATE TABLE pipeline_step_deps (
+    id          INT       NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    step_fk     INT       NOT NULL,
+    dep_step_fk INT       NULL,          -- gate on another step
+    time_at     TIMESTAMP NULL,          -- gate on wall clock
+    UNIQUE KEY uq_pipeline_step_deps (step_fk, dep_step_fk),
+    CONSTRAINT fk_psd_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_psd_dep_step
+        FOREIGN KEY (dep_step_fk) REFERENCES pipeline_steps (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);

@@ -60,6 +60,17 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        # Req #3111 — Swarm Orchestration foundation (migration 076). Listed
+        # longest-first within the family: pipeline_step_requirements and
+        # pipeline_step_deps must precede pipeline_steps, which must precede
+        # pipelines, or a shorter name would claim the prefix first. `epics` has
+        # no partial-match conflict with the epic_fk column (the \b lookahead
+        # stops at `epics` only on a word boundary or _ibfk, never the _fk suffix).
+        'pipeline_step_requirements',
+        'pipeline_step_deps',
+        'pipeline_steps',
+        'pipelines',
+        'epics',
         # Req #3096 — per-document actual-token rows (migration 074), child of
         # agent_telemetry_rows. Listed before agent_telemetry_rows/runs (longest-
         # first): agent_telemetry_row_docs must precede the shorter `agents` token
@@ -209,6 +220,20 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_agent_telemetry_row_docs_row', 'fk_agent_telemetry_row_docs_creator',
         # Migration 075 — machine/model/effort on agent telemetry runs (req #3098)
         'fk_agent_telemetry_runs_machine',
+        # Migration 076 — Swarm Orchestration foundation (req #3111)
+        'fk_epics_category', 'fk_epics_creator',
+        'fk_features_epic', 'fk_requirements_feature',
+        'fk_pipelines_machine', 'fk_pipelines_creator',
+        'fk_pipeline_steps_pipeline', 'fk_pipeline_steps_creator',
+        'fk_psr_step', 'fk_psr_requirement',
+        'fk_psd_step', 'fk_psd_dep_step',
+        'uq_pipeline_step_deps',
+        # Index names created by migration 076. Unlike constraint names MySQL
+        # scopes index names per TABLE, not per schema — so these would not
+        # collide across prefixed runs. They are prefixed anyway for symmetry
+        # and so a failure message names the run that produced it.
+        'ix_pipeline_steps_pipeline_fk', 'ix_psr_requirement_fk',
+        'ix_psd_dep_step_fk',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -286,6 +311,10 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3111 — Swarm Orchestration foundation. FK-safe order: the dep/link
+    # leaves, then steps, then pipelines. `epics` drops near features (below),
+    # since features.epic_fk is SET NULL and imposes no ordering of its own.
+    'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps', 'pipelines',
     # Req #3096 — per-document actual-token rows, child of agent_telemetry_rows.
     # Req #3031 — agent context telemetry. FK-safe: row_docs, then rows, then runs.
     'agent_telemetry_row_docs', 'agent_telemetry_rows', 'agent_telemetry_runs',
@@ -296,6 +325,9 @@ ALL_TABLE_SUFFIXES = [
     'test_results', 'test_runs',
     'test_plan_cases', 'feature_test_cases',
     'test_plans', 'test_cases', 'features',
+    # Req #3111 — epics drops after features (epics -> categories is RESTRICT;
+    # features.epic_fk is SET NULL so it imposes no order of its own).
+    'epics',
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
     'priority_card_order', 'dev_servers',
@@ -493,6 +525,10 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'agent_telemetry_runs', 'agent_telemetry_rows',
             # Req #3096 — per-document actual-token rows (migration 074)
             'agent_telemetry_row_docs',
+            # Req #3111 — Swarm Orchestration foundation (migration 076)
+            'epics',
+            'pipelines', 'pipeline_steps',
+            'pipeline_step_requirements', 'pipeline_step_deps',
         ]
     }
     assert tables == expected_tables, \

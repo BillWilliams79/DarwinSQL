@@ -1616,3 +1616,529 @@ def test_agent_instructions_delete_then_repost_swap_is_legal(
         assert [(r['instruction_fk'], r['sort_order']) for r in cur.fetchall()] == \
             [(second, 1), (first, 2)]
     db_connection.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Req #3111 — Swarm Orchestration schema foundation (migration 076)
+#
+# Every new FK gets a behavioural test, because the FK policy here is where the
+# design rules acquire teeth. Three policies are in play and they are NOT
+# interchangeable:
+#   RESTRICT  — the delete must FAIL (dep_step_fk, requirement_fk, category_fk,
+#               machine_fk). This is design rule 4 enforced by the database:
+#               a step something else gates on cannot be deleted or merged away,
+#               and a requirement in a plan cannot be deleted.
+#   CASCADE   — the delete must take the children (pipeline -> steps, step ->
+#               its links and its own dep conditions).
+#   SET NULL  — the delete must DEMOTE, not destroy (epic -> features,
+#               feature -> requirements). Deleting an epic must never take
+#               requirement history with it.
+# ---------------------------------------------------------------------------
+
+def _insert_epic(cur, creator_fk, category_fk, title=None):
+    cur.execute(
+        "INSERT INTO epics (title, description, category_fk, creator_fk) "
+        "VALUES (%s, %s, %s, %s)",
+        (title or f'epic-{uuid.uuid4().hex[:6]}', 'fixture epic', category_fk, creator_fk))
+    return cur.lastrowid
+
+
+def _insert_feature(cur, creator_fk, category_fk, epic_fk=None):
+    cur.execute(
+        "INSERT INTO features (title, description, category_fk, creator_fk, epic_fk) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (f'feat-{uuid.uuid4().hex[:6]}', 'fixture feature', category_fk, creator_fk, epic_fk))
+    return cur.lastrowid
+
+
+def _insert_requirement(cur, creator_fk, category_fk, feature_fk=None):
+    cur.execute(
+        "INSERT INTO requirements (title, category_fk, creator_fk, ai_model, effort, feature_fk) "
+        "VALUES (%s, %s, %s, 'opus', 'high', %s)",
+        (f'req-{uuid.uuid4().hex[:6]}', category_fk, creator_fk, feature_fk))
+    return cur.lastrowid
+
+
+def _insert_pipeline(cur, creator_fk, machine_fk=None, status='draft'):
+    cur.execute(
+        "INSERT INTO pipelines (title, description, pipeline_status, machine_fk, creator_fk) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (f'pipe-{uuid.uuid4().hex[:6]}', 'fixture goal', status, machine_fk, creator_fk))
+    return cur.lastrowid
+
+
+def _insert_step(cur, creator_fk, pipeline_fk, run='auto'):
+    cur.execute(
+        "INSERT INTO pipeline_steps (pipeline_fk, title, run, creator_fk) "
+        "VALUES (%s, %s, %s, %s)",
+        (pipeline_fk, f'step-{uuid.uuid4().hex[:6]}', run, creator_fk))
+    return cur.lastrowid
+
+
+# --- epics -----------------------------------------------------------------
+
+def test_epics_category_fk_invalid_rejected(db_connection, test_creator_fk):
+    """A non-existent category_fk is refused outright."""
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO epics (title, category_fk, creator_fk) VALUES (%s, %s, %s)",
+                ('orphan epic', 999999, test_creator_fk))
+    db_connection.rollback()
+
+
+def test_epics_category_delete_restricted(db_connection, test_creator_fk, seed_test_profile):
+    """epics -> categories is RESTRICT: you cannot orphan an epic by deleting its
+    category. Move it first. Same policy as requirements/features."""
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
+                    ('epic-restrict proj', test_creator_fk))
+        project = cur.lastrowid
+        cur.execute("INSERT INTO categories (category_name, project_fk, creator_fk) "
+                    "VALUES (%s, %s, %s)", ('epic-restrict cat', project, test_creator_fk))
+        category = cur.lastrowid
+        _insert_epic(cur, test_creator_fk, category)
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM categories WHERE id = %s", (category,))
+    db_connection.rollback()
+
+
+# --- features.epic_fk (SET NULL) -------------------------------------------
+
+def test_feature_epic_fk_set_null_on_epic_delete(
+        db_connection, test_creator_fk, test_category_id):
+    """Deleting an epic DEMOTES its features to unfiled — it must never delete
+    them. SET NULL is the only policy that allows the delete to succeed while
+    keeping the feature."""
+    with db_connection.cursor() as cur:
+        epic = _insert_epic(cur, test_creator_fk, test_category_id)
+        feature = _insert_feature(cur, test_creator_fk, test_category_id, epic_fk=epic)
+
+        cur.execute("DELETE FROM epics WHERE id = %s", (epic,))
+
+        cur.execute("SELECT epic_fk FROM features WHERE id = %s", (feature,))
+        row = cur.fetchone()
+        assert row is not None, 'deleting an epic must not delete its features'
+        assert row['epic_fk'] is None
+    db_connection.rollback()
+
+
+def test_feature_epic_fk_invalid_rejected(db_connection, test_creator_fk, test_category_id):
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            _insert_feature(cur, test_creator_fk, test_category_id, epic_fk=999999)
+    db_connection.rollback()
+
+
+# --- requirements.feature_fk (SET NULL) ------------------------------------
+
+def test_requirement_feature_fk_set_null_on_feature_delete(
+        db_connection, test_creator_fk, test_category_id):
+    """Deleting a feature must not delete requirement history — the requirement
+    is demoted to unfiled."""
+    with db_connection.cursor() as cur:
+        feature = _insert_feature(cur, test_creator_fk, test_category_id)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id, feature_fk=feature)
+
+        cur.execute("DELETE FROM features WHERE id = %s", (feature,))
+
+        cur.execute("SELECT feature_fk FROM requirements WHERE id = %s", (req,))
+        row = cur.fetchone()
+        assert row is not None, 'deleting a feature must not delete its requirements'
+        assert row['feature_fk'] is None
+    db_connection.rollback()
+
+
+def test_requirement_feature_fk_invalid_rejected(
+        db_connection, test_creator_fk, test_category_id):
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            _insert_requirement(cur, test_creator_fk, test_category_id, feature_fk=999999)
+    db_connection.rollback()
+
+
+# --- pipelines -------------------------------------------------------------
+
+def test_pipeline_status_defaults_to_draft(db_connection, test_creator_fk):
+    """A pipeline is born `draft` — not active. started_at stays NULL until the
+    transition, which is why it is NULL-able unlike the execution-table baseline."""
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
+                    ('defaults probe', test_creator_fk))
+        pipeline = cur.lastrowid
+        cur.execute("SELECT pipeline_status, started_at, completed_at "
+                    "FROM pipelines WHERE id = %s", (pipeline,))
+        row = cur.fetchone()
+        assert row['pipeline_status'] == 'draft'
+        assert row['started_at'] is None
+        assert row['completed_at'] is None
+    db_connection.rollback()
+
+
+def test_pipeline_machine_delete_restricted(db_connection, test_creator_fk):
+    """pipelines -> machines is RESTRICT, matching every other machine reference
+    in the schema: a machine with history pointing at it cannot be deleted out
+    from under that history."""
+    with db_connection.cursor() as cur:
+        machine = _insert_machine(cur, test_creator_fk,
+                                  hostname=f'pipe-{uuid.uuid4().hex[:8]}')
+        _insert_pipeline(cur, test_creator_fk, machine_fk=machine)
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM machines WHERE id = %s", (machine,))
+    db_connection.rollback()
+
+
+def test_pipeline_machine_fk_nullable(db_connection, test_creator_fk):
+    """NULL machine_fk means 'any machine' — a legal and common state."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk, machine_fk=None)
+        cur.execute("SELECT machine_fk FROM pipelines WHERE id = %s", (pipeline,))
+        assert cur.fetchone()['machine_fk'] is None
+    db_connection.rollback()
+
+
+# --- pipeline_steps --------------------------------------------------------
+
+def test_pipeline_step_cascades_from_pipeline(db_connection, test_creator_fk):
+    """The pipeline is the container: deleting a plan takes its steps."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+
+        cur.execute("DELETE FROM pipelines WHERE id = %s", (pipeline,))
+        cur.execute("SELECT id FROM pipeline_steps WHERE id = %s", (step,))
+        assert cur.fetchone() is None
+    db_connection.rollback()
+
+
+def test_pipeline_step_run_defaults_to_auto(db_connection, test_creator_fk):
+    """`run` is the second dimension alongside derived state: auto launches as
+    soon as deps complete, manual waits for the user. Default auto."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        cur.execute("INSERT INTO pipeline_steps (pipeline_fk, title, creator_fk) "
+                    "VALUES (%s, %s, %s)", (pipeline, 'run default probe', test_creator_fk))
+        step = cur.lastrowid
+        cur.execute("SELECT run, completed_at, notes FROM pipeline_steps WHERE id = %s",
+                    (step,))
+        row = cur.fetchone()
+        assert row['run'] == 'auto'
+        assert row['completed_at'] is None
+        assert row['notes'] is None
+    db_connection.rollback()
+
+
+def test_pipeline_step_pipeline_fk_invalid_rejected(db_connection, test_creator_fk):
+    with db_connection.cursor() as cur:
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("INSERT INTO pipeline_steps (pipeline_fk, title, creator_fk) "
+                        "VALUES (%s, %s, %s)", (999999, 'orphan step', test_creator_fk))
+    db_connection.rollback()
+
+
+def test_pipeline_step_notes_holds_gate_exception_prose(db_connection, test_creator_fk):
+    """`notes` must hold the evidence a status enum cannot express. This exact
+    shape is a real fixture value: a gate that passed WITH documented exceptions
+    rather than raw green (req #3080, plan stage 1.4)."""
+    evidence = ('gate passed WITH exceptions: skill harness 3709/3713, '
+                '4 pre-existing failures dispositioned into #3061 scope')
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        cur.execute("INSERT INTO pipeline_steps (pipeline_fk, title, notes, creator_fk) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (pipeline, 'regression gate', evidence, test_creator_fk))
+        step = cur.lastrowid
+        cur.execute("SELECT notes FROM pipeline_steps WHERE id = %s", (step,))
+        assert cur.fetchone()['notes'] == evidence
+    db_connection.rollback()
+
+
+# --- pipeline_step_requirements (asymmetric junction) ----------------------
+
+def test_step_requirement_link_cascades_from_step(
+        db_connection, test_creator_fk, test_category_id):
+    """step_fk CASCADE: the links are the step's own data."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id)
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (step, req))
+
+        cur.execute("DELETE FROM pipeline_steps WHERE id = %s", (step,))
+        cur.execute("SELECT step_fk FROM pipeline_step_requirements WHERE step_fk = %s",
+                    (step,))
+        assert cur.fetchone() is None
+        # ...and the requirement itself survives untouched.
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (req,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_requirement_in_a_plan_cannot_be_deleted(
+        db_connection, test_creator_fk, test_category_id):
+    """requirement_fk is RESTRICT — the deliberate deviation from the
+    CASCADE-both-sides junction default. Silently dropping a requirement out of
+    an execution plan is exactly the residue failure this schema exists to
+    prevent."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id)
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (step, req))
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM requirements WHERE id = %s", (req,))
+    db_connection.rollback()
+
+
+def test_step_requirement_duplicate_link_rejected(
+        db_connection, test_creator_fk, test_category_id):
+    """Composite PK: one requirement appears at most once in a given step."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id)
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (step, req))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                        "VALUES (%s, %s)", (step, req))
+    db_connection.rollback()
+
+
+def test_step_is_a_launch_unit_of_many_requirements(
+        db_connection, test_creator_fk, test_category_id):
+    """Design rule 2: requirements aggregate by the swarm-start that launches
+    them. The fixture plan carries eight such steps (1, 12, 13, 19, 33, 38, 39,
+    40); step 12 is a seven-requirement parallel launch. The POC rendered same-gate rows as
+    scattered singles until they were merged by hand."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        reqs = [_insert_requirement(cur, test_creator_fk, test_category_id)
+                for _ in range(7)]
+        cur.executemany("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                        "VALUES (%s, %s)", [(step, r) for r in reqs])
+
+        cur.execute("SELECT COUNT(*) AS c FROM pipeline_step_requirements "
+                    "WHERE step_fk = %s", (step,))
+        assert cur.fetchone()['c'] == 7
+    db_connection.rollback()
+
+
+def test_step_with_zero_requirements_is_legal(db_connection, test_creator_fk):
+    """A step may legitimately have NO requirements — fixture plan step 7,
+    "record the all-passing regression baseline". It has nothing to derive state
+    from, which is precisely why completed_at exists as the manual stamp."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        cur.execute("INSERT INTO pipeline_steps (pipeline_fk, title, completed_at, creator_fk) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (pipeline, 'record regression baseline', '2026-07-26 01:30:00',
+                     test_creator_fk))
+        step = cur.lastrowid
+        cur.execute("SELECT COUNT(*) AS c FROM pipeline_step_requirements "
+                    "WHERE step_fk = %s", (step,))
+        assert cur.fetchone()['c'] == 0
+        cur.execute("SELECT completed_at FROM pipeline_steps WHERE id = %s", (step,))
+        assert cur.fetchone()['completed_at'] is not None
+    db_connection.rollback()
+
+
+# --- pipeline_step_deps ----------------------------------------------------
+
+def test_dep_step_cannot_be_deleted_while_referenced(db_connection, test_creator_fk):
+    """DESIGN RULE 4, ENFORCED BY THE DATABASE. Ids are assigned once and never
+    reused, and deleting or merging away a step that another step depends on
+    must be BLOCKED — not silently orphan the graph."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) VALUES (%s, %s)",
+                    (dependent, gate))
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM pipeline_steps WHERE id = %s", (gate,))
+    db_connection.rollback()
+
+
+def test_dep_rows_cascade_from_their_own_step(db_connection, test_creator_fk):
+    """step_fk CASCADEs: the conditions ON a step are the step's own data, so
+    deleting the dependent step takes them. (Contrast dep_step_fk above.)"""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) VALUES (%s, %s)",
+                    (dependent, gate))
+
+        cur.execute("DELETE FROM pipeline_steps WHERE id = %s", (dependent,))
+        cur.execute("SELECT id FROM pipeline_step_deps WHERE step_fk = %s", (dependent,))
+        assert cur.fetchone() is None
+        # The gate step survives — nothing referenced IT.
+        cur.execute("SELECT id FROM pipeline_steps WHERE id = %s", (gate,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_dual_condition_gate_is_two_rows(db_connection, test_creator_fk):
+    """THE s0.4 CASE. That gate waited on requirement #3050's session completing
+    AND a 2-hour wall-clock gate at 06:31:38 PDT — two independent wait
+    mechanisms on one step. Modeling it as two rows rather than a gate_expr
+    string is what keeps both the topological sort and the watchdog able to read
+    it."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk, time_at) "
+                    "VALUES (%s, %s, NULL)", (dependent, gate))
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk, time_at) "
+                    "VALUES (%s, NULL, %s)", (dependent, '2026-07-24 13:31:38'))
+
+        cur.execute("SELECT dep_step_fk, time_at FROM pipeline_step_deps "
+                    "WHERE step_fk = %s ORDER BY id", (dependent,))
+        rows = cur.fetchall()
+        assert len(rows) == 2
+        assert rows[0]['dep_step_fk'] == gate and rows[0]['time_at'] is None
+        assert rows[1]['dep_step_fk'] is None and rows[1]['time_at'] is not None
+    db_connection.rollback()
+
+
+def test_duplicate_step_to_step_edge_rejected(db_connection, test_creator_fk):
+    """UNIQUE(step_fk, dep_step_fk): the same gate cannot be recorded twice."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) VALUES (%s, %s)",
+                    (dependent, gate))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) "
+                        "VALUES (%s, %s)", (dependent, gate))
+    db_connection.rollback()
+
+
+def test_multiple_time_only_deps_allowed_on_one_step(db_connection, test_creator_fk):
+    """MySQL treats NULLs as distinct in a UNIQUE key, so the composite
+    deliberately does NOT collapse time conditions: a step may carry more than
+    one wall-clock gate. That is the intended scope of the invariant, not a hole
+    in it — the key exists to forbid duplicate STEP edges."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        for stamp in ('2026-07-24 13:31:38', '2026-07-25 09:00:00'):
+            cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk, time_at) "
+                        "VALUES (%s, NULL, %s)", (step, stamp))
+
+        cur.execute("SELECT COUNT(*) AS c FROM pipeline_step_deps "
+                    "WHERE step_fk = %s AND dep_step_fk IS NULL", (step,))
+        assert cur.fetchone()['c'] == 2
+    db_connection.rollback()
+
+
+def test_dep_step_fk_invalid_rejected(db_connection, test_creator_fk):
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) "
+                        "VALUES (%s, %s)", (step, 999999))
+    db_connection.rollback()
+
+
+def test_deleting_a_pipeline_with_internal_deps_is_refused(
+        db_connection, test_creator_fk):
+    """THE OPERATIONAL CONSEQUENCE of dep_step_fk RESTRICT, pinned as a test so it
+    can never be discovered by surprise in production.
+
+    A plain `DELETE FROM pipelines` does NOT work once any step gates on another.
+    MySQL evaluates the RESTRICT on dep_step_fk while cascading pipeline -> steps,
+    and refuses — even though the referencing dep row is itself part of the same
+    cascade. Every non-trivial plan hits this immediately (the fixture plan has 39
+    step-to-step edges).
+
+    This is the correct trade, not a defect: design rule 4 requires the database
+    to block a referenced step from disappearing, and MySQL cannot express "block
+    unless the whole graph is going." The price is that deleting a plan is a
+    documented two-phase operation (see the next test), and the accidental
+    one-line destruction of a plan is refused as a side benefit."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) VALUES (%s, %s)",
+                    (dependent, gate))
+
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM pipelines WHERE id = %s", (pipeline,))
+    db_connection.rollback()
+
+
+def test_pipeline_teardown_order_clears_the_whole_graph(
+        db_connection, test_creator_fk, test_category_id):
+    """THE SUPPORTED TEARDOWN: drop the dependency edges first, then the pipeline.
+    Steps and requirement links CASCADE from the pipeline, so two statements are
+    enough. Any delete_pipeline implementation must follow this order.
+
+    The requirements themselves must survive — they are not the plan's to delete.
+    """
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        gate = _insert_step(cur, test_creator_fk, pipeline)
+        dependent = _insert_step(cur, test_creator_fk, pipeline)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id)
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (dependent, req))
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) VALUES (%s, %s)",
+                    (dependent, gate))
+
+        # Phase 1 — edges.
+        cur.execute("DELETE FROM pipeline_step_deps WHERE step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE pipeline_fk = %s)", (pipeline,))
+        # Phase 2 — the container; steps and links cascade.
+        cur.execute("DELETE FROM pipelines WHERE id = %s", (pipeline,))
+
+        for sql, params in (
+                ("SELECT id FROM pipeline_steps WHERE pipeline_fk = %s", (pipeline,)),
+                ("SELECT step_fk FROM pipeline_step_requirements WHERE step_fk IN (%s, %s)",
+                 (gate, dependent)),
+                ("SELECT id FROM pipeline_step_deps WHERE step_fk IN (%s, %s)",
+                 (gate, dependent))):
+            cur.execute(sql, params)
+            assert cur.fetchone() is None, sql
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (req,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+def test_pipeline_without_internal_deps_deletes_directly(
+        db_connection, test_creator_fk, test_category_id):
+    """The simple case still works in one statement: a plan whose steps carry no
+    step-to-step edges cascades cleanly. Only dep_step_fk RESTRICT blocks, and
+    only when an edge exists."""
+    with db_connection.cursor() as cur:
+        pipeline = _insert_pipeline(cur, test_creator_fk)
+        step = _insert_step(cur, test_creator_fk, pipeline)
+        req = _insert_requirement(cur, test_creator_fk, test_category_id)
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (step, req))
+        # A time-only condition references no step, so it never RESTRICTs.
+        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk, time_at) "
+                    "VALUES (%s, NULL, %s)", (step, '2026-07-24 13:31:38'))
+
+        cur.execute("DELETE FROM pipelines WHERE id = %s", (pipeline,))
+
+        cur.execute("SELECT id FROM pipeline_steps WHERE id = %s", (step,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM pipeline_step_deps WHERE step_fk = %s", (step,))
+        assert cur.fetchone() is None
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (req,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()

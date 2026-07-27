@@ -89,6 +89,32 @@ def seed_test_profile(db_connection, test_creator_fk):
         cur.execute("DELETE FROM requirement_sessions WHERE requirement_fk IN "
                     "(SELECT id FROM requirements WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #3111: pipelines. pipeline_step_requirements.requirement_fk and
+        # pipeline_step_deps.dep_step_fk are both ON DELETE RESTRICT, so the plan
+        # graph MUST be torn down before requirements and steps — a leftover row
+        # blocks the deletes below.
+        #
+        # Scoped from BOTH ends on purpose. Deleting only rows whose step_fk
+        # belongs to the test creator misses the row that points the other way,
+        # and that row is constructible: darwin_dev permanently holds the seeded
+        # Substrate Rebuild fixture, whose steps are owned by the real user. A
+        # test that links its own requirement to a FIXTURE step (or gates a
+        # fixture step on its own step) would otherwise survive teardown, fail
+        # the requirements DELETE with a 1451, and take the whole session-scoped
+        # teardown down with it — leaking the test profile, domain, area, project
+        # and category into darwin_dev for every later run to accumulate on.
+        cur.execute("DELETE FROM pipeline_step_deps WHERE step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
+                    "OR dep_step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s)",
+                    (test_creator_fk, test_creator_fk))
+        cur.execute("DELETE FROM pipeline_step_requirements WHERE step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
+                    "OR requirement_fk IN "
+                    "(SELECT id FROM requirements WHERE creator_fk = %s)",
+                    (test_creator_fk, test_creator_fk))
+        cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
         # Req #2943: swarm_starts + machines. machine_fk is ON DELETE RESTRICT on
@@ -120,6 +146,10 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM features WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM features WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #3111: epics -> categories is RESTRICT, so epics must go before
+        # categories. features.epic_fk is SET NULL, so features may go either
+        # side; deleted just above for readability.
+        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))
