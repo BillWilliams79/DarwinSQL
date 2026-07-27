@@ -932,12 +932,16 @@ CREATE TABLE architecture_documents (
 CREATE TABLE agent_documents (
     agent_fk           INT          NOT NULL,
     document_fk        INT          NOT NULL,
-    relationship       SET('owned','curated','autoload','referenced') NOT NULL DEFAULT 'referenced',
+    relationship       SET('principles','owned','curated','autoload','referenced') NOT NULL DEFAULT 'referenced',
     notes              VARCHAR(512) NULL,
     sort_order         SMALLINT     NULL,
     owned_document_fk  INT          AS (IF(FIND_IN_SET('owned', relationship) > 0, document_fk, NULL)) VIRTUAL,
+    -- req #3129: mirror image of the owner rule -- one 'owned' per DOCUMENT,
+    -- one 'principles' per AGENT. The key column differs on purpose.
+    principles_agent_fk INT         AS (IF(FIND_IN_SET('principles', relationship) > 0, agent_fk, NULL)) VIRTUAL,
     PRIMARY KEY (agent_fk, document_fk),
     UNIQUE KEY uq_agent_documents_owner (owned_document_fk),
+    UNIQUE KEY uq_agent_documents_principles (principles_agent_fk),
     CONSTRAINT fk_ad_agent
         FOREIGN KEY (agent_fk) REFERENCES agents (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
