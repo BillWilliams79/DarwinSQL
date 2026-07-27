@@ -2088,18 +2088,25 @@ def test_agent_documents_columns(db_connection):
     document': a VIRTUAL generated column equal to document_fk only on an 'owned'
     row (NULL otherwise), carrying a UNIQUE key. MySQL has no partial index, and
     NULLs are distinct in a UNIQUE key — so unlimited non-owned links coexist
-    while a second 'owned' claim raises IntegrityError."""
+    while a second 'owned' claim raises IntegrityError.
+
+    principles_agent_fk (req #3129) is the same machinery pointed the OTHER WAY:
+    one 'owned' link per DOCUMENT, one 'principles' link per AGENT. It is keyed
+    on agent_fk, not document_fk — the assertion below is what catches that
+    inversion, because both columns are INT/VIRTUAL/UNIQUE and are otherwise
+    indistinguishable from a DESCRIBE."""
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'agent_documents')
     expected = {'agent_fk', 'document_fk', 'relationship', 'notes',
-                'sort_order', 'owned_document_fk'}
+                'sort_order', 'owned_document_fk', 'principles_agent_fk'}
     assert set(cols.keys()) == expected
 
     assert cols['agent_fk']['Null'] == 'NO'
     assert cols['agent_fk']['Key'] == 'PRI'
     assert cols['document_fk']['Null'] == 'NO'
     assert cols['document_fk']['Key'] == 'PRI'
-    assert cols['relationship']['Type'] == "set('owned','curated','autoload','referenced')"
+    assert cols['relationship']['Type'] == \
+        "set('principles','owned','curated','autoload','referenced')"
     assert cols['relationship']['Null'] == 'NO'
     assert cols['relationship']['Default'] == 'referenced'
     assert cols['notes']['Type'] == 'varchar(512)'
@@ -2109,6 +2116,41 @@ def test_agent_documents_columns(db_connection):
     # storage) and UNIQUE.
     assert 'VIRTUAL GENERATED' in cols['owned_document_fk']['Extra'].upper()
     assert cols['owned_document_fk']['Key'] == 'UNI'
+
+    # req #3129: same machinery, opposite key column.
+    assert 'VIRTUAL GENERATED' in cols['principles_agent_fk']['Extra'].upper()
+    assert cols['principles_agent_fk']['Key'] == 'UNI'
+
+
+def test_agent_documents_principles_is_keyed_per_agent(db_connection):
+    """req #3129 — the generated-column EXPRESSION, not just its shape.
+
+    A DESCRIBE cannot tell principles_agent_fk from owned_document_fk: both are
+    INT, VIRTUAL and UNIQUE. Only the expression distinguishes 'one per agent'
+    from 'one per document', and getting it backwards would let one agent hold
+    many principles documents while forbidding two agents from each having their
+    own. Assert the expression text directly."""
+    with db_connection.cursor() as cur:
+        cur.execute("""
+            SELECT COLUMN_NAME, GENERATION_EXPRESSION
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'agent_documents'
+              AND GENERATION_EXPRESSION <> ''
+        """)
+        # DictCursor — rows are dicts, not tuples.
+        exprs = {r['COLUMN_NAME']: r['GENERATION_EXPRESSION']
+                 for r in cur.fetchall()}
+
+    assert set(exprs) == {'owned_document_fk', 'principles_agent_fk'}
+    owned = exprs['owned_document_fk'].replace('`', '').replace(' ', '')
+    principles = exprs['principles_agent_fk'].replace('`', '').replace(' ', '')
+
+    assert 'owned' in owned and 'document_fk' in owned
+    assert 'principles' in principles
+    # The whole point: keyed on agent_fk, and NOT on document_fk.
+    assert 'agent_fk' in principles
+    assert 'document_fk' not in principles
 
 
 # ============================================================================
