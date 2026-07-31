@@ -252,6 +252,16 @@ CREATE TABLE IF NOT EXISTS requirements (
                                             -- parent feature (req #3111, migration 076); NULL = unfiled.
                                             -- The story tier of Epic > Feature > Story; SET NULL so deleting a
                                             -- feature demotes its requirements instead of destroying history.
+    tracking        TINYINT(1)      NOT NULL DEFAULT 0,
+                                            -- CONTAINER, not work (req #3123, migration 20260731124830).
+                                            -- 1 = this requirement HOLDS a plan (or an epic/feature) rather than
+                                            -- being work performed inside it, so it stays `development` for that
+                                            -- plan's whole life. A pipeline step EXCLUDES tracking requirements
+                                            -- from its gating set (design rule 1) and from its /swarm-start
+                                            -- argument list (rule 8); a step whose links are ALL tracking derives
+                                            -- from its own completed_at, exactly as a link-less step does.
+                                            -- Orthogonal to requirement_status — a container has a lifecycle too
+                                            -- — which is why this is a flag and not a status value.
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,

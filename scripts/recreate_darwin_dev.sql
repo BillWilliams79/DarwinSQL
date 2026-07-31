@@ -250,6 +250,10 @@ CREATE TABLE requirements (
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
     feature_fk      INT             NULL DEFAULT NULL,
                                             -- parent feature (req #3111, migration 076); NULL = unfiled
+    tracking        TINYINT(1)      NOT NULL DEFAULT 0,
+                                            -- CONTAINER, not work (req #3123): 1 = holds a plan/epic rather than
+                                            -- being work inside it, so it is excluded from a pipeline step's
+                                            -- gating set (design rule 1) and its /swarm-start args (rule 8)
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
