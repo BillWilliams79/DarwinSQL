@@ -1,0 +1,66 @@
+-- 20260731124830_add_requirements_tracking_container_flag.sql
+--
+-- Req #3123: give the Swarm Orchestration derivation engine a DURABLE SIGNAL for
+-- "this requirement is a container, not work".
+--
+-- PROBLEM.  A pipeline step's state is DERIVED from its linked requirements
+--           (req #3080 design rule 1): any linked requirement in `development`
+--           makes the step Running. A plan's own TRACKING requirement — the one
+--           that holds the plan — stays in `development` for the entire life of
+--           the plan it describes, so any step that links it pins itself Running
+--           forever. The req #3111 schema records nothing that distinguishes a
+--           container from work, so the engine has nothing to except.
+--
+--           Measured on the seeded Substrate Rebuild fixture: step 19 links
+--           #3083, this plan's own tracker, and derives Running where the plan
+--           recorded done. Verified in the shipped #3112 engine on 2026-07-27.
+--
+-- SHAPE.    One boolean on `requirements`, because the fact is a property of the
+--           REQUIREMENT and not of a plan or of a link: #3083 is a container
+--           whether or not any pipeline exists, and an epic-container
+--           requirement is a container in every plan that links it. Both kinds
+--           memory/swarm-orchestration-doctrine.md §4 names are intrinsic.
+--
+--           The obvious alternatives, and why not (full memo in
+--           memory/swarm-orchestration.md):
+--
+--             * `pipelines.tracking_requirement_fk` — records a global fact in a
+--               plan-scoped slot. One plan, one tracker; cannot express an
+--               epic-container requirement that is not THIS plan's tracker.
+--             * `pipeline_step_requirements.role` — records the same global fact
+--               once per link with nothing keeping the copies consistent, which
+--               is the shape design rule 1 exists to prevent. It is also not
+--               changeable in place: that junction has a composite PK and no
+--               `id`, and Lambda-Rest's generic PUT keys every UPDATE on `id`.
+--
+--           `tracking` is orthogonal to `requirement_status` — a container has a
+--           lifecycle like anything else — which is why it is a flag and not a
+--           new status value. NOT NULL DEFAULT 0 means no backfill: every
+--           existing row is correctly `work`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands — the
+--           only difference is the trailing database name, so read it twice:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260731124830_add_requirements_tracking_container_flag.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260731124830_add_requirements_tracking_container_flag.sql darwin
+--
+--           The production command above requires
+--           `bash scripts/db/rds-snapshot.sh 20260731124830` to report status=ok
+--           first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260731124830 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE requirements
+    ADD COLUMN tracking TINYINT(1) NOT NULL DEFAULT 0 AFTER feature_fk;
+
+-- The data statement is the POINT of this migration, not a footnote to it.
+-- Without it the column ships and nothing observable changes: #3083 is the
+-- Substrate Rebuild plan's tracking requirement — the only container Darwin
+-- currently has — and flagging it is what closes the fixture's step-19
+-- divergence. Idempotent, and a no-op (0 rows) on any database that does not
+-- carry the row.
+UPDATE requirements SET tracking = 1 WHERE id = 3083;

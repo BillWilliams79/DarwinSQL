@@ -100,6 +100,23 @@ MANUAL_COMPLETION = {'7': '2026-07-26 01:30:00'}
 TERMINAL_STATUSES = ('met', 'deferred', 'wontfix')
 
 
+def is_tracking(requirement_row):
+    """True when a live requirement row carries the req #3123 CONTAINER flag.
+
+    The gateway returns TINYINT as an int; a JSON round trip can present the same
+    value as True or "1". An absent column reads as False — a database that has
+    not taken migration 20260731124830 yet has no containers, which `main` then
+    turns into a loud abort rather than a quiet wrong fixture.
+    """
+    value = (requirement_row or {}).get('tracking')
+    if value is None or value == '':
+        return False
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return False
+
+
 def step_id(plan_step):
     """plan step id -> pipeline_steps.id."""
     return STEP_BASE + int(plan_step)
@@ -129,7 +146,7 @@ def wrap_comment(text, width=52):
     return lines
 
 
-def derived_state(row, statuses):
+def derived_state(row, statuses, tracking_ids=()):
     """Design rule 1, applied to one plan row.
 
     Mirrors the RULES in `pipelineModel.js::deriveStepState`, translated to the
@@ -141,8 +158,16 @@ def derived_state(row, statuses):
     whose only link is unresolvable falls through to the req-less branch rather
     than reporting Scheduled. A req-less step has nothing to derive from; it is
     Complete exactly when it carries a manual completion stamp.
+
+    `tracking_ids` are CONTAINERS (req #3123, `requirements.tracking`) and are
+    subtracted BEFORE the empty check, exactly as the engine does it — so a step
+    whose links are all containers lands in the req-less branch and derives from
+    its manual stamp, never Running. The subtraction has to happen here too, or
+    this generator's header would report a divergence the shipped engine no
+    longer produces.
     """
-    linked = [statuses.get(rid) for rid in row['reqs']]
+    exempt = set(tracking_ids)
+    linked = [statuses.get(rid) for rid in row['reqs'] if rid not in exempt]
     linked = [s for s in linked if s]
     if not linked:
         return 'done' if row['step'] in MANUAL_COMPLETION else 'pending'
@@ -261,8 +286,45 @@ def main():
     step_to_step_edges = sum(1 for row in rows if row['deps'] != '-'
                              for token in row['deps'].split() if not token.startswith('T:'))
     statuses = {rid: live.get(rid, {}).get('requirement_status') for rid in req_ids}
-    divergences = [(row['step'], row['state'], derived_state(row, statuses))
-                   for row in rows if derived_state(row, statuses) != row['state']]
+
+    # req #3123 — the CONTAINER flag, read LIVE like every other piece of
+    # requirement metadata here. Not hardcoded to REQ_ID: a plan may legitimately
+    # link an epic-container requirement that is not its own tracker, and the
+    # generator classifying by id "and nothing more" is exactly what the header
+    # used to warn about.
+    tracking_ids = {rid for rid in req_ids if is_tracking(live.get(rid, {}))}
+
+    # FAIL LOUD if the plan's own tracker is not flagged. Silence here is the
+    # dangerous outcome: the fixture would load clean and reproduce the pre-#3123
+    # step-19 divergence, and the header would explain it as an open finding that
+    # has in fact shipped. A generated file lying about its own contents is the
+    # failure mode this generator's header notes already exist to prevent.
+    #
+    # The two causes are DISTINGUISHED rather than collapsed. A single message
+    # blaming the migration would be a confident wrong diagnosis when the real
+    # fault is a requirement missing from the read, and this generator's header
+    # notes already exist because a confident wrong explanation costs more than
+    # a missing one.
+    if REQ_ID in req_ids and REQ_ID not in tracking_ids:
+        if REQ_ID not in live:
+            raise SystemExit(
+                "requirement #%d — this plan's own TRACKING requirement — is referenced "
+                "by the plan but ABSENT from the darwin://requirements read (the read was "
+                "not truncated; that is checked separately above). Do NOT assume the "
+                "migration is missing: the row itself did not come back, so every piece "
+                "of its metadata this fixture emits would be a fallback value. Check the "
+                "requirement exists and is readable, then re-run." % REQ_ID)
+        raise SystemExit(
+            "requirement #%d — this plan's own TRACKING requirement — came back with "
+            "tracking=0. Apply migration "
+            "20260731124830_add_requirements_tracking_container_flag.sql (which flips it) "
+            "to the database this read hits, or set the flag with update_requirement, "
+            "before regenerating: without it this fixture silently reproduces the "
+            "pre-req-#3123 step-19 divergence." % REQ_ID)
+
+    divergences = [(row['step'], row['state'], derived_state(row, statuses, tracking_ids))
+                   for row in rows
+                   if derived_state(row, statuses, tracking_ids) != row['state']]
 
     out = []
     w = out.append
@@ -351,6 +413,53 @@ def main():
     w('-- Deriving state from this fixture reproduces the plan\'s own `state` field for %d'
       % (len(rows) - len(divergences)))
     w('-- of %d rows.' % len(rows))
+    w('--')
+    # HISTORY, kept rather than deleted (req #3123 scope item 6). The old note
+    # here said the step-19 divergence was an open finding; deleting it outright
+    # would erase why the column exists, and leaving it would be a generated file
+    # asserting something false about its own contents. So: state that it is
+    # resolved, name the mechanism, and let the computed list above prove it.
+    if tracking_ids:
+        w('-- ### RESOLVED — the tracking-requirement divergence (req #3123)')
+        w('--')
+        w('-- This file used to carry a KNOWN DIVERGENCE note: step 19 derived Running')
+        w('-- where the plan recorded done, because it links #%d — this plan\'s own' % REQ_ID)
+        w('-- TRACKING requirement, a container that stays in `development` for the')
+        w('-- entire life of the plan it describes. Deriving pinned the step Running')
+        w('-- forever. It was the sole divergence with a cause in the engine rather')
+        w('-- than in the plan.')
+        w('--')
+        w('-- Req #3123 shipped the durable signal that closes it:')
+        w('-- `requirements.tracking` (migration 20260731124830). A container is')
+        w('-- subtracted from a step\'s GATING set before state is derived, so a step')
+        w('-- whose links are all containers falls through to its own completed_at')
+        w('-- exactly as a link-less step does, and a MIXED step lets its remaining')
+        w('-- work decide. The flag is emitted below from the LIVE requirement read,')
+        w('-- never hand-set here, and generation ABORTS if #%d comes back unflagged.' % REQ_ID)
+        w('--')
+        w('-- Flagged as containers in this generation: %s.'
+          % ', '.join('#%d' % rid for rid in sorted(tracking_ids)))
+        # Whether the exemption is LOAD-BEARING right now is a fact about live
+        # data, so it is computed, not asserted. A container that has since
+        # closed derives correctly with or without the exemption, and a header
+        # claiming this file proves the fix when it no longer can is exactly the
+        # generated-file-lying-about-itself failure the notes above guard.
+        load_bearing = sorted(
+            rid for rid in tracking_ids
+            if statuses.get(rid) not in TERMINAL_STATUSES)
+        w('--')
+        if load_bearing:
+            w('-- The exemption is LOAD-BEARING in this generation: %s %s still open, so'
+              % (', '.join('#%d' % rid for rid in load_bearing),
+                 'is' if len(load_bearing) == 1 else 'are'))
+            w('-- without the flag the step(s) linking it would derive Running.')
+        else:
+            w('-- NOTE: every flagged container is now in a TERMINAL status, so the steps')
+            w('-- linking one derive the same state with or without the exemption. This')
+            w('-- file therefore CARRIES the signal but no longer DEMONSTRATES it. The')
+            w('-- demonstration lives in the static JS fixture,')
+            w('-- Darwin/src/SwarmView/pipelines/__tests__/substrateRebuildFixture.js, which')
+            w('-- pins #%d at `development` + tracking=1 on purpose (req #3169).' % REQ_ID)
     # EVERY claim below is gated on having actually found the thing it claims.
     # The numbers used to be hardcoded; the CAUSAL prose was too, and a confident
     # wrong explanation costs more than a stale count — an unconditional "the rest
@@ -371,17 +480,17 @@ def main():
         w('-- and hand-correcting the inputs to make a rule come out right is exactly the')
         w('-- move design rule 1 forbids. Causes found in THIS list:')
         w('--')
-        tracker_steps = [s for s, _, _ in divergences
-                         if REQ_ID in (by_step[s]['reqs'] if s in by_step else [])]
-        if tracker_steps:
-            w('--   * TRACKING REQUIREMENT — %s link#%d, this plan\'s own tracking'
-              % (steps_phrase(tracker_steps), REQ_ID))
-            w('--     requirement, which stays in `development` for the entire life of the')
-            w('--     plan it describes, so the step pins itself Running forever. A REAL')
-            w('--     INPUT for the derivation engine (req #3112) and the Primary doctrine')
-            w('--     (req #3116) — a tracking requirement is a container, not work —')
-            w('--     carried by req #3123. Recorded rather than smoothed away.')
-        others = [s for s, _, _ in divergences if s not in tracker_steps]
+        # There is deliberately NO "tracking requirement" branch here any more.
+        # The abort in `main` guarantees the plan's own tracker is flagged before
+        # this point, and a flagged container is subtracted from the gating set
+        # before derivation — so a divergence CAUSED by a container cannot reach
+        # this list. A branch for it would be unreachable code claiming to be a
+        # detector, which is worse than no detector: it reads as coverage.
+        #
+        # The pre-req-#3123 version of this file classified by the tracker id and
+        # warned that it "classifies by the plan's own tracker id and nothing
+        # more". That caveat is what the flag replaced.
+        others = [s for s, _, _ in divergences]
         if others:
             w('--   * PLAN LAG — %s. Here the DERIVATION is the correct value: the stored'
               % steps_phrase(others))
@@ -389,9 +498,10 @@ def main():
             w('--     starts or closes. That lag is the exact failure design rule 1 names')
             w('--     (plan row 13 read "Scheduled" while five sessions ran), so these rows')
             w('--     are the product FIXING the problem rather than describing it.')
-            w('--     Read them as such only after ruling out a second tracking')
-            w('--     requirement or a requirement missing from the live read — this')
-            w('--     generator classifies by the plan\'s own tracker id and nothing more.')
+            w('--     Read them as such only after ruling out a requirement missing from')
+            w('--     the live read. A tracking container is no longer a candidate cause:')
+            w('--     since req #3123 containers carry `requirements.tracking`, this')
+            w('--     generator reads the flag live and exempts them before deriving.')
     w('')
     w('-- The plan text carries em-dashes, ellipses and other non-ASCII; declare the')
     w('-- connection charset so a loader that does not default to utf8mb4 cannot mangle')
@@ -503,13 +613,13 @@ def main():
     w('-- ---------------------------------------------------------------------------')
     w('INSERT INTO requirements (id, title, requirement_status, coordination_type, '
       'ai_model, effort, category_fk, creator_fk, machine_fk, feature_fk, '
-      'started_at, completed_at) VALUES')
+      'tracking, started_at, completed_at) VALUES')
     values = []
     for rid in req_ids:
         src = live.get(rid, {})
         title = src.get('title') or f'Requirement #{rid} (not resolvable at fixture-generation time)'
         machine = MACHINE_MAP.get(src.get('machine_fk'))
-        values.append('  (%d, %s, %s, %s, %s, %s, %d, %s, %s, %d, %s, %s)' % (
+        values.append('  (%d, %s, %s, %s, %s, %s, %d, %s, %s, %d, %d, %s, %s)' % (
             rid,
             q(title[:256]),
             q(src.get('requirement_status') or 'authoring'),
@@ -520,6 +630,7 @@ def main():
             q(CREATOR),
             q(machine),
             feature_id[req_feature[rid]],
+            1 if rid in tracking_ids else 0,
             q(src.get('started_at')),
             q(src.get('completed_at'))))
     w(',\n'.join(values))
@@ -531,6 +642,10 @@ def main():
     w('  effort = new.effort,')
     w('  machine_fk = new.machine_fk,')
     w('  feature_fk = new.feature_fk,')
+    # In the UPDATE arm too, not just the INSERT arm: darwin_dev already holds
+    # most of these ids, so a fixture that only set the flag on first insert
+    # would leave a stale 0 on the very row the exemption is about.
+    w('  tracking = new.tracking,')
     w('  started_at = new.started_at,')
     w('  completed_at = new.completed_at;')
     w('')

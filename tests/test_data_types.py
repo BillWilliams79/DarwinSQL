@@ -439,6 +439,11 @@ def test_requirements_columns(db_connection):
     # database legitimately lacks it — unlike the tolerated columns above, which
     # were added by dev-first migrations that could lag.
     expected_fields.append('feature_fk')
+    # Req #3123, migration 20260731124830 — the CONTAINER flag. Asserted
+    # unconditionally for the same reason feature_fk is: the migration lands in
+    # darwin_dev and production together, so no live database legitimately lacks
+    # it. See test_requirements_tracking_column below for the column's own shape.
+    expected_fields.append('tracking')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -2331,6 +2336,28 @@ def test_requirements_feature_fk_column(db_connection):
     assert cols['feature_fk']['Null'] == 'YES'
     assert cols['feature_fk']['Default'] is None
     assert cols['feature_fk']['Key'] == 'MUL'       # indexed FK
+
+
+def test_requirements_tracking_column(db_connection):
+    """requirements.tracking — the CONTAINER flag (req #3123).
+
+    NOT NULL DEFAULT 0 is the whole ergonomics of the column: every requirement
+    ever written is work unless someone says otherwise, so the migration needs no
+    backfill and no caller needs to pass it. NOT indexed on purpose — nothing
+    filters requirements by it; it is read on rows the plan already has in hand
+    (the composed pipeline read projects it alongside requirement_status).
+
+    Deliberately a flag and not a requirement_status value: a container has its
+    own lifecycle — #3083 is `development` — so the two are orthogonal, and
+    folding them would make "is this work finished" unanswerable for containers.
+    """
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'requirements')
+    assert 'tracking' in cols
+    assert cols['tracking']['Type'] == 'tinyint(1)'
+    assert cols['tracking']['Null'] == 'NO'
+    assert cols['tracking']['Default'] == '0'
+    assert cols['tracking']['Key'] == ''            # not indexed
 
 
 def test_pipelines_columns(db_connection):
