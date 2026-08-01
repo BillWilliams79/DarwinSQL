@@ -69,6 +69,11 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'pipeline_step_requirements',
         'pipeline_step_deps',
         'pipeline_steps',
+        # Req #3224 — the durable orchestration reservation (migration
+        # 20260801150404). No partial-match conflict with anything: its FK
+        # columns are `pipeline_fk`/`epic_fk`/`machine_fk`, and its own key names
+        # are all preceded by `_`, which the lookbehind below refuses.
+        'orchestration_claims',
         'pipelines',
         'epics',
         # Req #3096 — per-document actual-token rows (migration 074), child of
@@ -234,6 +239,12 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # and so a failure message names the run that produced it.
         'ix_pipeline_steps_pipeline_fk', 'ix_psr_requirement_fk',
         'ix_psd_dep_step_fk',
+        # Req #3224. `ix_orchestration_claims_epic_fk` is NOT optional here the
+        # way the three above are: `CREATE INDEX` has no `IF NOT EXISTS` form in
+        # MySQL, so an unprefixed one lands on the REAL table and the replay
+        # fails 1061 "Duplicate key name" the second time this suite runs.
+        'fk_oc_pipeline', 'fk_oc_epic', 'fk_oc_machine', 'fk_oc_creator',
+        'uq_orchestration_claims_scope', 'ix_orchestration_claims_epic_fk',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -311,6 +322,10 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3224 — the durable orchestration reservation. Drops FIRST of this
+    # family: it points at pipelines, epics AND machines, and is pointed at by
+    # nothing.
+    'orchestration_claims',
     # Req #3111 — Swarm Orchestration foundation. FK-safe order: the dep/link
     # leaves, then steps, then pipelines. `epics` drops near features (below),
     # since features.epic_fk is SET NULL and imposes no ordering of its own.
@@ -529,6 +544,9 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'epics',
             'pipelines', 'pipeline_steps',
             'pipeline_step_requirements', 'pipeline_step_deps',
+            # Req #3224 — the durable orchestration reservation
+            # (migration 20260801150404)
+            'orchestration_claims',
         ]
     }
     assert tables == expected_tables, \
