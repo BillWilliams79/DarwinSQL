@@ -1742,6 +1742,10 @@ def test_table_count(db_connection):
         'epics',
         'pipelines', 'pipeline_steps',
         'pipeline_step_requirements', 'pipeline_step_deps',
+        # Req #3224 — the durable, SHARED orchestration reservation (migration
+        # 20260801150404). One row per RESERVED SCOPE, so the single-orchestrator
+        # guarantee crosses a machine boundary instead of living in /tmp.
+        'orchestration_claims',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

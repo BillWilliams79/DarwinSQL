@@ -1268,3 +1268,62 @@ CREATE TABLE IF NOT EXISTS pipeline_step_deps (
 );
 
 CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
+
+-- ---------------------------------------------------------------------------
+-- Orchestration reservations (req #3224, migration 20260801150404)
+-- ---------------------------------------------------------------------------
+-- ONE row per RESERVED SCOPE. The single-orchestrator guarantee, made durable
+-- and shared so it crosses a machine boundary — the machine-local registry
+-- under /tmp cannot, and `kill(pid, 0)` is only answerable on the machine that
+-- owns the pid. The CONFLICT RULE is unchanged: a whole-plan scope owns every
+-- step in its plan and conflicts with any scope on it; two epic scopes conflict
+-- only when they are the same epic (design rule 10 makes step -> orchestrator a
+-- function).
+--
+-- `pipeline_fk` + `epic_fk` ARE the scope; there is no `scope` string, because
+-- `pipeline:2` / `epic:7@2` is a RENDERING of those ids (design rule 1).
+-- `epic_key` carries the UNIQUE key because MySQL treats NULLs in a UNIQUE index
+-- as DISTINCT — over `epic_fk` directly, two whole-plan claims would both
+-- insert, which is the collision the constraint exists to stop. Same device as
+-- agent_documents.owned_document_fk.
+--
+-- LIVENESS IS HEARTBEAT AGE ON A DB-STAMPED CLOCK (`update_ts`, falling back to
+-- `claimed_at` before the first heartbeat), never `engine_pid` — that column is
+-- there so a HUMAN can find the process, and reading a remote pid as liveness is
+-- the mistake this table corrects. `polls` is the heartbeat's payload because
+-- ON UPDATE CURRENT_TIMESTAMP only fires when a value actually CHANGES.
+-- Staleness (600 s = ten default engine cycles) is enforced in
+-- darwin-mcp/services/orchestration_claims.py; a schema cannot express it.
+--
+-- DISTINCT FROM PAUSE (req #3223) and deliberately not merged with it: a
+-- reservation is a live claim reclaimed on staleness, a pause is a user
+-- intention that must never be.
+CREATE TABLE IF NOT EXISTS orchestration_claims (
+    id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    pipeline_fk   INT          NOT NULL,                -- the plan this claim covers
+    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
+    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL,  -- carries the UNIQUE key
+    machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
+    terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
+    engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
+    polls         INT          NOT NULL DEFAULT 0,      -- the heartbeat payload
+    claimed_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk    VARCHAR(64)  NOT NULL,
+    create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
+    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
+    CONSTRAINT fk_oc_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_oc_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);
