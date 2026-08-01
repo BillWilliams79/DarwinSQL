@@ -2289,13 +2289,19 @@ def test_agent_telemetry_row_docs_columns(db_connection):
 # ============================================================================
 
 def test_epics_columns(db_connection):
-    """epics is a CONTENT table: full baseline, no status enum (MVP discipline —
-    an epic is open until its features are done; a second hand-maintained
-    lifecycle buys nothing)."""
+    """epics is a CONTENT table, plus ONE status column and it is not a lifecycle.
+
+    `closed` remains the lifecycle answer — an epic is open until its features
+    are done, and a second hand-maintained lifecycle enum buys nothing. What req
+    #3223 added is a SUPPRESSION answer, which `closed` cannot give: "do not
+    swarm-start this epic's work right now" is not "this epic is finished", and
+    overloading `closed` would make parking an epic and completing it the same
+    act. See `test_epics_status_is_suppression_not_lifecycle` below.
+    """
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'epics')
-    expected = {'id', 'title', 'description', 'category_fk', 'creator_fk',
-                'closed', 'sort_order', 'create_ts', 'update_ts'}
+    expected = {'id', 'title', 'description', 'epic_status', 'category_fk',
+                'creator_fk', 'closed', 'sort_order', 'create_ts', 'update_ts'}
     assert set(cols.keys()) == expected
 
     assert cols['id']['Type'] == 'int'
@@ -2325,9 +2331,32 @@ def test_epics_columns(db_connection):
     assert cols['sort_order']['Type'] == 'smallint'
     assert cols['sort_order']['Null'] == 'YES'
 
-    # No lifecycle enum — deliberate.
-    assert 'epic_status' not in cols
+    # No SECOND lifecycle column — still deliberate. `closed` is the lifecycle;
+    # `epic_status` (asserted below) answers a different question entirely.
     assert 'status' not in cols
+
+
+def test_epics_status_is_suppression_not_lifecycle(db_connection):
+    """req #3223, migration 20260801125029 — `epics.epic_status`.
+
+    NOT NULL DEFAULT 'active' is the load-bearing part: every epic that existed
+    before this column backfills to the only safe answer, so nothing that was
+    launching yesterday stops launching because a column appeared.
+
+    VARCHAR(16), matching `pipelines.pipeline_status` /
+    `requirements.requirement_status` / `features.feature_status` rather than an
+    ENUM, because every status column in this schema is a VARCHAR whose value set
+    is enforced in the service layer — an ENUM here would be the one table where
+    adding a value needs DDL.
+    """
+    with db_connection.cursor() as cur:
+        cols = _columns(cur, 'epics')
+    assert cols['epic_status']['Type'] == 'varchar(16)'
+    assert cols['epic_status']['Null'] == 'NO'
+    assert cols['epic_status']['Default'] == 'active'
+    # Unindexed on purpose: `epics` holds single-digit rows and every read of
+    # this column arrives by primary key or as part of a whole-table list.
+    assert cols['epic_status']['Key'] == ''
 
 
 def test_features_epic_fk_column(db_connection):

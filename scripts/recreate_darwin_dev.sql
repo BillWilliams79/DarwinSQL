@@ -184,6 +184,9 @@ CREATE TABLE epics (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title        VARCHAR(256) NOT NULL,
     description  TEXT         NULL,
+    epic_status  VARCHAR(16)  NOT NULL DEFAULT 'active',  -- active|paused (req #3223,
+                                            -- migration 20260801125029). SUPPRESSION, not
+                                            -- lifecycle — see schema.sql for the full note.
     category_fk  INT          NOT NULL,
     creator_fk   VARCHAR(64)  NOT NULL,
     closed       TINYINT(1)   NOT NULL DEFAULT 0,
