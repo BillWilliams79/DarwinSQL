@@ -13,8 +13,10 @@ plan is fetched LIVE every time rather than vendored: req #3119 (plan step 42)
 re-seeds darwin_dev from whatever the plan says at that point, and a vendored copy
 would quietly go stale between now and then.
 
-darwin_dev ONLY. Production `darwin` stays empty until the Primary's live-plan
-cutover, which is a separate doctrine-governed act.
+darwin_dev ONLY. NEVER apply the output to production `darwin`. It used to be safe
+to say `darwin` was simply empty; the Primary's live-plan cutover has since landed
+and production carries the real plan, so this fixture's 9001-band rows would sit
+alongside live ones rather than in an empty table (req #3147).
 """
 import json
 import os
@@ -338,9 +340,11 @@ def main():
     w('-- the acceptance fixture for the Swarm Orchestration feature, expressed in the')
     w('-- tables migration 076 creates.')
     w('--')
-    w('-- *** darwin_dev ONLY. *** Production `darwin` stays EMPTY until the Primary\'s')
-    w('-- live-plan cutover, which is a separate doctrine-governed act. Do not apply')
-    w('-- this file to `darwin`.')
+    w('-- *** darwin_dev ONLY. *** NEVER apply this file to production `darwin`.')
+    w('-- It used to be safe to say `darwin` was simply empty. The Primary\'s live-plan')
+    w('-- cutover has since landed and production carries the real plan, so these')
+    w('-- 9001-band rows would sit alongside live ones rather than in an empty table')
+    w('-- (req #3147).')
     w('--')
     w('-- Source plan: requirement #%d, %d rows, %d distinct requirements,'
       % (REQ_ID, len(rows), len(req_ids)))
