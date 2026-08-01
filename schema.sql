@@ -286,6 +286,15 @@ CREATE TABLE IF NOT EXISTS requirements (
 -- Swarm session management
 -- ============================================================================
 
+-- FK checks are disabled across this one CREATE because `swarm_sessions`
+-- forward-references `pipelines`, which the Swarm Orchestration block declares
+-- much further down (req #3186). Same pattern, and same reason, as the
+-- build-visualizer block below: the constraint must stay INLINE — the
+-- conformance tests that derive `CREATOR_TABLE_REFERENCES` and the junction
+-- registry from this file parse CREATE TABLE bodies and never see a trailing
+-- ALTER — so a fresh `mysql < schema.sql` needs the check relaxed instead.
+SET FOREIGN_KEY_CHECKS = 0;
+
 CREATE TABLE IF NOT EXISTS swarm_sessions (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     branch          VARCHAR(128)    NULL,
@@ -301,6 +310,16 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default bumped to high, req #3007)
     worktree_path   VARCHAR(512)    NULL,
     machine_fk      INT             NULL,          -- req #2943; which machine ran this session
+    -- Orchestration attribution (req #3186, migration 20260801020944). WHICH
+    -- PIPELINE / WHICH EPIC this session was advancing — stamped ONCE by
+    -- darwin-mcp's link_requirement_session and never overwritten, because the
+    -- links a derivation would walk (requirements.feature_fk, features.epic_fk,
+    -- pipeline_step_requirements) are all mutable and would rewrite a finished
+    -- session's history. NULL = no plan/epic context, or pre-#3186 and not
+    -- derivable at backfill time. ON DELETE SET NULL: session history must never
+    -- block deleting a pipeline or an epic.
+    pipeline_fk     INT             NULL DEFAULT NULL,
+    epic_fk         INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332). On each swarm_status change db.py adds
@@ -345,8 +364,16 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_swarm_sessions_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_swarm_sessions_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
 );
+
+SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE TABLE IF NOT EXISTS requirement_sessions (
     requirement_fk  INT             NOT NULL,

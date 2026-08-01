@@ -536,6 +536,8 @@ def test_swarm_sessions_columns(db_connection):
     - starting_secs..legacy_secs: INT, NOT NULL, DEFAULT 0     (req #2332, 8 buckets)
     - instrumented: TINYINT, NOT NULL, DEFAULT 1               (req #2332)
     - pre_pause_status: VARCHAR(16), NULL                      (req #2332)
+    - pipeline_fk: INT, NULL, MUL                              (req #3186, migration 20260801020944)
+    - epic_fk: INT, NULL, MUL                                  (req #3186, migration 20260801020944)
     - phase_tokens: JSON, NULL                                 (req #2839, migration 060)
     - tokens_at_last_transition: JSON, NULL                    (req #2839, migration 060)
     - start_summary: TEXT, NULL
@@ -574,7 +576,22 @@ def test_swarm_sessions_columns(db_connection):
     for rollup in ('wall_secs_total', 'output_tokens_total'):
         if rollup in columns:
             expected_fields.append(rollup)
+    # Req #3186, migration 20260801020944 — orchestration attribution. Tolerated
+    # the same way, for the same dev-before-production window.
+    for attribution in ('pipeline_fk', 'epic_fk'):
+        if attribution in columns:
+            expected_fields.append(attribution)
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #3186 attribution columns — NULLable INT FKs with no default. NULL is
+    # meaningful: "this session belongs to no plan / no epic", which is a real
+    # answer for ad-hoc work outside any pipeline, not a missing value.
+    for attribution in ('pipeline_fk', 'epic_fk'):
+        if attribution in columns:
+            assert columns[attribution]['Type'] == 'int'
+            assert columns[attribution]['Null'] == 'YES'
+            assert columns[attribution]['Default'] is None
+            assert columns[attribution]['Key'] == 'MUL'
 
     # req #3117 rollup columns (migration 077) — NULLable INTs with NO default.
     # The nullability is the contract, not an accident: NULL means "not computed
