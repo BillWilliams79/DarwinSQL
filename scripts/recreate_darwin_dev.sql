@@ -276,6 +276,12 @@ CREATE TABLE requirements (
 
 -- Swarm session management
 
+-- FK checks relaxed across this one CREATE: `swarm_sessions` forward-references
+-- `pipelines`, which this script does not declare until much further down
+-- (req #3186). Mirrors the identical relaxation in schema.sql, which this file
+-- must stay column-for-column identical to (see memory/database.md § parity gate).
+SET FOREIGN_KEY_CHECKS = 0;
+
 CREATE TABLE swarm_sessions (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     branch          VARCHAR(128)    NULL,
@@ -291,6 +297,11 @@ CREATE TABLE swarm_sessions (
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
     worktree_path   VARCHAR(512)    NULL,
     machine_fk      INT             NULL,          -- req #2943
+    -- Orchestration attribution (req #3186, migration 20260801020944): WHICH
+    -- PIPELINE / WHICH EPIC this session was advancing. Stamped once at
+    -- requirement-link time; NULL = work outside any plan.
+    pipeline_fk     INT             NULL DEFAULT NULL,
+    epic_fk         INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332, migration 059)
@@ -327,8 +338,16 @@ CREATE TABLE swarm_sessions (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_swarm_sessions_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_swarm_sessions_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
 );
+
+SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE TABLE requirement_sessions (
     requirement_fk  INT             NOT NULL,
