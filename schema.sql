@@ -184,6 +184,18 @@ CREATE TABLE IF NOT EXISTS epics (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title        VARCHAR(256) NOT NULL,
     description  TEXT         NULL,
+    epic_status  VARCHAR(16)  NOT NULL DEFAULT 'active',  -- active|paused (req #3223,
+                                            -- migration 20260801125029). SUPPRESSION, not
+                                            -- lifecycle: `closed` still says an epic is
+                                            -- finished, this says whether its work may be
+                                            -- swarm-started. `paused` stops the Pipeline
+                                            -- Engine announcing launches for the epic's
+                                            -- steps under ANY orchestrator — an epic-scoped
+                                            -- one and a whole-plan one alike — and nothing
+                                            -- else: orchestration, running sessions and a
+                                            -- directly user-initiated /swarm-start are all
+                                            -- unaffected. Read for free by
+                                            -- darwin://pipeline/{id}.
     category_fk  INT          NOT NULL,
     creator_fk   VARCHAR(64)  NOT NULL,
     closed       TINYINT(1)   NOT NULL DEFAULT 0,

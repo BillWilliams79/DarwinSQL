@@ -1,0 +1,79 @@
+-- 20260801125029_add_epics_epic_status_for_pause_enforcement.sql
+--
+-- Req #3223: give an EPIC a durable, shared "do not swarm-start this" state, so
+-- pause enforcement has somewhere to live at epic scope.
+--
+-- PROBLEM.  Pause exists today only as an AGREEMENT. `pipelines.pipeline_status`
+--           already carries the value `paused`, but nothing reads it: the
+--           Pipeline Engine's only reference to the column is a comment saying
+--           it does not touch it, and the derivation never consults it — so a
+--           step on a paused plan derives eligible exactly as on an active one,
+--           and `/pipeline-start` silently flipped `paused` to `active` without
+--           a word. At EPIC scope there was no state at all: `epics` carries
+--           `closed` and nothing else, and `closed` is a lifecycle fact ("this
+--           epic is finished"), not a suppression one ("don't start its work
+--           right now"). Overloading `closed` for pause would make finishing an
+--           epic and parking it the same act.
+--
+--           The consequence is the failure this requirement names: two parties
+--           can both believe a plan is paused while work launches. That belief
+--           has to survive a Claude session ending, a different machine picking
+--           the plan up, and a night with no engine running at all — which is
+--           what makes it a COLUMN in the shared database rather than anything
+--           held by a process.
+--
+-- SHAPE.    One VARCHAR(16) on `epics`, `NOT NULL DEFAULT 'active'`, values
+--           `active` | `paused`.
+--
+--           A STATUS COLUMN, not a boolean and not a new table:
+--
+--             * It matches every sibling in this schema — `pipeline_status`,
+--               `requirement_status`, `feature_status`, `swarm_status` — so an
+--               epic's suppression state is read, written and rendered exactly
+--               like everything else's, and `darwin://pipeline/{id}` picks it up
+--               for free on a row it already fetches (design rule 5's fixed
+--               seven gateway reads is unchanged).
+--             * A scope-keyed pause TABLE would be the shape that could express
+--               "paused in THAT plan". It is deliberately NOT built: an epic
+--               seated in two pipelines is hypothetical today, and the moment it
+--               stops being hypothetical is the moment that table becomes
+--               justified. The LIMIT is therefore stated rather than designed
+--               around — pausing an epic pauses it everywhere it is seated.
+--
+--           TWO VALUES ONLY, and no `draft`/`completed`/`aborted` alongside
+--           them. An epic's lifecycle is already `closed`; adding a parallel
+--           lifecycle enum here would create two columns that can disagree about
+--           whether an epic is finished. This column answers exactly one
+--           question — may this epic's work be swarm-started — and every value
+--           it has is an answer to it.
+--
+--           NOT NULL DEFAULT 'active' backfills every existing row to the only
+--           safe answer: nothing that was launching yesterday stops launching
+--           because this column appeared.
+--
+--           No index. `epics` holds single-digit rows, and every read of this
+--           column arrives by primary key or as part of a whole-table list.
+--
+--           Not an FK and not creator-scoped by itself, so `CREATOR_FK_TABLES`
+--           / `CREATOR_TABLE_REFERENCES` (Lambda-Rest/auth_utils.py) are
+--           unchanged: `epics` already carries `creator_fk`, and this adds no
+--           column that POINTS at another creator-scoped row.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands — the
+--           only difference is the trailing database name, so read it twice:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260801125029_add_epics_epic_status_for_pause_enforcement.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260801125029_add_epics_epic_status_for_pause_enforcement.sql darwin
+--
+--           The production command above requires
+--           `bash scripts/db/rds-snapshot.sh 20260801125029` to report status=ok
+--           first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260801125029 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE epics
+    ADD COLUMN epic_status VARCHAR(16) NOT NULL DEFAULT 'active' AFTER description;
