@@ -7,9 +7,11 @@
 -- the acceptance fixture for the Swarm Orchestration feature, expressed in the
 -- tables migration 076 creates.
 --
--- *** darwin_dev ONLY. *** Production `darwin` stays EMPTY until the Primary's
--- live-plan cutover, which is a separate doctrine-governed act. Do not apply
--- this file to `darwin`.
+-- *** darwin_dev ONLY. *** NEVER apply this file to production `darwin`.
+-- It used to be safe to say `darwin` was simply empty. The Primary's live-plan
+-- cutover has since landed and production carries the real plan, so these
+-- 9001-band rows would sit alongside live ones rather than in an empty table
+-- (req #3147).
 --
 -- Source plan: requirement #3083, 42 rows, 67 distinct requirements,
 --              4 epics, 23 features.
