@@ -1336,6 +1336,40 @@ def test_map_coordinates_columns(db_connection):
     assert columns['altitude']['Null'] == 'YES'
 
 
+def test_map_coordinates_composite_index(db_connection):
+    """migration 20260803164904 (req #3166): (map_run_fk, seq), and ONLY that.
+
+    `DESCRIBE` cannot tell these two apart — `map_run_fk` reads `Key='MUL'`
+    under the old single-column index and under the composite alike, so the
+    column test above passes either way. Nothing else in this suite loads
+    `scripts/recreate_darwin_dev.sql`, which is the file a darwin_dev rebuild
+    actually runs, so a stale copy of it would silently restore the pre-#3166
+    index with every test still green. This is the assertion that notices.
+
+    Asserted as EXACTLY two keys because the migration REPLACES rather than
+    adds: leaving `idx_map_coordinates_run` in place would be a redundant
+    B-tree maintained on every row of a bulk import (~600 per run).
+    """
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW INDEX FROM map_coordinates")
+        rows = cur.fetchall()
+
+    by_key = {}
+    for row in rows:
+        by_key.setdefault(row['Key_name'], {})[row['Seq_in_index']] = row['Column_name']
+
+    assert 'idx_map_coordinates_run_seq' in by_key, \
+        'idx_map_coordinates_run_seq missing — migration 20260803164904 not applied'
+    composite = by_key['idx_map_coordinates_run_seq']
+    assert [composite[i] for i in sorted(composite)] == ['map_run_fk', 'seq'], \
+        'map_run_fk must lead: it is the FK prefix AND the filter column'
+
+    assert 'idx_map_coordinates_run' not in by_key, \
+        'the single-column index is redundant under the composite and must be dropped'
+    assert set(by_key) == {'PRIMARY', 'idx_map_coordinates_run_seq'}, \
+        f'unexpected indexes on map_coordinates: {sorted(by_key)}'
+
+
 def test_map_views_columns(db_connection):
     """Verify map_views column definitions match schema.sql."""
     with db_connection.cursor() as cur:
