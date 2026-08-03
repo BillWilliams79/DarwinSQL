@@ -563,7 +563,9 @@ CREATE TABLE map_coordinates (
     FOREIGN KEY (map_run_fk)
         REFERENCES map_runs (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    INDEX idx_map_coordinates_run (map_run_fk)
+    -- req #3166: composite, REPLACING the old idx_map_coordinates_run.
+    -- `map_run_fk` is the leftmost prefix, so it still satisfies the FK.
+    INDEX idx_map_coordinates_run_seq (map_run_fk, seq)
 );
 
 CREATE TABLE map_views (

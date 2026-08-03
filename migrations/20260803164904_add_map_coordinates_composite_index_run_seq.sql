@@ -1,0 +1,153 @@
+-- 20260803164904_add_map_coordinates_composite_index_run_seq.sql
+--
+-- Req #3166: let a GPS track be READ in seq order straight out of an index,
+-- instead of being sorted in memory on every single read.
+--
+-- PROBLEM.  `map_coordinates` carries exactly one index, `idx_map_coordinates_run
+--           (map_run_fk)`, and EVERY read of the table in the whole product is
+--           the same shape:
+--
+--             WHERE map_run_fk = ? ORDER BY seq ASC
+--
+--           (RouteMapThumbnail, RouteDetailView, the /maps aggregator card, the
+--           KML export dialog and the JSON export service — no other access
+--           pattern exists.) The index answers the WHERE and nothing else, so
+--           MySQL filesorts the matched rows on `seq` every time, allocating a
+--           sort buffer per connection. Lambda-Rest opens ONE FRESH CONNECTION
+--           PER INVOCATION (`db_connection.py`), so that allocation is never
+--           amortised across requests the way a pooled server would amortise
+--           it — the cost is paid in full by each of the N concurrent reads a
+--           thumbnail grid or an aggregate open fans out.
+--
+--           Scale, MEASURED on production 2026-08-03 while applying this
+--           migration: 1,528,251 rows across 2,547 runs — 600.0 rows per run on
+--           average, 4,370 in the largest single run. (The requirement's
+--           pre-measurement estimate of ~600 was taken from a 533-row darwin_dev
+--           seed slice and turns out to be exact.) Against that: a RouteCardView
+--           "All" page mounting up to 300 thumbnails, on a db.t4g.small with
+--           max_connections=300 and a 7-day minimum freeable memory of 243 MB.
+--           Per-sort cost is small; the exposure is the concurrency multiplier,
+--           not the single query.
+--
+--           *** THE FILESORT CLAIM ABOVE IS THE REQUIREMENT'S, AND MEASUREMENT
+--           DISPROVED IT. READ THIS BEFORE CITING THIS MIGRATION. ***
+--
+--           The product never emits `WHERE map_run_fk=? ORDER BY seq ASC`.
+--           `Lambda-Rest/rest_get_table.py` puts the client's `sort=` INSIDE the
+--           aggregate — `GROUP_CONCAT(JSON_OBJECT(...) ORDER BY seq asc SEPARATOR
+--           ', ')` — so there is no statement-level ORDER BY on this path at all.
+--           MySQL sorts that with `Item_func_group_concat`'s own red-black tree,
+--           which never consults the access path, so no index can supply the
+--           order. Measured against PRODUCTION 2026-08-03 on the largest run
+--           (id 35463, 4,370 rows), EXPLAIN FORMAT=JSON of the REAL statement:
+--
+--               key             = idx_map_coordinates_run_seq
+--               used_key_parts  = ["map_run_fk"]      <-- `seq` NOT used
+--               key_length      = 4                   <-- one INT
+--
+--           and median wall time over 15 reps: ORDER BY seq 43.15 ms, ORDER BY
+--           latitude 40.35 ms, no ORDER BY at all 40.87 ms. Ordering by the
+--           indexed column is not faster than ordering by an unindexed one, and
+--           removing the sort entirely saves nothing measurable — the cost on
+--           this path is building the JSON, not sorting it. `Sort_rows` stays ~0
+--           either way because the GROUP_CONCAT tree is not counted there, which
+--           is also why an EMPTY `Extra` in EXPLAIN proves NOTHING here.
+--
+--           An earlier version of this comment claimed the filesort was gone,
+--           on an EXPLAIN of the hand-written single-table query rather than of
+--           the statement Lambda-Rest actually builds. That was wrong.
+--
+--           WHY THE INDEX STAYS ANYWAY. It answers every lookup the dropped
+--           index answered (`map_run_fk` is its leftmost prefix), it satisfies
+--           the FK, it costs ~4 bytes per entry, and it is already applied to
+--           both databases — reverting means two more ALTERs on the largest
+--           table in the schema to buy nothing. It is neutral-to-positive, not
+--           the win the requirement described.
+--
+--           WHAT WOULD ACTUALLY REMOVE THE SORT is restructuring
+--           `rest_get_table.py` to order in a derived table and aggregate over
+--           it. Deliberately NOT done: MySQL does not guarantee a derived
+--           table's ORDER BY survives into the outer aggregate (it may merge the
+--           derived table and drop it), which is the exact implicit-ordering
+--           hazard `memory/mysql-migration.md` records this codebase avoiding —
+--           and the measurement above says the prize is ~5% of one query on the
+--           slowest run in the database. High blast radius on the read path the
+--           entire frontend uses, for nothing.
+--
+--           Verified after apply, both databases: `map_coordinates_ibfk_1` is
+--           intact and `information_schema.STATISTICS` shows exactly PRIMARY
+--           plus `idx_map_coordinates_run_seq (map_run_fk, seq)`. InnoDB resolves
+--           the FK by leftmost prefix at table-open time, so had the composite
+--           not qualified the DROP would have failed ER_DROP_INDEX_FK (1553)
+--           rather than succeeding — the success IS the proof, and ADD-then-DROP
+--           is required rather than merely tidier.
+--
+-- SHAPE.    One composite index `(map_run_fk, seq)`, replacing the single-column
+--           one.
+--
+--           REPLACING, not adding alongside. `(map_run_fk, seq)` has `map_run_fk`
+--           as its leftmost prefix, so it answers every lookup the old index
+--           answered AND satisfies the `map_run_fk` foreign key's index
+--           requirement — MySQL re-points the constraint at it. Keeping both
+--           would leave a second B-tree that no query can ever prefer, maintained
+--           on every write, on the one table in this schema that takes bulk
+--           inserts: an import writes ~600 rows per run in a single transaction.
+--           A redundant index there is pure write amplification.
+--
+--           The column ORDER is the whole point and is not interchangeable.
+--           `(map_run_fk, seq)` makes the rows for one run already adjacent AND
+--           already ordered, so the read is a range scan with no sort step.
+--           `(seq, map_run_fk)` would answer neither half.
+--
+--           `seq` and not `id`: `seq` is the recorded order of the GPS fix and is
+--           what every consumer sorts by. `id` happens to agree with it today
+--           because the importer inserts in seq order, but nothing enforces that
+--           and a re-import would break the coincidence.
+--
+--           Covering-index note: the reads project `latitude, longitude,
+--           altitude`, which this index does not carry, so each row still costs a
+--           primary-key lookup. Adding those three columns to the index would
+--           make it covering and would also roughly triple its size on the
+--           largest table in the schema. Deliberately NOT done — the sort was the
+--           measured-by-shape problem, the row lookups are not, and this is a
+--           $5/month db.t4g.small where index bytes compete with the buffer pool.
+--
+--           ALGORITHM=INPLACE, LOCK=NONE on both statements: this table is the
+--           biggest in the schema and the change must not block concurrent reads
+--           or writes while it runs. Stated explicitly rather than left to
+--           MySQL's default so the ALTER FAILS LOUDLY if it ever cannot be done
+--           online, instead of silently taking a table lock in production.
+--
+--           Two statements rather than one combined ALTER: if the DROP were ever
+--           refused, the ADD has already landed and the table is left with a
+--           redundant index (harmless) rather than with neither change applied.
+--
+--           No new column, so `CREATOR_FK_TABLES` / `JUNCTION_OWNERSHIP` /
+--           `CREATOR_TABLE_REFERENCES` (Lambda-Rest/auth_utils.py) are all
+--           unchanged. `map_coordinates` stays junction-scoped through
+--           `map_run_fk` → `map_runs.creator_fk`, and that predicate is a
+--           subquery on the PARENT table, so this index does not affect it.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands — the
+--           only difference is the trailing database name, so read it twice:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260803164904_add_map_coordinates_composite_index_run_seq.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260803164904_add_map_coordinates_composite_index_run_seq.sql darwin
+--
+--           The production command above requires
+--           `bash scripts/db/rds-snapshot.sh 20260803164904` to report status=ok
+--           first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260803164904 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE map_coordinates
+    ADD INDEX idx_map_coordinates_run_seq (map_run_fk, seq),
+    ALGORITHM=INPLACE, LOCK=NONE;
+
+ALTER TABLE map_coordinates
+    DROP INDEX idx_map_coordinates_run,
+    ALGORITHM=INPLACE, LOCK=NONE;

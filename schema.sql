@@ -628,7 +628,12 @@ CREATE TABLE IF NOT EXISTS map_coordinates (
     FOREIGN KEY (map_run_fk)
         REFERENCES map_runs (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    INDEX idx_map_coordinates_run (map_run_fk)
+    -- req #3166: composite, and it REPLACES the old single-column
+    -- idx_map_coordinates_run. `map_run_fk` is the leftmost prefix, so this
+    -- still satisfies the foreign key, and `seq` removes the filesort from the
+    -- one read shape the whole product uses:
+    --   WHERE map_run_fk = ? ORDER BY seq ASC
+    INDEX idx_map_coordinates_run_seq (map_run_fk, seq)
 );
 
 CREATE TABLE IF NOT EXISTS map_views (
