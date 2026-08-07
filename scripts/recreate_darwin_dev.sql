@@ -2,11 +2,31 @@
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
 -- All 52 tables in FK-dependency order
-
-USE darwin_dev;
+--
+-- ============================================================================
+-- THIS FILE DROPS 52 TABLES. (req #3196)
+-- ============================================================================
+-- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
+-- a `USE` is a statement the caller's loader may strip, reorder or never reach,
+-- so the only thing standing between this file and production was that nobody
+-- had typed the wrong database name yet. The two declarations below are the
+-- protection, and they are checked BEFORE a connection is opened:
+--
+--   `darwin:targets` omits `darwin`, which is an ABSOLUTE production ban —
+--   no flag in DarwinSQL/scripts/db_guard.py overrides it.
+--
+--   `darwin:destructive` requires --destructive on the command line, so the
+--   reset can never be a careless invocation:
+--
+--     python3 DarwinSQL/scripts/load_sql.py \
+--       DarwinSQL/scripts/recreate_darwin_dev.sql darwin_dev --destructive
+--
+-- darwin:targets = darwin_dev
+-- darwin:destructive
 
 SET FOREIGN_KEY_CHECKS = 0;
-DROP TABLE IF EXISTS pipeline_step_deps, pipeline_step_requirements, pipeline_steps, pipelines,
+DROP TABLE IF EXISTS orchestration_claims,
+    pipeline_step_deps, pipeline_step_requirements, pipeline_steps, pipelines,
     agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
     customers,
@@ -1135,3 +1155,42 @@ CREATE TABLE pipeline_step_deps (
 );
 
 CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
+
+-- Orchestration reservations (req #3224, migration 20260801150404).
+--
+-- ADDED BY req #3196, not by #3224: this table reached schema.sql and both live
+-- databases but never this file, so a rebuilt darwin_dev came back 12 columns
+-- short and every orchestration reservation failed against a table that did not
+-- exist. The drift went unseen because the § Schema-of-Record Parity gate that
+-- would have caught it could not RUN — both schema.sql and this file were
+-- unloadable through load_sql.py until #3196 fixed the statement splitter.
+
+CREATE TABLE orchestration_claims (
+    id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    pipeline_fk   INT          NOT NULL,                -- the plan this claim covers
+    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
+    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL,  -- carries the UNIQUE key
+    machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
+    terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
+    engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
+    polls         INT          NOT NULL DEFAULT 0,      -- the heartbeat payload
+    claimed_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk    VARCHAR(64)  NOT NULL,
+    create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
+    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
+    CONSTRAINT fk_oc_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_oc_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);

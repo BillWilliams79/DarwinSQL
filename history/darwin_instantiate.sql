@@ -2,10 +2,15 @@
 -- DEPRECATED — Historical reference only.
 -- This file is superseded by schema.sql (current state) + migrations/.
 -- Retained for archaeological value showing the original table evolution.
+--
+-- DISARMED by req #3196. This file opened with `USE darwin;` and closed with a
+-- second one. Deprecated or not, they were live statements: anything that
+-- executed this file re-pointed its session at PRODUCTION. They are commented
+-- out below rather than deleted, so the archaeology survives without the gun.
 -- ==========================================================================
 
 /*CREATE DATABASE IF NOT EXISTS darwin;*/
-USE darwin;
+-- USE darwin;   (req #3196 — the target is the caller's, never the file's)
 
 /* ############################################## */
 /* VERSION 0 Initial tables instatiation */
@@ -173,4 +178,4 @@ MODIFY COLUMN description VARCHAR(1024) NOT NULL;
 
 
 /* Future Update Here */
-USE darwin;
+-- USE darwin;   (req #3196 — the target is the caller's, never the file's)

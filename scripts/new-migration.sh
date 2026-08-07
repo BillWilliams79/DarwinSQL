@@ -186,18 +186,28 @@ ${REQ_LINE}
 -- SHAPE.    <the tables/columns/constraints this adds, and why this shape and
 --           not the obvious alternative>
 --
--- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands — the
---           only difference is the trailing database name, so read it twice:
+-- TARGET.   NEVER write \`USE <db>;\` or \`CREATE DATABASE\` into this file. A
+--           \`USE\` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: \`-- darwin:targets = darwin\`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
 --
 --             python3 DarwinSQL/scripts/load_sql.py \\
 --               DarwinSQL/migrations/${STAMP}_${SLUG}.sql darwin_dev
 --
 --             python3 DarwinSQL/scripts/load_sql.py \\
---               DarwinSQL/migrations/${STAMP}_${SLUG}.sql darwin
+--               DarwinSQL/migrations/${STAMP}_${SLUG}.sql darwin --production
 --
---           The production command above requires
---           \`bash scripts/db/rds-snapshot.sh ${STAMP}\` to report status=ok
---           first. See memory/database.md § Schema Migration Workflow.
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses \`darwin\` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires \`bash scripts/db/rds-snapshot.sh ${STAMP}\` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
 --
 -- Migration id ${STAMP} is a UTC timestamp allocated by
 -- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.

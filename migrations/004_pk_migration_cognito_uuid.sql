@@ -2,8 +2,10 @@
 -- Supports using Cognito username (UUID) as the profiles primary key
 -- This migration is data-dependent and was applied once in production.
 -- It is preserved here as historical record of the schema change.
-
-USE darwin;
+--
+-- The `USE darwin;` that stood here was removed by req #3196 — a migration file
+-- must not choose its own database. Name the target on the connection:
+--   python3 DarwinSQL/scripts/load_sql.py <this file> darwin_dev
 
 -- Drop all foreign keys referencing profiles.id
 ALTER TABLE domains DROP FOREIGN KEY domains_ibfk_1;

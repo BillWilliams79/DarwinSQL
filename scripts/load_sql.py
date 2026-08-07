@@ -2,103 +2,85 @@
 """Apply a .sql file to a Darwin database. The loader this machine lacks.
 
     . Lambda-Rest/exports.sh
-    python3 DarwinSQL/scripts/load_sql.py <file.sql> <database>
+    python3 DarwinSQL/scripts/load_sql.py <file.sql> <database> [flags]
+
+    python3 DarwinSQL/scripts/load_sql.py migrations/<MIG>.sql darwin_dev
+    python3 DarwinSQL/scripts/load_sql.py migrations/<MIG>.sql darwin --production
 
 There is no `mysql` CLI on the Mac mini, so the migration/fixture instructions in
-memory/database.md ("mysql -u <user> -p darwin_dev < migrations/NNN.sql") have no
-executable on this host. This is that command.
+memory/database.md have no executable on this host. This is that command.
 
-WHY A HAND-ROLLED SPLITTER. Splitting on a bare `;` is wrong for Darwin's fixture
-files: `seed_pipelines_darwin_dev.sql` carries requirement titles containing both
-semicolons ("...from local mirrors; retire git-worktree machinery...") and `#`
-characters ("...CORRECTED 2026-07-26: #3079 completed..."), inside string
-literals. A naive split produces syntax errors; a `#`-comment stripper silently
-truncates the text it stores. So:
+THE TARGET IS THE CALLER'S, AND ONLY THE CALLER'S (req #3196). Every rule about
+which database gets hit lives in `db_guard.py`, which also owns the statement
+splitter this file used to carry — one implementation, so the loader, the guard
+and `tests/test_sql_targets.py` cannot disagree about what a statement is.
 
-  * statements split on `;` only OUTSIDE a single-quoted string;
-  * `''` (MySQL's doubled-quote escape) and backslash escapes both honoured;
-  * only FULL-LINE `--` comments are removed — an inline `--` is never assumed to
-    start a comment, because it may be inside a literal;
-  * `#` is left alone entirely.
+What changed in #3196: this loader used to SILENTLY STRIP a `USE`/`CREATE
+DATABASE` statement. That kept the loader itself safe and left every other
+caller — the `mysql` CLI, a hand-written probe, another machine — exposed, while
+saying nothing about the fact that the file disagreed with the operator. It now
+REFUSES. The corpus carries no such statement (pinned by a test), so the refusal
+only ever fires on a file that has just acquired one.
 
 Everything runs in ONE transaction and rolls back on the first failure, so a
 half-applied fixture is not a state this can produce. (DDL still self-commits in
 MySQL — that is a server property, not something the loader can undo.)
 """
+import argparse
 import os
 import sys
 
-import pymysql
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-
-def split_statements(text):
-    """Split SQL on `;` that is not inside a single-quoted string literal."""
-    statements, buf, in_string, escaped = [], [], False, False
-    for char in text:
-        if escaped:
-            buf.append(char)
-            escaped = False
-            continue
-        if char == '\\' and in_string:
-            buf.append(char)
-            escaped = True
-            continue
-        if char == "'":
-            # A doubled '' inside a literal reads as close-then-open, which lands
-            # back in the string — the same place MySQL's own parser ends up.
-            in_string = not in_string
-            buf.append(char)
-            continue
-        if char == ';' and not in_string:
-            statements.append(''.join(buf))
-            buf = []
-            continue
-        buf.append(char)
-    if ''.join(buf).strip():
-        statements.append(''.join(buf))
-    return statements
-
-
-def strip_full_line_comments(text):
-    return '\n'.join(line for line in text.split('\n')
-                     if not line.lstrip().startswith('--'))
+import db_guard  # noqa: E402
 
 
 def main():
-    if len(sys.argv) != 3:
-        sys.exit(__doc__)
-    path, database = sys.argv[1], sys.argv[2]
+    parser = argparse.ArgumentParser(
+        prog='load_sql.py',
+        description='Apply a .sql file to exactly the database you name.',
+    )
+    parser.add_argument('path', metavar='file.sql', help='The .sql file to apply.')
+    db_guard.add_target_arguments(parser)
+    args = parser.parse_args()
 
-    missing = [v for v in ('endpoint', 'username', 'db_password') if not os.environ.get(v)]
-    if missing:
-        sys.exit(f'ERROR: {", ".join(missing)} not set — source Lambda-Rest/exports.sh first')
+    try:
+        statements, targets = db_guard.check_file(
+            args.path, args.database,
+            production=args.production,
+            destructive=args.destructive,
+            override_file_target=args.override_file_target,
+        )
+    except db_guard.GuardError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f'ERROR: cannot read {args.path}: {exc}', file=sys.stderr)
+        return 2
 
-    body = strip_full_line_comments(open(path).read())
-    statements = [s.strip() for s in split_statements(body) if s.strip()]
-    # `USE`/`CREATE DATABASE` are declarations for the mysql CLI; the connection
-    # below already names the target, and honouring a stray USE would let a file
-    # redirect itself at a database the caller did not ask for.
-    statements = [s for s in statements
-                  if not s.upper().startswith(('USE ', 'CREATE DATABASE'))]
+    db_guard.banner(args.database, args.path, targets)
 
-    conn = pymysql.connect(host=os.environ['endpoint'], user=os.environ['username'],
-                           password=os.environ['db_password'], database=database,
-                           charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor,
-                           autocommit=False)
+    try:
+        conn = db_guard.connect(args.database)
+    except db_guard.GuardError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+
     try:
         with conn.cursor() as cur:
             for statement in statements:
                 print('->', ' '.join(statement.split())[:88])
                 cur.execute(statement)
         conn.commit()
-        print(f'status=ok statements={len(statements)} database={database}')
+        print(f'status=ok statements={len(statements)} database={args.database}')
     except Exception as exc:
         conn.rollback()
-        print(f'status=error database={database}\nerror={exc}', file=sys.stderr)
-        raise
+        print(f'status=error database={args.database}\nerror={exc}', file=sys.stderr)
+        return 1
     finally:
         conn.close()
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
