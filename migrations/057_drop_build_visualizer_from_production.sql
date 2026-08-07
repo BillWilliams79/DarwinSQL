@@ -25,6 +25,19 @@
 -- After this runs, production `darwin` is "behind" the schema-of-record by these
 -- 5 tables, the same documented way it is behind on migration 055.
 --
+-- "DO NOT APPLY TO darwin_dev" was a sentence in a comment until req #3196.
+-- The line below makes it a CONSTRAINT that DarwinSQL/scripts/db_guard.py
+-- checks before opening a connection — applying this file to darwin_dev is now
+-- refused rather than merely discouraged, and reaching production still needs
+-- --production on the command line:
+--
+--   python3 DarwinSQL/scripts/load_sql.py \
+--     DarwinSQL/migrations/057_drop_build_visualizer_from_production.sql \
+--     darwin --production --destructive
+--
+-- darwin:targets = darwin
+-- darwin:destructive
+--
 -- ----------------------------------------------------------------------------
 -- Removal scope (production row counts verified 2026-06-01):
 --   customer_releases   (7 rows)

@@ -1,11 +1,20 @@
 -- Darwin Database Schema — Current State
--- Database: darwin
 -- This file reflects the final state of all 52 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
-
-CREATE DATABASE IF NOT EXISTS darwin;
-USE darwin;
+--
+-- THE TARGET DATABASE IS THE CALLER'S (req #3196). This file used to open with
+-- `CREATE DATABASE IF NOT EXISTS darwin; USE darwin;`, which re-pointed the
+-- session to PRODUCTION no matter which database the caller had connected to —
+-- the file outranked the operator, silently, and on 2026-08-01 it wrote three
+-- rows to production from a probe aimed at a scratch database. Name the target
+-- on the connection instead:
+--
+--     python3 DarwinSQL/scripts/load_sql.py DarwinSQL/schema.sql <database>
+--
+-- Creating the database is likewise the caller's: `seed_darwin_dev.py` does it
+-- for darwin_dev, and production already exists. A file that cannot be aimed
+-- cannot be aimed at the wrong thing.
 
 -- ============================================================================
 -- Core domain model: profiles → domains → areas → tasks

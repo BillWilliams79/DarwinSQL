@@ -19,8 +19,15 @@ Migration 016 retroactively tracks those table definitions. Tests must apply
 import os
 import glob
 import re
+import sys
+
 import pymysql
 import pytest
+
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts'))
+
+import db_guard  # noqa: E402  (needs the path insert above)
 
 
 # ---------------------------------------------------------------------------
@@ -249,26 +256,19 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
 
-    # Remove SQL comments (both -- and # style)
-    lines = []
-    for line in sql.split('\n'):
-        if '--' in line:
-            line = line[:line.index('--')]
-        if '#' in line and "'" not in line[:line.index('#')]:
-            line = line[:line.index('#')]
-        line = line.rstrip()
-        if line:
-            lines.append(line)
-    sql = '\n'.join(lines)
-
-    # Split into statements and execute each (skip CREATE DATABASE / USE)
-    for statement in sql.split(';'):
-        stmt = statement.strip()
-        if not stmt:
-            continue
+    # Comment-stripping and statement-splitting come from db_guard (req #3196).
+    # This used to be a fourth, private implementation — line-based comment
+    # removal plus `sql.split(';')` — which cut any statement whose string
+    # literal contained a `;`, and truncated any literal containing `--`. The
+    # guard's splitter is quote- AND comment-aware and is the SAME code the
+    # loader executes with and `test_sql_targets.py` audits with, so this suite
+    # can no longer pass on a parse the loader would never produce.
+    #
+    # The CREATE DATABASE / USE skip that stood here is gone with it: no file in
+    # the corpus carries one any more, and `test_sql_targets.py` fails the build
+    # on the next. A silent skip here would hide exactly that.
+    for stmt in db_guard.parse_statements(sql):
         upper_stmt = stmt.upper()
-        if upper_stmt.startswith(('CREATE DATABASE', 'USE ')):
-            continue
         try:
             cur.execute(stmt)
         except Exception as e:

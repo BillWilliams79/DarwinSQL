@@ -711,21 +711,36 @@ def test_fixture_owns_its_project_and_category(by_table):
 # ---------------------------------------------------------------------------
 
 def test_fixture_targets_darwin_dev_and_never_production(seed_sql, blocks):
-    """*** darwin_dev ONLY. *** Production `darwin` must never be a target here."""
+    """*** darwin_dev ONLY. *** Production `darwin` must never be a target here.
+
+    This used to assert a `USE darwin_dev;` statement was PRESENT. Req #3196
+    reversed that: a `USE` re-points whoever executes it, so it protects the
+    fixture only until somebody types the other database name, and the same
+    mechanism aimed at production is what wrote three rows there on 2026-08-01.
+    The target is now declared as a CONSTRAINT the caller is checked against —
+    `-- darwin:targets = darwin_dev`, enforced by DarwinSQL/scripts/db_guard.py
+    before a connection is opened, with a list that omits `darwin` acting as an
+    absolute production ban. `test_sql_targets.py` pins the absence of `USE`
+    across the whole corpus.
+    """
     body = _blank_comments(seed_sql)
 
-    used = re.findall(r'^\s*USE\s+`?(\w+)`?\s*;', body, re.I | re.M)
-    assert used, "no `USE <db>;` statement — the target database must be explicit"
-    assert set(used) == {'darwin_dev'}, (
-        f"fixture selects {sorted(set(used))}; it is darwin_dev ONLY and applying "
-        f"it to production `darwin` is forbidden"
+    assert re.search(r'^\s*--\s*darwin:targets\s*=\s*darwin_dev\s*$', seed_sql, re.M), (
+        "no `-- darwin:targets = darwin_dev` declaration — the target database "
+        "must be declared, and this fixture is darwin_dev ONLY"
+    )
+    assert not re.findall(r'^\s*USE\s+`?(\w+)`?\s*;', body, re.I | re.M), (
+        "the fixture carries a `USE <db>;` statement, which overrides the "
+        "caller's target (req #3196)"
     )
 
     # A schema-qualified `darwin.epics` (or ``darwin`.`epics``) would reach
-    # production regardless of USE. Block table names are backtick-stripped.
+    # production regardless of the declared target. Block table names are
+    # backtick-stripped.
     qualified = sorted({b.table for b in blocks if '.' in b.table})
     assert not qualified, (
-        f"schema-qualified INSERT targets bypass `USE darwin_dev`: {qualified}"
+        f"schema-qualified INSERT targets bypass the darwin_dev target "
+        f"declaration: {qualified}"
     )
     # Literals are blanked first: a requirement legitimately titled "...scoping on
     # darwin.pipeline_step_deps" is prose, not a table reference.
