@@ -1,10 +1,10 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 52 tables in FK-dependency order
+-- All 53 tables in FK-dependency order
 --
 -- ============================================================================
--- THIS FILE DROPS 52 TABLES. (req #3196)
+-- THIS FILE DROPS 53 TABLES. (req #3196)
 -- ============================================================================
 -- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
 -- a `USE` is a statement the caller's loader may strip, reorder or never reach,
@@ -39,6 +39,8 @@ DROP TABLE IF EXISTS orchestration_claims,
     map_views, map_coordinates, map_runs, map_routes,
     priority_card_order, dev_servers,
     swarm_undos,
+    branch_acceptance_tests, acceptance_tests,
+    swarm_complete_sessions, swarm_completes,
     swarm_start_sessions, swarm_starts,
     requirement_sessions,
     requirements, swarm_sessions, machines, categories, projects,
@@ -1093,6 +1095,10 @@ CREATE TABLE pipelines (
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal
     pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    execution_mode  ENUM('parallel', 'serial')
+                              NOT NULL DEFAULT 'parallel', -- req #3388: parallel = every epic at
+                                                           -- once; serial = one at a time, live
+                                                           -- epic DERIVED
     machine_fk      INT          NULL DEFAULT NULL,
     creator_fk      VARCHAR(64)  NOT NULL,
     started_at      TIMESTAMP    NULL,
