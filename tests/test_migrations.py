@@ -83,6 +83,15 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'orchestration_claims',
         'pipelines',
         'epics',
+        # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509), the
+        # parallel-era family. Order does not matter here — measured with the
+        # real regex, no new name matches inside any other new name or any 1.0
+        # name in either direction — but listed longest-first as house style.
+        'pipeline2_step_requirements',
+        'pipeline2_step_deps',
+        'pipeline2_steps',
+        'pipeline2_epics',
+        'pipeline2_pipelines',
         # Req #3096 — per-document actual-token rows (migration 074), child of
         # agent_telemetry_rows. Listed before agent_telemetry_rows/runs (longest-
         # first): agent_telemetry_row_docs must precede the shorter `agents` token
@@ -252,6 +261,19 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # fails 1061 "Duplicate key name" the second time this suite runs.
         'fk_oc_pipeline', 'fk_oc_epic', 'fk_oc_machine', 'fk_oc_creator',
         'uq_orchestration_claims_scope', 'ix_orchestration_claims_epic_fk',
+        # Migration 20260808115509 — Pipeline 2.0 plan layer (req #3337).
+        # 11 fk_p2_*, 1 uq_p2_*, 3 ix_p2_* (the fourth, ix_p2_psr_requirement_fk,
+        # does not exist — the stage-2 gate ruling made requirement_fk the sole
+        # PRIMARY KEY of pipeline2_step_requirements, which already serves that
+        # lookup). The three ix_p2_* names are, like ix_orchestration_claims_epic_fk
+        # above, NOT optional: CREATE INDEX has no IF NOT EXISTS in MySQL.
+        'fk_p2_pipelines_machine', 'fk_p2_pipelines_creator',
+        'fk_p2_epics_pipeline', 'fk_p2_epics_category', 'fk_p2_epics_creator',
+        'fk_p2_steps_epic', 'fk_p2_steps_creator',
+        'fk_p2_psr_step', 'fk_p2_psr_requirement',
+        'fk_p2_psd_step', 'fk_p2_psd_dep_step',
+        'uq_p2_step_deps',
+        'ix_p2_epics_pipeline_fk', 'ix_p2_steps_epic_fk', 'ix_p2_psd_dep_step_fk',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -326,6 +348,13 @@ ALL_TABLE_SUFFIXES = [
     # family: it points at pipelines, epics AND machines, and is pointed at by
     # nothing.
     'orchestration_claims',
+    # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509), parallel
+    # era. Placed BEFORE the 1.0 pipeline family, leaves first: deps/links, then
+    # steps, then epics, then pipelines. Unlike 1.0's epics, pipeline2_epics
+    # needs no relationship to features — 2.0's epic has no feature_fk pointing
+    # at it — so it drops with its own family instead of near features below.
+    'pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
+    'pipeline2_epics', 'pipeline2_pipelines',
     # Req #3111 — Swarm Orchestration foundation. FK-safe order: the dep/link
     # leaves, then steps, then pipelines. `epics` drops near features (below),
     # since features.epic_fk is SET NULL and imposes no ordering of its own.
@@ -370,6 +399,22 @@ ALL_TABLE_SUFFIXES = [
     'swarm_sessions', 'categories', 'projects',
     'tasks', 'recurring_tasks', 'areas', 'domains', 'profiles',
 ]
+
+
+# COVERS: SCH-019
+def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
+    """§ 5.4 item 2: the five 2.0 names precede the 1.0 pipeline family, and
+    within the 2.0 family the edge tables precede steps precede epics precede
+    pipelines — leaves first."""
+    p2 = ['pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
+          'pipeline2_epics', 'pipeline2_pipelines']
+    p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps')
+
+    p2_positions = [ALL_TABLE_SUFFIXES.index(name) for name in p2]
+    assert p2_positions == sorted(p2_positions), \
+        'pipeline2_* family must appear leaves-first, in this exact order'
+    assert max(p2_positions) < p1_start, \
+        'pipeline2_* family must drop entirely before the 1.0 pipeline family'
 
 
 @pytest.fixture(autouse=True)
@@ -481,8 +526,22 @@ def test_migration_016_creates_roadmap_tables(db_connection, migration_test_pref
 # Test: All migrations apply successfully in dependency order
 # ---------------------------------------------------------------------------
 
+# COVERS: SCH-020, SCH-021, SCH-022
 def test_migration_sequence_applies(db_connection, migration_test_prefix):
     """Apply all migrations in dependency order to temp tables.
+
+    This replay runs AGAINST a darwin_dev that already holds the real
+    (unprefixed) pipeline2_* tables and their real fk_p2_*/uq_p2_*/ix_p2_*
+    constraint names (applied earlier by this same requirement). Two things
+    would make this test fail rather than merely under-report if #3337's own
+    registration were wrong: table_names missing an entry (§ 5.4 item 3, SCH-020)
+    leaves the migration's CREATE TABLE unprefixed, so it silently no-ops
+    against the real table (IF NOT EXISTS) and the prefixed name this test
+    expects (SCH-022) never appears — a Missing: assertion; named_constraints
+    missing an entry (§ 5.4 item 4, SCH-021) leaves a constraint name literal,
+    which collides with the identically-named real constraint already on the
+    real table and raises MySQL 1826 (CREATE TABLE failures are never
+    tolerated, even in tolerant mode — see _apply_migration above).
 
     Order: 001-008 (core), 016 (roadmap tables), 009-015 (modifications),
     017+ (recurring_tasks, map tables, etc.).
@@ -547,6 +606,10 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # Req #3224 — the durable orchestration reservation
             # (migration 20260801150404)
             'orchestration_claims',
+            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509),
+            # parallel era. Stands beside the 1.0 five above; not a replacement.
+            'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
+            'pipeline2_step_requirements', 'pipeline2_step_deps',
         ]
     }
     assert tables == expected_tables, \

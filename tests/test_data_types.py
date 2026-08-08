@@ -1732,6 +1732,7 @@ def test_customers_columns(db_connection):
     assert columns['sort_order']['Null'] == 'YES'
 
 
+# COVERS: SCH-018
 def test_table_count(db_connection):
     """Verify darwin_dev database contains the expected tables."""
     with db_connection.cursor() as cur:
@@ -1780,6 +1781,11 @@ def test_table_count(db_connection):
         # 20260801150404). One row per RESERVED SCOPE, so the single-orchestrator
         # guarantee crosses a machine boundary instead of living in /tmp.
         'orchestration_claims',
+        # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509). Five
+        # tables standing beside the 1.0 five above, parallel era: containment
+        # chain Pipeline -> Epic -> Step -> Requirement.
+        'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
+        'pipeline2_step_requirements', 'pipeline2_step_deps',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

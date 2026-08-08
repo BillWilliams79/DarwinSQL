@@ -115,6 +115,22 @@ def seed_test_profile(db_connection, test_creator_fk):
                     (test_creator_fk, test_creator_fk))
         cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
+        # Req #3337: Pipeline 2.0 plan layer, parallel era. Same both-ends
+        # scoping as the 1.0 pair just above, and for the identical reason —
+        # `pipeline2_step_requirements.requirement_fk` is ON DELETE RESTRICT.
+        cur.execute("DELETE FROM pipeline2_step_deps WHERE step_fk IN "
+                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s) "
+                    "OR dep_step_fk IN "
+                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s)",
+                    (test_creator_fk, test_creator_fk))
+        cur.execute("DELETE FROM pipeline2_step_requirements WHERE step_fk IN "
+                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s) "
+                    "OR requirement_fk IN "
+                    "(SELECT id FROM requirements WHERE creator_fk = %s)",
+                    (test_creator_fk, test_creator_fk))
+        cur.execute("DELETE FROM pipeline2_steps WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM pipeline2_epics WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM pipeline2_pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
         # Req #2943: swarm_starts + machines. machine_fk is ON DELETE RESTRICT on
