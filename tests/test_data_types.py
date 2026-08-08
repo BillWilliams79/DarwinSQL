@@ -2446,12 +2446,28 @@ def test_requirements_tracking_column(db_connection):
 
 def test_pipelines_columns(db_connection):
     """pipelines is an EXECUTION table: status enum + started_at/completed_at,
-    and NO closed / sort_order / category_fk (a plan spans categories)."""
+    and NO closed / sort_order / category_fk (a plan spans categories).
+
+    `execution_mode` (req #3388) is the plan's SECOND enum and is deliberately
+    orthogonal to `pipeline_status`: one says whether the plan is running, the
+    other says how it runs its epics. It is the ONLY stored fact serial
+    execution needs — the epic order, which epics are closed and which one is
+    live are all DERIVED per design rule 1, which is why there is no
+    `current_epic_fk` here to go stale.
+    """
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'pipelines')
-    expected = {'id', 'title', 'description', 'pipeline_status', 'machine_fk',
-                'creator_fk', 'started_at', 'completed_at', 'create_ts', 'update_ts'}
+    expected = {'id', 'title', 'description', 'pipeline_status', 'execution_mode',
+                'machine_fk', 'creator_fk', 'started_at', 'completed_at',
+                'create_ts', 'update_ts'}
     assert set(cols.keys()) == expected
+
+    # req #3388. DEFAULT 'parallel' is load-bearing: it is the pre-#3388
+    # behaviour, so the migration is a no-op for every existing plan and the
+    # derivation reads an absent value the same way.
+    assert cols['execution_mode']['Type'] == "enum('parallel','serial')"
+    assert cols['execution_mode']['Null'] == 'NO'
+    assert cols['execution_mode']['Default'] == 'parallel'
 
     assert cols['id']['Key'] == 'PRI'
     assert cols['id']['Extra'] == 'auto_increment'
