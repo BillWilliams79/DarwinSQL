@@ -1,0 +1,80 @@
+-- 20260808092732_add_pipelines_execution_mode_serial_parallel.sql
+--
+-- Req #3388: a plan has no way to say it runs its epics ONE AT A TIME, so serial
+-- execution is simulated by pausing every epic except the live one.
+--
+-- PROBLEM.  `epics.epic_status` was defined by req #3223 as SUPPRESSION carrying a
+--           USER INTENTION — "do not launch this". Running a plan serially puts a
+--           DERIVABLE SEQUENCING FACT into that same column instead: "it is not
+--           this epic's turn". The two become indistinguishable in the data, with
+--           three consequences that are all invisible:
+--
+--             1. Nothing records that the plan is MEANT to be serial, so two live
+--                epics cannot be detected as wrong — a forgotten unpause silently
+--                parallelises the plan and looks exactly like a correct parallel
+--                run.
+--             2. Advancing is a hand-run pair of commands per epic (pause the one
+--                that finished, unpause the next) that nothing verifies.
+--             3. A user who genuinely wants to pause the LIVE epic writes the same
+--                value the sequencer is using, and whoever clears it next cannot
+--                tell which intention they are clearing.
+--
+--           Measured on pipeline 79 'FP Pipeline - Agent Harness' on 2026-08-08:
+--           epic 3 'Primary AI/Swar' carried epic_status='paused' for no reason
+--           other than that it was not its turn yet.
+--
+-- SHAPE.    ONE column on `pipelines`, and deliberately nothing else.
+--
+--           `execution_mode` is the only stored fact this feature needs, because
+--           it is the only part that is an INTENTION. Everything else is DERIVED
+--           in `darwin-mcp/services/pipeline_derive.py::serial_state` (and its
+--           browser mirror), per design rule 1:
+--
+--             * the ORDER of the epics is their first appearance in DISPLAY order,
+--               which is topological;
+--             * an epic is CLOSED when every step it owns derives `done`;
+--             * the LIVE epic is the first in that order that is not closed.
+--
+--           WHY NOT `epics.sort_order`, the obvious alternative: it is global to
+--           the epic, so two plans containing one epic could never order it
+--           differently — and it is measurably WRONG here. On pipeline 79 it holds
+--           3 for epic 3 'Primary AI/Swar' and 6 for epic 9 'First Principle',
+--           which orders them BACKWARDS against the dependency graph. Deriving
+--           from display order has neither problem and needs no maintenance:
+--           re-planning the deps re-orders the epics for free.
+--
+--           WHY NOT a `current_epic_fk` column: it would be a stored copy of a
+--           derived answer, drifting the moment a step is added, completed or
+--           re-filed — the same defect design rule 1 exists to prevent, and the
+--           reason a step has no state column either.
+--
+--           DEFAULT 'parallel' is the behaviour that existed before this column,
+--           so every existing row keeps running exactly as it does today and the
+--           deployment is a no-op until somebody sets a plan to 'serial'. The
+--           derivation reads an ABSENT value as 'parallel' for the same reason.
+--
+--           ENUM rather than a lookup table: two values, no attributes of their
+--           own, and the same shape `pipeline_status` / `epic_status` already use
+--           on these tables.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands — the
+--           only difference is the trailing database name, so read it twice:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260808092732_add_pipelines_execution_mode_serial_parallel.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260808092732_add_pipelines_execution_mode_serial_parallel.sql darwin
+--
+--           The production command above requires
+--           `bash scripts/db/rds-snapshot.sh 20260808092732` to report status=ok
+--           first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260808092732 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE pipelines
+    ADD COLUMN execution_mode ENUM('parallel', 'serial')
+        NOT NULL DEFAULT 'parallel'
+        COMMENT 'req #3388: parallel = every epic at once; serial = one epic at a time, live epic DERIVED'
+        AFTER pipeline_status;
