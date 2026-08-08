@@ -1881,12 +1881,15 @@ def test_machines_columns(db_connection):
     """Req #2943: machines registry — content-table baseline (id/title/description/
     closed/sort_order/creator_fk/timestamps) PLUS the auto-detected identity
     columns. No category_fk (infrastructure entity). hostname is UNIQUE (the
-    auto-match key). platform/arch NOT NULL; os_version/hw_model/last_seen_at NULL."""
+    auto-match key). platform/arch NOT NULL; os_version/hw_model/last_seen_at NULL.
+    max_live_sessions (req #3390): per-machine swarm concurrency ceiling,
+    NOT NULL DEFAULT 20 — the DDL default is the only literal anywhere in the
+    system (both live machines are pinned explicitly by hostname)."""
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'machines')
     expected = {'id', 'title', 'description', 'hostname', 'platform', 'arch',
-                'os_version', 'hw_model', 'last_seen_at', 'closed', 'sort_order',
-                'creator_fk', 'create_ts', 'update_ts'}
+                'os_version', 'hw_model', 'last_seen_at', 'max_live_sessions',
+                'closed', 'sort_order', 'creator_fk', 'create_ts', 'update_ts'}
     assert set(cols.keys()) == expected
 
     assert cols['id']['Type'] == 'int'
@@ -1916,6 +1919,13 @@ def test_machines_columns(db_connection):
     assert cols['hw_model']['Null'] == 'YES'
     assert 'timestamp' in cols['last_seen_at']['Type']
     assert cols['last_seen_at']['Null'] == 'YES'
+
+    # Per-machine swarm concurrency ceiling (req #3390) — NOT NULL DEFAULT,
+    # never nullable-means-unlimited (that would be fail-open where #3344's
+    # admission control is fail-closed).
+    assert cols['max_live_sessions']['Type'] == 'smallint'
+    assert cols['max_live_sessions']['Null'] == 'NO'
+    assert cols['max_live_sessions']['Default'] == '20'
 
     # Content-table baseline soft-delete + hand-sort.
     assert cols['closed']['Type'] == 'tinyint(1)'

@@ -184,6 +184,7 @@ CREATE TABLE machines (
     os_version   VARCHAR(64)  NULL,
     hw_model     VARCHAR(64)  NULL,
     last_seen_at TIMESTAMP    NULL,
+    max_live_sessions SMALLINT NOT NULL DEFAULT 20,
     closed       TINYINT(1)   NOT NULL DEFAULT 0,
     sort_order   SMALLINT     NULL,
     creator_fk   VARCHAR(64)  NOT NULL,
