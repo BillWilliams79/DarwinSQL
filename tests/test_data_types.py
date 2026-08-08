@@ -516,6 +516,7 @@ def test_requirements_columns(db_connection):
         assert columns['machine_fk']['Default'] is None
 
 
+# COVERS: SWM-022
 def test_swarm_sessions_columns(db_connection):
     """Verify swarm_sessions column definitions match schema.sql.
 
@@ -582,6 +583,13 @@ def test_swarm_sessions_columns(db_connection):
         if attribution in columns:
             expected_fields.append(attribution)
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #3343 (SWM-022): step-addressed launch execution deliberately adds no
+    # column anywhere — a step is derivable from a session's requirement via
+    # the plan's own membership junction (design rule 11). The exact-set
+    # assertion above already proves this structurally; this one names the
+    # specific column a future change must not reintroduce.
+    assert 'step_fk' not in columns
 
     # req #3186 attribution columns — NULLable INT FKs with no default. NULL is
     # meaningful: "this session belongs to no plan / no epic", which is a real
@@ -702,6 +710,7 @@ def test_requirement_sessions_columns(db_connection):
     assert columns['session_fk']['Key'] == 'PRI'
 
 
+# COVERS: SWM-022
 def test_swarm_starts_columns(db_connection):
     """Verify swarm_starts column definitions match migration 046.
 
@@ -736,6 +745,12 @@ def test_swarm_starts_columns(db_connection):
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
     assert set(columns.keys()) == set(expected_fields)
+
+    # req #3343 (SWM-022): the one swarm_starts row per invocation is the
+    # step-addressed launch unit's birth record via its `arguments` column
+    # (holding the typed input verbatim) — no `step_fk` column, deliberately;
+    # a step is derivable through session -> requirement -> step membership.
+    assert 'step_fk' not in columns
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'
