@@ -1,5 +1,5 @@
 -- Darwin Database Schema — Current State
--- This file reflects the final state of all 52 tables after all migrations.
+-- This file reflects the final state of all 53 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 --
@@ -1213,6 +1213,10 @@ CREATE TABLE IF NOT EXISTS pipelines (
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal
     pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    execution_mode  ENUM('parallel', 'serial')
+                              NOT NULL DEFAULT 'parallel', -- req #3388: parallel = every epic at
+                                                           -- once; serial = one at a time, live
+                                                           -- epic DERIVED
     machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
     creator_fk      VARCHAR(64)  NOT NULL,
     started_at      TIMESTAMP    NULL,                     -- set on draft -> active (NULL-able: a

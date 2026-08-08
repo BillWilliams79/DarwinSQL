@@ -155,7 +155,7 @@ def test_restricted_files_declare_their_target(relpath, expected):
 
 
 def test_recreate_darwin_dev_is_declared_destructive():
-    """It DROPs 52 tables. `--destructive` is the only way it runs."""
+    """It DROPs 53 tables. `--destructive` is the only way it runs."""
     path = os.path.join(DARWINSQL_ROOT, 'scripts', 'recreate_darwin_dev.sql')
     with open(path) as handle:
         body = handle.read()
@@ -163,6 +163,34 @@ def test_recreate_darwin_dev_is_declared_destructive():
     assert 'darwin' not in db_guard.declared_targets(body), (
         'recreate_darwin_dev.sql must never list production as a target — that '
         'list is the absolute ban'
+    )
+
+
+def test_recreate_darwin_dev_drop_list_matches_create_list():
+    """The `DROP TABLE IF EXISTS` list must name exactly the tables this file creates.
+
+    Req #3395: `execution_mode` surfaced a pre-existing, independent bug — the DROP
+    list was missing `acceptance_tests`, `branch_acceptance_tests`,
+    `swarm_complete_sessions` and `swarm_completes`, all four created later in this
+    same file. Running the destructive rebuild against a database that already had
+    them died partway through with MySQL 1050 ("table already exists"), having
+    already dropped most of `darwin_dev` first — a hand-maintained list nothing
+    verified. A table CREATEd here but not DROPped first makes every future rebuild
+    fail the same way; a table DROPped here but never CREATEd back would leave
+    `darwin_dev` permanently missing it. Both directions are a hard failure, not a
+    style nit — this file is destructive and shared.
+    """
+    path = os.path.join(DARWINSQL_ROOT, 'scripts', 'recreate_darwin_dev.sql')
+    with open(path) as handle:
+        body = handle.read()
+    drop_section = re.search(r'DROP TABLE IF EXISTS(.*?);', body, re.S)
+    assert drop_section, 'no DROP TABLE IF EXISTS statement found'
+    dropped = {name for name in re.findall(r'(\w+)', drop_section.group(1))}
+    created = set(re.findall(r'CREATE TABLE (\w+)', body))
+    assert dropped == created, (
+        f'DROP/CREATE table-list mismatch — created but not dropped: '
+        f'{sorted(created - dropped)}; dropped but not created: '
+        f'{sorted(dropped - created)}'
     )
 
 
