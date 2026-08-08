@@ -120,6 +120,7 @@ def _prefix(filename):
 # Test: every filename matches the naming contract
 # ---------------------------------------------------------------------------
 
+# COVERS: SCH-029
 def test_every_migration_filename_matches_the_naming_contract():
     """Each file is a legacy 3-digit or a new-era 14-digit UTC stamp.
 
