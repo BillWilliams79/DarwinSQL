@@ -121,7 +121,14 @@
 -- or reject it. Load with DarwinSQL/scripts/load_sql.py (quote-aware splitter —
 -- titles here contain both semicolons and # characters inside string literals).
 SET NAMES utf8mb4;
-USE darwin_dev;
+
+-- darwin_dev ONLY. This used to be enforced by a `USE darwin_dev;` statement,
+-- which enforced nothing: a `USE` re-points whoever executes it, so it protects
+-- the file only for as long as nobody types the other database name. The line
+-- below is a CONSTRAINT the caller is checked against before a connection is
+-- opened, and a target list that omits `darwin` is an absolute production ban
+-- (req #3196, DarwinSQL/scripts/db_guard.py).
+-- darwin:targets = darwin_dev
 
 -- ---------------------------------------------------------------------------
 -- Teardown — FK-safe order, scoped to this fixture's ids.

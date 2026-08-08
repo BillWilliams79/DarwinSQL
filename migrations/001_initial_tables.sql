@@ -1,8 +1,10 @@
 -- Migration 001: Initial table creation
 -- Creates: profiles, domains, areas, tasks
 -- Note: profiles.id was originally INT AUTO_INCREMENT; changed in migration 004
-
-USE darwin;
+--
+-- The `USE darwin;` that stood here was removed by req #3196 — a migration file
+-- must not choose its own database. Name the target on the connection:
+--   python3 DarwinSQL/scripts/load_sql.py <this file> darwin_dev
 
 CREATE TABLE IF NOT EXISTS profiles (
     PRIMARY KEY (id),
