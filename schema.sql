@@ -165,6 +165,9 @@ CREATE TABLE IF NOT EXISTS machines (
     os_version   VARCHAR(64)  NULL,               -- sw_vers (macOS) / os-release PRETTY_NAME (Linux/WSL)
     hw_model     VARCHAR(64)  NULL,               -- sysctl hw.model (macOS) / best-effort WSL; NULL when unavailable
     last_seen_at TIMESTAMP    NULL,               -- auto-updated on each identity resolution
+    max_live_sessions SMALLINT NOT NULL DEFAULT 20, -- swarm concurrency ceiling (req #3390);
+                                                    -- 0 is meaningful (drain); DEFAULT applies
+                                                    -- only to future auto-registered machines
     closed       TINYINT(1)   NOT NULL DEFAULT 0, -- retire a machine
     sort_order   SMALLINT     NULL,
     creator_fk   VARCHAR(64)  NOT NULL,

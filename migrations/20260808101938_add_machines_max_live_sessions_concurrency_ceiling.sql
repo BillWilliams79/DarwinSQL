@@ -1,0 +1,64 @@
+-- 20260808101938_add_machines_max_live_sessions_concurrency_ceiling.sql
+--
+-- Req #3390: give each machine its own swarm-concurrency ceiling, so the
+-- admission control landing in req #3344 has per-machine data to read instead
+-- of a single hard-coded number.
+--
+-- PROBLEM.  The swarm concurrency ceiling has been a code constant with no
+--           notion that different machines have different capacity — MCHP
+--           Windows and the Mac Mini are not equally powerful, so one shared
+--           number is either too tight for one or too loose for the other.
+--           req #3336 (stage-2 gate) decided this is PER-MACHINE DATA: each
+--           `machines` row should carry its own ceiling.
+--
+-- SHAPE.    One SMALLINT on `machines`, `NOT NULL DEFAULT 20`, named
+--           `max_live_sessions` (matches req #3344's constant so one grep
+--           finds both — never `max_concurrent`, req #3370's acceptance is
+--           that grep for MAX_CONCURRENT returns nothing).
+--
+--           NOT NULL DEFAULT, never nullable: a NULL-means-unlimited column
+--           would be fail-OPEN at exactly the point #3344 is fail-closed, and
+--           machine-identity.sh auto-registers new machines via
+--           create_machine (which does not pass this column) — a new machine
+--           must land with a sane default, not an unbounded ceiling. 0 is a
+--           MEANINGFUL value ("this machine launches nothing" — drain);
+--           negative is refused in the application layer, since Darwin does
+--           not use CHECK constraints.
+--
+--           Both live machines are pinned explicitly by hostname (the
+--           UNIQUE machine-identity key — id differs between darwin_dev and
+--           darwin): MCHP Windows (SJO-LT-C72929B) = 19, Mac Mini (Macmini)
+--           = 21. The DDL default of 20 applies only to future
+--           auto-registered machines.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260808101938_add_machines_max_live_sessions_concurrency_ceiling.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260808101938_add_machines_max_live_sessions_concurrency_ceiling.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20260808101938` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260808101938 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE machines
+    ADD COLUMN max_live_sessions SMALLINT NOT NULL DEFAULT 20 AFTER last_seen_at;
+
+UPDATE machines SET max_live_sessions = 19 WHERE hostname = 'SJO-LT-C72929B';
+UPDATE machines SET max_live_sessions = 21 WHERE hostname = 'Macmini';
