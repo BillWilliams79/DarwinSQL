@@ -1,0 +1,81 @@
+-- 20260809002208_add_swarm_completes_machine_fk_envelope_context.sql
+--
+-- Req #3202: `swarm_completes` is the one envelope-bearing table that cannot say
+-- WHICH MACHINE ran the work it records.
+--
+-- PROBLEM.  Req #3202's own field table names `machine` as one of the columns
+--           both telemetry domains already share:
+--
+--               model    swarm_sessions.ai_model   | agent_telemetry_runs.ai_model
+--               effort   swarm_sessions.effort     | agent_telemetry_runs.effort
+--               machine  machine_fk                | machine_fk
+--
+--           It is shared on THREE of the four tables and was simply never added
+--           to the fourth. Req #2943 gave `swarm_sessions` and `swarm_starts`
+--           their `machine_fk`; req #3098 gave `agent_telemetry_runs` one;
+--           `swarm_completes` was missed in both passes and nothing noticed,
+--           because until #3202 nothing asserted the four tables agreed.
+--
+--           The consequence is concrete, not cosmetic. `swarm_completes` records
+--           the merge/deploy half of every session and carries its own
+--           `tokens_*`/`wall_seconds` — the closeout's real cost — with no way to
+--           attribute that cost to a host. Darwin is a two-machine setup (a Mac
+--           mini and MCHP Windows) with deliberately different capacity, so "what
+--           does a closeout cost on this box" is a question the data could not
+--           answer at all, while the exactly-parallel `swarm_starts` row could.
+--
+--           It surfaced from `DarwinSQL/tests/test_telemetry_envelope.py`, the
+--           derived conformance check req #3202 added — on its first run, which
+--           is what a derived check is for. A hand-maintained list of "these four
+--           tables should match" would have listed the mismatch as agreement.
+--
+-- SHAPE.    One nullable INT, `machine_fk`, with the SAME FK shape the other
+--           three carry — `ON UPDATE CASCADE ON DELETE RESTRICT`, so a machine
+--           row cannot be deleted out from under the history that references it.
+--           Nullable with no default: NULL means the machine was not resolved
+--           (every existing row, and any future closeout whose
+--           machine-identity.sh lookup fails), never a fabricated attribution.
+--
+--           Positioned after `effort` to mirror `swarm_starts` column-for-column;
+--           these two tables have always mirrored each other across the
+--           launch/closeout split and the diff between them should stay readable.
+--
+--           NO BACKFILL. A completed run's host is not recoverable from anything
+--           stored: `swarm_completes` has no worktree path, and its linked
+--           session's `machine_fk` is the machine that RAN THE WORK, which is not
+--           necessarily the machine that ran the closeout — that is the same
+--           launcher-versus-worker confusion req #3326 had to reverse on
+--           `swarm_starts.ai_model`. Inferring it would be fabricating the exact
+--           kind of value this column exists to record honestly.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260809002208_add_swarm_completes_machine_fk_envelope_context.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260809002208_add_swarm_completes_machine_fk_envelope_context.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20260809002208` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260809002208 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE swarm_completes
+    ADD COLUMN machine_fk INT NULL AFTER effort,
+    ADD CONSTRAINT fk_swarm_completes_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT;
