@@ -107,6 +107,10 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # (e.g., 'test_cases' inside 'feature_test_cases' is blocked by the
         # regex lookbehind, but longest-first preserves future safety.)
         'feature_test_cases',
+        # Req #3352 — requirement_test_cases (migration 20260809002149). Listed
+        # before the shorter 'requirements' and 'test_cases' tokens (below) so
+        # the longer match wins under longest-first replace order.
+        'requirement_test_cases',
         'test_plan_cases',
         'test_results',
         'test_plans',
@@ -274,6 +278,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_p2_psd_step', 'fk_p2_psd_dep_step',
         'uq_p2_step_deps',
         'ix_p2_epics_pipeline_fk', 'ix_p2_steps_epic_fk', 'ix_p2_psd_dep_step_fk',
+        # Migration 20260809002149 — requirement_test_cases (req #3352)
+        'fk_rtc_requirement', 'fk_rtc_case',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -366,8 +372,11 @@ ALL_TABLE_SUFFIXES = [
     # test_results → test_runs CASCADE; test_runs → test_plans RESTRICT;
     # feature_test_cases/test_plan_cases CASCADE from both sides;
     # test_results → test_cases RESTRICT (so test_results must drop before test_cases).
+    # Req #3352 — requirement_test_cases (migration 20260809002149) CASCADEs
+    # from both requirements and test_cases, same shape as feature_test_cases;
+    # it drops here too, a leaf before both requirements (below) and test_cases.
     'test_results', 'test_runs',
-    'test_plan_cases', 'feature_test_cases',
+    'test_plan_cases', 'feature_test_cases', 'requirement_test_cases',
     'test_plans', 'test_cases', 'features',
     # Req #3111 — epics drops after features (epics -> categories is RESTRICT;
     # features.epic_fk is SET NULL so it imposes no order of its own).
@@ -610,6 +619,9 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # parallel era. Stands beside the 1.0 five above; not a replacement.
             'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
             'pipeline2_step_requirements', 'pipeline2_step_deps',
+            # Req #3352 — requirement_test_cases (migration 20260809002149).
+            # Stands beside feature_test_cases above; not a replacement.
+            'requirement_test_cases',
         ]
     }
     assert tables == expected_tables, \
