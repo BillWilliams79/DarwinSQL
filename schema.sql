@@ -311,12 +311,13 @@ CREATE TABLE IF NOT EXISTS requirements (
 -- ============================================================================
 
 -- FK checks are disabled across this one CREATE because `swarm_sessions`
--- forward-references `pipelines`, which the Swarm Orchestration block declares
--- much further down (req #3186). Same pattern, and same reason, as the
--- build-visualizer block below: the constraint must stay INLINE — the
--- conformance tests that derive `CREATOR_TABLE_REFERENCES` and the junction
--- registry from this file parse CREATE TABLE bodies and never see a trailing
--- ALTER — so a fresh `mysql < schema.sql` needs the check relaxed instead.
+-- forward-references `pipelines` (req #3186) and `pipeline2_pipelines` /
+-- `pipeline2_epics` (req #3350), all declared much further down. Same
+-- pattern, and same reason, as the build-visualizer block below: the
+-- constraint must stay INLINE — the conformance tests that derive
+-- `CREATOR_TABLE_REFERENCES` and the junction registry from this file parse
+-- CREATE TABLE bodies and never see a trailing ALTER — so a fresh
+-- `mysql < schema.sql` needs the check relaxed instead.
 SET FOREIGN_KEY_CHECKS = 0;
 
 CREATE TABLE IF NOT EXISTS swarm_sessions (
@@ -344,6 +345,19 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     -- block deleting a pipeline or an epic.
     pipeline_fk     INT             NULL DEFAULT NULL,
     epic_fk         INT             NULL DEFAULT NULL,
+    -- 2.0 orchestration attribution (req #3350, migration 20260809081441).
+    -- Sits BESIDE the 1.0 pair above rather than replacing it — an FK is a
+    -- static declaration, not an alternation, so re-pointing the 1.0 columns
+    -- at the pipeline2_* tables would fail every still-live 1.0 stamp
+    -- outright (memory/pipeline-2-data-architecture.md § 9.4). One walk
+    -- (pipeline2_step_requirements -> pipeline2_steps -> pipeline2_epics ->
+    -- pipeline2_pipelines) produces BOTH pipeline2_fk and epic2_fk together,
+    -- so unlike the 1.0 pair they cannot disagree. TRANSITIONAL — both pairs
+    -- are archived and dropped at #3356, not retired in place. ON DELETE SET
+    -- NULL for the same reason as the 1.0 pair: session history must never
+    -- block deleting a pipeline2 plan or epic.
+    pipeline2_fk    INT             NULL DEFAULT NULL,
+    epic2_fk        INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332). On each swarm_status change db.py adds
@@ -424,6 +438,12 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
         ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_swarm_sessions_epic
         FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_pipeline2
+        FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_epic2
+        FOREIGN KEY (epic2_fk) REFERENCES pipeline2_epics (id)
         ON UPDATE CASCADE ON DELETE SET NULL
 );
 
