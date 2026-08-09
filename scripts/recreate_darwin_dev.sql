@@ -1184,45 +1184,6 @@ CREATE TABLE pipeline_step_deps (
 
 CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
 
--- Orchestration reservations (req #3224, migration 20260801150404).
---
--- ADDED BY req #3196, not by #3224: this table reached schema.sql and both live
--- databases but never this file, so a rebuilt darwin_dev came back 12 columns
--- short and every orchestration reservation failed against a table that did not
--- exist. The drift went unseen because the § Schema-of-Record Parity gate that
--- would have caught it could not RUN — both schema.sql and this file were
--- unloadable through load_sql.py until #3196 fixed the statement splitter.
-
-CREATE TABLE orchestration_claims (
-    id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    pipeline_fk   INT          NOT NULL,                -- the plan this claim covers
-    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
-    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL,  -- carries the UNIQUE key
-    machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
-    terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
-    engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
-    polls         INT          NOT NULL DEFAULT 0,      -- the heartbeat payload
-    claimed_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    creator_fk    VARCHAR(64)  NOT NULL,
-    create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
-    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
-    CONSTRAINT fk_oc_pipeline
-        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_oc_epic
-        FOREIGN KEY (epic_fk) REFERENCES epics (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_oc_machine
-        FOREIGN KEY (machine_fk) REFERENCES machines (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_oc_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);
-
 -- ---------------------------------------------------------------------------
 -- FIVE tables standing BESIDE the 1.0 five, not replacing them. Both eras run
 -- at once until 1.0 is eradicated, and requirements are NOT doubled: one
@@ -1421,3 +1382,57 @@ CREATE TABLE pipeline2_step_deps (
 );
 
 CREATE INDEX ix_p2_psd_dep_step_fk ON pipeline2_step_deps (dep_step_fk);
+
+-- Orchestration reservations (req #3224, migration 20260801150404).
+--
+-- ADDED BY req #3196, not by #3224: this table reached schema.sql and both live
+-- databases but never this file, so a rebuilt darwin_dev came back 12 columns
+-- short and every orchestration reservation failed against a table that did not
+-- exist. The drift went unseen because the § Schema-of-Record Parity gate that
+-- would have caught it could not RUN — both schema.sql and this file were
+-- unloadable through load_sql.py until #3196 fixed the statement splitter.
+--
+-- SERVES BOTH ERAS since req #3369, migration 20260809024954 — see schema.sql
+-- for the full rationale. Placed here, after BOTH plan layers, because it now
+-- carries a live FK into each; `pipeline_fk` is nullable for the same reason.
+
+CREATE TABLE orchestration_claims (
+    id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    pipeline_fk   INT          NULL DEFAULT NULL,       -- 1.0 scope; NULL on a 2.0 claim
+    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = 1.0 whole-plan scope
+    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL,  -- carries uq_..._scope
+    pipeline2_fk  INT          NULL DEFAULT NULL,       -- 2.0 scope; NULL on a 1.0 claim
+    epic2_fk      INT          NULL DEFAULT NULL,       -- NULL = 2.0 whole-plan scope
+    epic2_key     INT          AS (COALESCE(epic2_fk, 0)) VIRTUAL, -- carries uq_..._scope2
+    machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
+    terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
+    engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
+    polls         INT          NOT NULL DEFAULT 0,      -- the heartbeat payload
+    claimed_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    creator_fk    VARCHAR(64)  NOT NULL,
+    create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
+    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
+    UNIQUE KEY uq_orchestration_claims_scope2 (pipeline2_fk, epic2_key),
+    CONSTRAINT fk_oc_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_pipeline2
+        FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_epic2
+        FOREIGN KEY (epic2_fk) REFERENCES pipeline2_epics (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_oc_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_oc_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);
+CREATE INDEX ix_orchestration_claims_epic2_fk ON orchestration_claims (epic2_fk);
