@@ -1,5 +1,5 @@
 -- Darwin Database Schema — Current State
--- This file reflects the final state of all 58 tables after all migrations.
+-- This file reflects the final state of all 59 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 --
@@ -805,6 +805,23 @@ CREATE TABLE IF NOT EXISTS feature_test_cases (
         FOREIGN KEY (feature_fk) REFERENCES features (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_ftc_case
+        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
+-- re-homes test cases from Feature onto Requirement: a test case asserts a
+-- deliverable and Requirement, not Feature, is the level that organizes
+-- deliverables. Stands BESIDE feature_test_cases, not in place of it, until
+-- the Feature-era eradication sequencing (req #3334) retires the old table.
+CREATE TABLE IF NOT EXISTS requirement_test_cases (
+    requirement_fk  INT             NOT NULL,
+    test_case_fk    INT             NOT NULL,
+    PRIMARY KEY (requirement_fk, test_case_fk),
+    CONSTRAINT fk_rtc_requirement
+        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_rtc_case
         FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );

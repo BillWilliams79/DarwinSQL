@@ -985,6 +985,87 @@ def test_delete_test_case_cascades_to_feature_test_cases(db_connection):
     db_connection.rollback()
 
 
+# COVERS: SCH-031
+def test_delete_requirement_cascades_to_requirement_test_cases(db_connection):
+    """req #3352 — DELETE requirement → CASCADE removes its requirement_test_cases
+    rows. Mirrors test_delete_feature_cascades_to_feature_test_cases above."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-del')
+        cur.execute(
+            "INSERT INTO requirements (title, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('req', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        requirement_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case2', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO requirement_test_cases (requirement_fk, test_case_fk) VALUES (%s, %s)",
+            (requirement_id, case_id)
+        )
+
+        cur.execute("DELETE FROM requirements WHERE id = %s", (requirement_id,))
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM requirement_test_cases "
+            "WHERE requirement_fk = %s OR test_case_fk = %s",
+            (requirement_id, case_id)
+        )
+        assert cur.fetchone()['c'] == 0  # CASCADE removed the junction row
+        # Test case itself is untouched
+        cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
+# COVERS: SCH-031
+def test_delete_test_case_cascades_to_requirement_test_cases(db_connection):
+    """req #3352 — DELETE test_case → CASCADE removes its requirement_test_cases
+    rows. Mirrors test_delete_test_case_cascades_to_feature_test_cases above."""
+    with db_connection.cursor() as cur:
+        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-case-del')
+        cur.execute(
+            "INSERT INTO requirements (title, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s)",
+            ('req2', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        requirement_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('case3', '1', 'ok', category_id, creator)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        case_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO requirement_test_cases (requirement_fk, test_case_fk) VALUES (%s, %s)",
+            (requirement_id, case_id)
+        )
+
+        cur.execute("DELETE FROM test_cases WHERE id = %s", (case_id,))
+
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM requirement_test_cases WHERE test_case_fk = %s",
+            (case_id,)
+        )
+        assert cur.fetchone()['c'] == 0
+        # Requirement itself untouched
+        cur.execute("SELECT id FROM requirements WHERE id = %s", (requirement_id,))
+        assert cur.fetchone() is not None
+    db_connection.rollback()
+
+
 def test_delete_test_plan_with_runs_rejected(db_connection):
     """DELETE test_plan with live test_runs → IntegrityError (ON DELETE RESTRICT).
 

@@ -1046,6 +1046,40 @@ def test_feature_test_cases_composite_pk(db_connection, test_creator_fk, test_ca
     db_connection.rollback()
 
 
+# COVERS: SCH-031
+def test_requirement_test_cases_composite_pk(db_connection, test_creator_fk, test_category_id):
+    """req #3352 — Second INSERT requirement_test_cases with same
+    (requirement_fk, test_case_fk) → IntegrityError. Mirrors
+    test_feature_test_cases_composite_pk above."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO requirements (title, category_fk, creator_fk, "
+            "requirement_status, coordination_type, ai_model, effort) "
+            "VALUES (%s, %s, %s, 'authoring', 'implemented', 'opus', 'high')",
+            ('r-dup', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        r_id = cur.fetchone()['id']
+        cur.execute(
+            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            ('tc-dup2', '1', 'ok', test_category_id, test_creator_fk)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        tc_id = cur.fetchone()['id']
+
+        cur.execute(
+            "INSERT INTO requirement_test_cases (requirement_fk, test_case_fk) VALUES (%s, %s)",
+            (r_id, tc_id)
+        )
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute(
+                "INSERT INTO requirement_test_cases (requirement_fk, test_case_fk) VALUES (%s, %s)",
+                (r_id, tc_id)
+            )
+    db_connection.rollback()
+
+
 # ---------------------------------------------------------------------------
 # Req #2943 — machines registry constraints
 # ---------------------------------------------------------------------------

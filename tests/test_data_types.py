@@ -1578,6 +1578,37 @@ def test_feature_test_cases_columns(db_connection):
     assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
 
 
+# COVERS: SCH-031, SCH-034
+def test_requirement_test_cases_columns(db_connection):
+    """req #3352 — requirement_test_cases junction (migration 20260809002149),
+    composite PK, no id. Mirrors test_feature_test_cases_columns above — both
+    junctions exist at once, feature_test_cases is not dropped by this one."""
+    with db_connection.cursor() as cur:
+        cur.execute("DESCRIBE requirement_test_cases")
+        columns = {row['Field']: row for row in cur.fetchall()}
+
+    expected_fields = ['requirement_fk', 'test_case_fk']
+    assert set(columns.keys()) == set(expected_fields), \
+        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
+
+    # Both FKs are primary key parts (composite PK)
+    assert columns['requirement_fk']['Type'] == 'int'
+    assert columns['requirement_fk']['Null'] == 'NO'
+    assert columns['requirement_fk']['Key'] == 'PRI'
+
+    assert columns['test_case_fk']['Type'] == 'int'
+    assert columns['test_case_fk']['Null'] == 'NO'
+    # MySQL reports non-leading composite PK columns as 'MUL'
+    assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
+
+    # feature_test_cases still exists — both eras run at once (req #3334's
+    # eradication sequencing is what would eventually drop it, not this one).
+    with db_connection.cursor() as cur:
+        cur.execute("SHOW TABLES LIKE 'feature_test_cases'")
+        assert cur.fetchone() is not None, \
+            "feature_test_cases must not be dropped by the junction requirement"
+
+
 def test_test_plans_columns(db_connection):
     """Verify test_plans column definitions match schema.sql (migration 043)."""
     with db_connection.cursor() as cur:
@@ -1801,6 +1832,11 @@ def test_table_count(db_connection):
         # chain Pipeline -> Epic -> Step -> Requirement.
         'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
         'pipeline2_step_requirements', 'pipeline2_step_deps',
+        # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
+        # Requirement (migration 20260809002149). Stands beside
+        # feature_test_cases above, not in its place, until req #3334's
+        # eradication sequencing.
+        'requirement_test_cases',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
