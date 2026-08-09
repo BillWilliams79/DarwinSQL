@@ -376,6 +376,36 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     -- NULL = not yet computed (pre-backfill); 0 = computed and genuinely zero.
     wall_secs_total INT             NULL,   -- sum of the 8 *_secs buckets
     output_tokens_total INT         NULL,   -- sum of phase_tokens[*].output
+    -- Shared TELEMETRY ENVELOPE (req #3202, migration 20260808235540). The one
+    -- measurement record every container of "a Claude run happened" carries —
+    -- identical name and type here, on swarm_starts, on swarm_completes and on
+    -- agent_telemetry_runs. Declared ONCE in scripts/telemetry/envelope.py;
+    -- DarwinSQL/tests/test_telemetry_envelope.py parses this file and fails the
+    -- build on any disagreement, which is what makes duplicating the columns
+    -- (rather than FK-ing to a shared table Lambda-Rest cannot JOIN) safe.
+    --   wall_ms      — the ONE wall-clock unit across both domains. BIGINT
+    --                  because a signed INT of ms overflows at ~24.8 days and a
+    --                  paused session parks for longer. Same fact as
+    --                  wall_secs_total, in the envelope's unit; both written by
+    --                  the same server-side rollup so they cannot disagree.
+    --   tokens_*     — the four-way usage the API actually reports. COMPLETES
+    --                  what output_tokens_total started: output alone cannot
+    --                  price a run when the four types bill differently.
+    --                  Server-managed, rolled up from phase_tokens.
+    --   prompt_*     — what was actually asked. prompt_text is a bounded
+    --                  2000-char PREFIX (HEAVY: dropped from every list read);
+    --                  prompt_sha256 hashes the FULL text so identity survives
+    --                  the clip; prompt_chars is the FULL length.
+    -- NULL means NOT MEASURED, never zero (req #3117's rule) — a pre-envelope
+    -- row must contribute nothing to an aggregate rather than drag it to zero.
+    wall_ms         BIGINT          NULL,
+    tokens_input    INT             NULL,
+    tokens_cache_write INT          NULL,
+    tokens_cache_read INT           NULL,
+    tokens_output   INT             NULL,
+    prompt_text     TEXT            NULL,
+    prompt_sha256   CHAR(64)        NULL,
+    prompt_chars    INT             NULL,
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
@@ -432,7 +462,17 @@ CREATE TABLE IF NOT EXISTS swarm_starts (
     tokens_cache_read   INT             NULL,
     tokens_output       INT             NULL,
     wall_seconds        INT             NULL,
+    -- Shared telemetry envelope (req #3202) — see the swarm_sessions block for
+    -- the full rationale. This table already carried the four tokens_* columns
+    -- with the envelope's exact names and types, which is why the envelope
+    -- ADOPTED their spelling rather than inventing a parallel one; it needs only
+    -- the ms wall clock and the prompt. wall_seconds is kept (live consumers)
+    -- and is derived from wall_ms by the same writer.
+    wall_ms             BIGINT          NULL,
     turn_count          INT             NULL,
+    prompt_text         TEXT            NULL,
+    prompt_sha256       CHAR(64)        NULL,
+    prompt_chars        INT             NULL,
     start_summary       TEXT            NULL,
     telemetry           TEXT            NULL,
     started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -478,12 +518,27 @@ CREATE TABLE IF NOT EXISTS swarm_completes (
     session_count       INT             NOT NULL DEFAULT 0,
     ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',
     effort              VARCHAR(16)     NOT NULL DEFAULT 'high',
+    -- req #3202, migration 20260809002208 — which machine ran the CLOSEOUT. The
+    -- one envelope context column this table was missing: req #2943 gave it to
+    -- swarm_sessions and swarm_starts, req #3098 to agent_telemetry_runs, and
+    -- swarm_completes was skipped by both. Nothing noticed until #3202's derived
+    -- conformance test asserted the four tables agree. No backfill — a completed
+    -- run's host is not recoverable, and the linked session's machine is the one
+    -- that ran the WORK, not necessarily the one that ran the closeout.
+    machine_fk          INT             NULL,
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,
     tokens_output       INT             NULL,
     wall_seconds        INT             NULL,
+    -- Shared telemetry envelope (req #3202) — see the swarm_sessions block.
+    -- Mirrors swarm_starts exactly, as the two tables have always mirrored each
+    -- other on the launch/closeout split.
+    wall_ms             BIGINT          NULL,
     turn_count          INT             NULL,
+    prompt_text         TEXT            NULL,
+    prompt_sha256       CHAR(64)        NULL,
+    prompt_chars        INT             NULL,
     complete_summary    TEXT            NULL,
     telemetry           TEXT            NULL,
     started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -493,7 +548,10 @@ CREATE TABLE IF NOT EXISTS swarm_completes (
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_swarm_completes_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_completes_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS swarm_complete_sessions (
@@ -1129,6 +1187,22 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_runs (
                                             -- req #3098, migration 075; fixed default for both backfill and future rows (capture-log row, not an editable setting)
     effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
                                             -- req #3098, migration 075; see ai_model comment
+    -- Shared TELEMETRY ENVELOPE (req #3202, migration 20260808235540) — the same
+    -- eight columns swarm_sessions / swarm_starts / swarm_completes carry, so an
+    -- agent capture and a swarm session are comparable for the first time. This
+    -- table previously had NO run-level cost at all: boot_time_ms is per-AGENT
+    -- (on agent_telemetry_rows) and measures one agent's boot, not what the
+    -- capture run itself spent. The 10-way context decomposition on
+    -- agent_telemetry_rows is untouched — the domain decompositions stay.
+    -- NULL = not measured, never zero.
+    wall_ms          BIGINT       NULL,
+    tokens_input     INT          NULL,
+    tokens_cache_write INT        NULL,
+    tokens_cache_read INT         NULL,
+    tokens_output    INT          NULL,
+    prompt_text      TEXT         NULL,
+    prompt_sha256    CHAR(64)     NULL,
+    prompt_chars     INT          NULL,
     machine_fk       INT          NULL,
                                             -- req #3098, migration 075; which machine ran the capture (NULL = unknown)
     creator_fk       VARCHAR(64)  NOT NULL,
