@@ -1,10 +1,12 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 58 tables in FK-dependency order
+-- All 59 tables in FK-dependency order
 --
 -- ============================================================================
--- THIS FILE DROPS 58 TABLES. (req #3196)
+-- THIS FILE DROPS 59 TABLES. (req #3196; count corrected to include
+-- requirement_test_cases, req #3378 — it was missing from this file since
+-- req #3352 created it, verify via `grep -c '^CREATE TABLE'` on this file)
 -- ============================================================================
 -- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
 -- a `USE` is a statement the caller's loader may strip, reorder or never reach,
@@ -35,7 +37,7 @@ DROP TABLE IF EXISTS orchestration_claims,
     agent_documents, agent_instructions,
     architecture_documents, instructions, agents,
     test_results, test_runs, test_plan_cases, test_plans,
-    feature_test_cases, test_cases, features, epics,
+    requirement_test_cases, feature_test_cases, test_cases, features, epics,
     user_integrations,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
@@ -681,6 +683,23 @@ CREATE TABLE feature_test_cases (
         FOREIGN KEY (feature_fk) REFERENCES features (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_ftc_case
+        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+-- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
+-- re-homes test cases from Feature onto Requirement: a test case asserts a
+-- deliverable and Requirement, not Feature, is the level that organizes
+-- deliverables. Stands BESIDE feature_test_cases, not in place of it, until
+-- the Feature-era eradication sequencing (req #3334) retires the old table.
+CREATE TABLE requirement_test_cases (
+    requirement_fk  INT             NOT NULL,
+    test_case_fk    INT             NOT NULL,
+    PRIMARY KEY (requirement_fk, test_case_fk),
+    CONSTRAINT fk_rtc_requirement
+        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_rtc_case
         FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
