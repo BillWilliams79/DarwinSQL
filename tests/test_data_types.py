@@ -582,6 +582,11 @@ def test_swarm_sessions_columns(db_connection):
     for attribution in ('pipeline_fk', 'epic_fk'):
         if attribution in columns:
             expected_fields.append(attribution)
+    # Req #3350, migration 20260809081441 — the 2.0 sibling pair, beside (not
+    # replacing) the 1.0 pair above. Tolerated the same way.
+    for attribution in ('pipeline2_fk', 'epic2_fk'):
+        if attribution in columns:
+            expected_fields.append(attribution)
     assert set(columns.keys()) == set(expected_fields)
 
     # req #3343 (SWM-022): step-addressed launch execution deliberately adds no
@@ -595,6 +600,15 @@ def test_swarm_sessions_columns(db_connection):
     # meaningful: "this session belongs to no plan / no epic", which is a real
     # answer for ad-hoc work outside any pipeline, not a missing value.
     for attribution in ('pipeline_fk', 'epic_fk'):
+        if attribution in columns:
+            assert columns[attribution]['Type'] == 'int'
+            assert columns[attribution]['Null'] == 'YES'
+            assert columns[attribution]['Default'] is None
+            assert columns[attribution]['Key'] == 'MUL'
+
+    # req #3350 — the 2.0 sibling pair. Same shape as the 1.0 pair above:
+    # NULLable INT FKs, no default, NULL meaning "not (yet, or ever) 2.0-seated".
+    for attribution in ('pipeline2_fk', 'epic2_fk'):
         if attribution in columns:
             assert columns[attribution]['Type'] == 'int'
             assert columns[attribution]['Null'] == 'YES'
