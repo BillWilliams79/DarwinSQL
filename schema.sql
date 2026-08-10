@@ -335,6 +335,28 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default bumped to high, req #3007)
     worktree_path   VARCHAR(512)    NULL,
     machine_fk      INT             NULL,          -- req #2943; which machine ran this session
+    -- Terminal window identity (req #3455, migration 20260810013244). WHICH
+    -- WINDOW this session's worker is running in, written PER SESSION by the
+    -- launcher (iterm-launch.sh / wt-launch.sh via terminal-record.sh) — the one
+    -- path that holds a single session's value at the moment the window is
+    -- created. It exists because the value was already measured and already
+    -- persisted, but only inside the BATCH-WIDE start_summary/telemetry blob
+    -- skill-finalize.sh stamps on every session of a /swarm-start batch, where
+    -- nothing says which of the batch's windows is this session's.
+    --   terminal_window_id — THE DURABLE HANDLE and the one anything keys on.
+    --     macOS: iTerm2's internal window id. Windows Terminal: the WT window
+    --     name (`swarm-N`). One column for both because both are an opaque
+    --     backend handle; the platform is answered by machines.platform through
+    --     machine_fk, so no terminal_backend column exists. VARCHAR because WT's
+    --     handle is not numeric.
+    --   terminal_number — the POSITIONAL number at launch (iTerm ⌥⌘N / WT index).
+    --     Display only, never keyed on: it goes stale the moment a window closes,
+    --     which is exactly why the handle above exists.
+    -- NULL = NOT RECORDED. Deliberately NOT backfilled: the historical blob is
+    -- batch-wide, so any derived value would be a guess about which window a
+    -- given session held — the defect this closes.
+    terminal_window_id VARCHAR(64)  NULL DEFAULT NULL,
+    terminal_number INT             NULL DEFAULT NULL,
     -- Orchestration attribution (req #3186, migration 20260801020944). WHICH
     -- PIPELINE / WHICH EPIC this session was advancing — stamped ONCE by
     -- darwin-mcp's link_requirement_session and never overwritten, because the
