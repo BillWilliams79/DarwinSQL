@@ -63,6 +63,8 @@
 --
 -- Migration id 20260811033413 is a UTC timestamp allocated by
 -- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+--
+-- darwin:destructive
 
 DROP TABLE feature_test_cases;
 

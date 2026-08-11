@@ -150,21 +150,21 @@ def seed_test_profile(db_connection, test_creator_fk):
         cur.execute("DELETE FROM instructions WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM architecture_documents WHERE creator_fk = %s",
                     (test_creator_fk,))
-        # Req #2380: features/test_cases/test_plans RESTRICT on categories,
-        # so delete these BEFORE categories. test_results and test_runs also
-        # clean up explicitly to handle tests that commit mid-run.
+        # Req #2380: test_cases/test_plans RESTRICT on categories, so delete
+        # these BEFORE categories. test_results and test_runs also clean up
+        # explicitly to handle tests that commit mid-run. `features` and
+        # `feature_test_cases` were dropped at req #3355 (migration
+        # 20260811033413) — test cases now re-home onto Requirement via
+        # `requirement_test_cases`, cleaned up above with `requirements`
+        # (ON DELETE CASCADE).
         cur.execute("DELETE FROM test_results WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_runs WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_plan_cases WHERE test_plan_fk IN "
                     "(SELECT id FROM test_plans WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_plans WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM feature_test_cases WHERE feature_fk IN "
-                    "(SELECT id FROM features WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM features WHERE creator_fk = %s", (test_creator_fk,))
         # Req #3111: epics -> categories is RESTRICT, so epics must go before
-        # categories. features.epic_fk is SET NULL, so features may go either
-        # side; deleted just above for readability.
+        # categories.
         cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))

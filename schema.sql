@@ -1,5 +1,5 @@
 -- Darwin Database Schema — Current State
--- This file reflects the final state of all 59 tables after all migrations.
+-- This file reflects the final state of all 57 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 --
@@ -222,30 +222,6 @@ CREATE TABLE IF NOT EXISTS epics (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS features (
-    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256)    NOT NULL,
-    description     TEXT            NOT NULL,
-    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
-    epic_fk         INT             NULL DEFAULT NULL,
-                                            -- parent epic (req #3111, migration 076); NULL = unfiled
-    category_fk     INT             NOT NULL,
-    creator_fk      VARCHAR(64)     NOT NULL,
-    closed          TINYINT(1)      NOT NULL DEFAULT 0,
-    sort_order      SMALLINT        NULL,
-    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_features_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_features_epic
-        FOREIGN KEY (epic_fk) REFERENCES epics (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_features_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
@@ -272,10 +248,6 @@ CREATE TABLE IF NOT EXISTS requirements (
                                             -- comma-separated sub-repo override (req #2583); NULL = use category default
     machine_fk      INT             NULL DEFAULT NULL,
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
-    feature_fk      INT             NULL DEFAULT NULL,
-                                            -- parent feature (req #3111, migration 076); NULL = unfiled.
-                                            -- The story tier of Epic > Feature > Story; SET NULL so deleting a
-                                            -- feature demotes its requirements instead of destroying history.
     tracking        TINYINT(1)      NOT NULL DEFAULT 0,
                                             -- CONTAINER, not work (req #3123, migration 20260731124830).
                                             -- 1 = this requirement HOLDS a plan (or an epic/feature) rather than
@@ -297,10 +269,6 @@ CREATE TABLE IF NOT EXISTS requirements (
         FOREIGN KEY (machine_fk)
         REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_requirements_feature
-        FOREIGN KEY (feature_fk)
-        REFERENCES features (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
@@ -839,23 +807,11 @@ CREATE TABLE IF NOT EXISTS test_cases (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS feature_test_cases (
-    feature_fk      INT             NOT NULL,
-    test_case_fk    INT             NOT NULL,
-    PRIMARY KEY (feature_fk, test_case_fk),
-    CONSTRAINT fk_ftc_feature
-        FOREIGN KEY (feature_fk) REFERENCES features (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_ftc_case
-        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
 -- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
 -- re-homes test cases from Feature onto Requirement: a test case asserts a
 -- deliverable and Requirement, not Feature, is the level that organizes
--- deliverables. Stands BESIDE feature_test_cases, not in place of it, until
--- the Feature-era eradication sequencing (req #3334) retires the old table.
+-- deliverables. feature_test_cases (its predecessor) was dropped by the
+-- Feature-era eradication cutover (req #3355, migration 20260811033413).
 CREATE TABLE IF NOT EXISTS requirement_test_cases (
     requirement_fk  INT             NOT NULL,
     test_case_fk    INT             NOT NULL,

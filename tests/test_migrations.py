@@ -584,8 +584,12 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'map_routes', 'map_runs', 'map_coordinates',
             'map_views', 'map_partners', 'map_run_partners',
             'user_integrations',
-            # Req #2380 — Swarm Features & Test Cases registry
-            'features', 'test_cases', 'feature_test_cases',
+            # Req #2380 — Swarm Features & Test Cases registry. `features` and
+            # `feature_test_cases` are CREATED by migration 042 then DROPPED by
+            # req #3355 (migration 20260811033413 — Feature schema eradication),
+            # so — like the Build Visualizer tables below — they do NOT appear
+            # in the final replay state.
+            'test_cases',
             'test_plans', 'test_plan_cases',
             'test_runs', 'test_results',
             # Req #2422 — swarm-start data type
@@ -619,8 +623,9 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # parallel era. Stands beside the 1.0 five above; not a replacement.
             'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
             'pipeline2_step_requirements', 'pipeline2_step_deps',
-            # Req #3352 — requirement_test_cases (migration 20260809002149).
-            # Stands beside feature_test_cases above; not a replacement.
+            # Req #3352 — requirement_test_cases (migration 20260809002149),
+            # the sole test-case junction since req #3355 dropped
+            # feature_test_cases.
             'requirement_test_cases',
         ]
     }
