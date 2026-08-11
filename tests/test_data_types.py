@@ -587,6 +587,12 @@ def test_swarm_sessions_columns(db_connection):
     for attribution in ('pipeline2_fk', 'epic2_fk'):
         if attribution in columns:
             expected_fields.append(attribution)
+    # Req #3455, migration 20260810013244 — WHICH TERMINAL WINDOW this session's
+    # worker runs in. Tolerated the same way, for the same dev-before-production
+    # window (this requirement is `implemented`, so production waits for the user).
+    for terminal in ('terminal_window_id', 'terminal_number'):
+        if terminal in columns:
+            expected_fields.append(terminal)
     assert set(columns.keys()) == set(expected_fields)
 
     # req #3343 (SWM-022): step-addressed launch execution deliberately adds no
@@ -625,6 +631,26 @@ def test_swarm_sessions_columns(db_connection):
             assert columns[rollup]['Type'] == 'int'
             assert columns[rollup]['Null'] == 'YES'
             assert columns[rollup]['Default'] is None
+
+    # req #3455 terminal identity (migration 20260810013244). Both NULLable with
+    # NO default, and that is the contract: NULL means NOT RECORDED — a session
+    # launched before this migration, or one whose best-effort launch-time write
+    # did not land. A default of any kind would fabricate a window that does not
+    # exist and hand the UI a link to nowhere.
+    #
+    # terminal_window_id is VARCHAR, not INT, even though iTerm2's handle is
+    # numeric: Windows Terminal's handle is the window NAME (`swarm-N`), the two
+    # backends share this one column, and a handle is never arithmetic.
+    # terminal_number is INT and is DISPLAY ONLY — positional, stale the moment a
+    # window closes. Neither carries a key: nothing looks a session up BY window.
+    if 'terminal_window_id' in columns:
+        assert columns['terminal_window_id']['Type'] == 'varchar(64)'
+        assert columns['terminal_window_id']['Null'] == 'YES'
+        assert columns['terminal_window_id']['Default'] is None
+    if 'terminal_number' in columns:
+        assert columns['terminal_number']['Type'] == 'int'
+        assert columns['terminal_number']['Null'] == 'YES'
+        assert columns['terminal_number']['Default'] is None
 
     # req #2943 machine_fk (migration 064) — nullable FK, no default.
     if 'machine_fk' in columns:
@@ -933,11 +959,26 @@ def test_swarm_completes_columns(db_connection):
                        'complete_summary', 'telemetry',
                        'started_at', 'completed_at',
                        'creator_fk', 'create_ts', 'update_ts']
+    # req #3202, migration 20260809002208 — WHERE the close-out ran, the
+    # envelope's machine context. Tolerated the same way every other post-058
+    # addition to this table is, so the file stays runnable against a database
+    # that has not taken the migration yet. (Not part of req #3455; the
+    # migration reached darwin_dev without this list being widened, so the
+    # assertion below failed for a column nobody had declared.)
+    if 'machine_fk' in columns:
+        expected_fields.append('machine_fk')
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'
     assert columns['id']['Extra'] == 'auto_increment'
+
+    # req #3202 machine_fk — nullable FK, no default. NULL is a real answer: a
+    # close-out whose machine identity did not resolve.
+    if 'machine_fk' in columns:
+        assert columns['machine_fk']['Type'] == 'int'
+        assert columns['machine_fk']['Null'] == 'YES'
+        assert columns['machine_fk']['Key'] == 'MUL'
 
     assert columns['skill_name']['Type'] == 'varchar(64)'
     assert columns['skill_name']['Null'] == 'NO'

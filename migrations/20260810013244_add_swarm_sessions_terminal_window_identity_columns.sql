@@ -1,0 +1,115 @@
+-- 20260810013244_add_swarm_sessions_terminal_window_identity_columns.sql
+--
+-- Req #3455: a swarm session's row cannot say which terminal window its worker
+-- is running in, so nothing can link to that window.
+--
+-- PROBLEM.  The window identity is already MEASURED at launch and already
+--           PERSISTED — and it is persisted in a form nothing can key on.
+--           `skill-finalize.sh` stamps ONE batch-wide `start_summary` /
+--           `telemetry` blob onto EVERY session of a `/swarm-start` batch, so
+--           session 2732's row reads
+--
+--               Terminal: window 4   window 5   window 8   window 10
+--
+--           with nothing saying which one is 2732's. The fact is per-session and
+--           has never had a per-session home.
+--
+--           (The blob itself is ALSO fixed, in the same requirement:
+--           skill-finalize.sh now writes each session only its own block,
+--           matched on `Branch:` against swarm_sessions.branch. A column is
+--           still the right home for the identity — prose is not queryable and
+--           the click needs a value, not a paragraph.)
+--
+-- SHAPE.    Two nullable columns on `swarm_sessions`, written per session by the
+--           launcher itself (`iterm-launch.sh` / `wt-launch.sh` via
+--           `scripts/swarm/terminal-record.sh`), which is the one path that
+--           holds ONE session's value at the moment it is created. Per-session
+--           by construction — no blob is parsed and no ordering is assumed.
+--
+--             terminal_window_id VARCHAR(64) NULL
+--               THE DURABLE HANDLE, and the one anything keys on. macOS: iTerm2's
+--               internal window id (`ITERM_INTERNAL_ID`, already captured at
+--               iterm-launch.sh:425 and already exported into the worker shell as
+--               ITERM_WINDOW_ID). Windows Terminal: the WT window NAME (`swarm-N`),
+--               which that backend already exports through the same variable. One
+--               column for both backends because both are an opaque
+--               backend-addressable handle; the platform is answered by
+--               `machines.platform` on the row this session already points at, so
+--               no `terminal_backend` column is needed. VARCHAR, not INT: iTerm2's
+--               id is numeric but WT's is not, and a handle is not arithmetic.
+--
+--             terminal_number INT NULL
+--               THE POSITIONAL NUMBER at launch (`win_num` on iterm, `WIN_IDX` on
+--               wt) — what the human READS ("Window 4") and what iTerm's ⌥⌘N
+--               hotkey addressed. Stored DELIBERATELY ALONGSIDE the id rather
+--               than instead of it, and never keyed on: it is positional and goes
+--               stale the moment any window closes, which is precisely why the id
+--               above exists. Display only.
+--
+--           Both NULLable and both left NULL for every existing row. There is no
+--           backfill and there must not be one: the historical blob is
+--           batch-wide, so any value derived from it would be a guess about which
+--           of a batch's windows a given session held — the exact defect this
+--           closes. NULL means NOT RECORDED, and the UI renders it as such.
+--
+--           Neither column joins a req #3122/#3125/#3432 registry: neither is an
+--           FK, and neither is a NOT NULL enum-shaped column ('' is not a
+--           distinguished value here — the columns are nullable and a blank is
+--           simply never written).
+--
+-- DEPLOY ORDER. **THIS MIGRATION MUST REACH PRODUCTION BEFORE THE DARWIN
+--           FRONTEND DOES.** It is not the usual "the column is simply available
+--           and nothing reads it until the new code ships" — that ordering is
+--           REVERSED here, and getting it wrong takes out a whole page.
+--
+--           `Darwin/src/hooks/factory/devopsQueries.js` names both columns in
+--           `SWARM_SESSION_DEFAULT_FIELDS`, the `fields=` projection the Sessions
+--           grid sends. Lambda-Rest validates every `fields=` name against
+--           `DESC <table>` on the LIVE database and 400s the WHOLE read on one it
+--           does not recognise — so a frontend deployed against a production
+--           `darwin` that has not taken this migration does not merely miss the
+--           Terminal column: the whole `swarm_sessions` read fails and the
+--           Sessions page renders nothing. (Same caveat the `pipeline_fk`/`epic_fk`
+--           and `pipeline2_fk`/`epic2_fk` widenings carry in that file, from
+--           req #3186 and #3350.)
+--
+--           MEASURED 2026-08-09, through the gateway, both databases, same call:
+--             darwin_dev  fields=id,machine_fk                          -> 200, 5 rows
+--             darwin_dev  fields=id,terminal_window_id,terminal_number  -> 200, 5 rows
+--             darwin      fields=id,machine_fk                          -> 200, 1120 rows
+--             darwin      fields=id,terminal_window_id,terminal_number  -> 400
+--           The fourth line is the whole hazard: not a degraded column, a dead page.
+--
+--           The MCP side is NOT exposed to this: both columns are HEAVY in
+--           `darwin-mcp/services/common.py`, so no MCP list read names them, and
+--           the by-id read fetches whole rows without a projection.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260810013244_add_swarm_sessions_terminal_window_identity_columns.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260810013244_add_swarm_sessions_terminal_window_identity_columns.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20260810013244` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260810013244 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE swarm_sessions
+    ADD COLUMN terminal_window_id VARCHAR(64) NULL DEFAULT NULL AFTER machine_fk,
+    ADD COLUMN terminal_number    INT         NULL DEFAULT NULL AFTER terminal_window_id;
