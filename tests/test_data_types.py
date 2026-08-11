@@ -593,6 +593,13 @@ def test_swarm_sessions_columns(db_connection):
     for terminal in ('terminal_window_id', 'terminal_number'):
         if terminal in columns:
             expected_fields.append(terminal)
+    # Req #3202, migration 20260808235540 — the shared telemetry envelope.
+    # Tolerated the same way, for the same dev-before-production window.
+    for envelope in ('wall_ms', 'tokens_input', 'tokens_cache_write',
+                      'tokens_cache_read', 'tokens_output',
+                      'prompt_text', 'prompt_sha256', 'prompt_chars'):
+        if envelope in columns:
+            expected_fields.append(envelope)
     assert set(columns.keys()) == set(expected_fields)
 
     # req #3343 (SWM-022): step-addressed launch execution deliberately adds no
@@ -784,6 +791,13 @@ def test_swarm_starts_columns(db_connection):
     # Tolerate both pre- and post-migration-064 state (req #2943 added machine_fk).
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
+    # Req #3202, migration 20260808235540 — the shared telemetry envelope's
+    # wall-clock unit and prompt columns (the four tokens_* columns above
+    # already matched the envelope's spelling and needed no change).
+    # Tolerated the same way, for the same dev-before-production window.
+    for envelope in ('wall_ms', 'prompt_text', 'prompt_sha256', 'prompt_chars'):
+        if envelope in columns:
+            expected_fields.append(envelope)
     assert set(columns.keys()) == set(expected_fields)
 
     # req #3343 (SWM-022): the one swarm_starts row per invocation is the
@@ -967,6 +981,13 @@ def test_swarm_completes_columns(db_connection):
     # assertion below failed for a column nobody had declared.)
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
+    # Req #3202, migration 20260808235540 — the shared telemetry envelope's
+    # wall-clock unit and prompt columns (the four tokens_* columns above
+    # already matched the envelope's spelling and needed no change).
+    # Tolerated the same way, for the same dev-before-production window.
+    for envelope in ('wall_ms', 'prompt_text', 'prompt_sha256', 'prompt_chars'):
+        if envelope in columns:
+            expected_fields.append(envelope)
     assert set(columns.keys()) == set(expected_fields)
 
     assert columns['id']['Type'] == 'int'
@@ -2345,6 +2366,14 @@ def test_agent_telemetry_runs_columns(db_connection):
     expected = {'id', 'captured_at', 'label', 'agent_count', 'harness_version',
                 'source_note', 'ai_model', 'effort', 'machine_fk',
                 'creator_fk', 'create_ts', 'update_ts'}
+    # Req #3202, migration 20260808235540 — the shared telemetry envelope.
+    # Tolerated the same way every other table above handles the same
+    # dev-before-production window.
+    for envelope in ('wall_ms', 'tokens_input', 'tokens_cache_write',
+                      'tokens_cache_read', 'tokens_output',
+                      'prompt_text', 'prompt_sha256', 'prompt_chars'):
+        if envelope in cols:
+            expected.add(envelope)
     assert set(cols.keys()) == expected
     assert cols['id']['Key'] == 'PRI'
     assert cols['captured_at']['Null'] == 'NO'

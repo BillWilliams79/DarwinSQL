@@ -327,11 +327,17 @@ CREATE TABLE swarm_sessions (
                                             -- low | medium | high | xhigh | ultracode (req #2916; captured at launch, default: xhigh)
     worktree_path   VARCHAR(512)    NULL,
     machine_fk      INT             NULL,          -- req #2943
+    -- Terminal window identity (req #3455, migration 20260810013244).
+    terminal_window_id VARCHAR(64)  NULL DEFAULT NULL,
+    terminal_number INT             NULL DEFAULT NULL,
     -- Orchestration attribution (req #3186, migration 20260801020944): WHICH
     -- PIPELINE / WHICH EPIC this session was advancing. Stamped once at
     -- requirement-link time; NULL = work outside any plan.
     pipeline_fk     INT             NULL DEFAULT NULL,
     epic_fk         INT             NULL DEFAULT NULL,
+    -- 2.0 orchestration attribution (req #3350, migration 20260809081441).
+    pipeline2_fk    INT             NULL DEFAULT NULL,
+    epic2_fk        INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332, migration 059)
@@ -356,6 +362,15 @@ CREATE TABLE swarm_sessions (
     -- and phase_tokens[*].output, readable from a projected list read.
     wall_secs_total INT             NULL,
     output_tokens_total INT         NULL,
+    -- Shared telemetry envelope (req #3202, migration 20260808235540).
+    wall_ms         BIGINT          NULL,
+    tokens_input    INT             NULL,
+    tokens_cache_write INT          NULL,
+    tokens_cache_read INT           NULL,
+    tokens_output   INT             NULL,
+    prompt_text     TEXT            NULL,
+    prompt_sha256   CHAR(64)        NULL,
+    prompt_chars    INT             NULL,
     start_summary   TEXT            NULL,
     complete_summary TEXT           NULL,
     telemetry       TEXT            NULL,
@@ -374,6 +389,12 @@ CREATE TABLE swarm_sessions (
         ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_swarm_sessions_epic
         FOREIGN KEY (epic_fk) REFERENCES epics (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_pipeline2
+        FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_swarm_sessions_epic2
+        FOREIGN KEY (epic2_fk) REFERENCES pipeline2_epics (id)
         ON UPDATE CASCADE ON DELETE SET NULL
 );
 
@@ -405,7 +426,12 @@ CREATE TABLE swarm_starts (
     tokens_cache_read   INT             NULL,
     tokens_output       INT             NULL,
     wall_seconds        INT             NULL,
+    -- Shared telemetry envelope (req #3202, migration 20260808235540).
+    wall_ms             BIGINT          NULL,
     turn_count          INT             NULL,
+    prompt_text         TEXT            NULL,
+    prompt_sha256       CHAR(64)        NULL,
+    prompt_chars        INT             NULL,
     start_summary       TEXT            NULL,
     telemetry           TEXT            NULL,
     started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -440,12 +466,19 @@ CREATE TABLE swarm_completes (
     session_count       INT             NOT NULL DEFAULT 0,
     ai_model            VARCHAR(16)     NOT NULL DEFAULT 'opus',  -- req #2949
     effort              VARCHAR(16)     NOT NULL DEFAULT 'high',  -- req #2949
+    -- req #3202, migration 20260809002208 — which machine ran the closeout.
+    machine_fk          INT             NULL,
     tokens_input        INT             NULL,
     tokens_cache_write  INT             NULL,
     tokens_cache_read   INT             NULL,
     tokens_output       INT             NULL,
     wall_seconds        INT             NULL,
+    -- Shared telemetry envelope (req #3202, migration 20260808235540).
+    wall_ms             BIGINT          NULL,
     turn_count          INT             NULL,
+    prompt_text         TEXT            NULL,
+    prompt_sha256       CHAR(64)        NULL,
+    prompt_chars        INT             NULL,
     complete_summary    TEXT            NULL,
     telemetry           TEXT            NULL,
     started_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -455,7 +488,10 @@ CREATE TABLE swarm_completes (
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_swarm_completes_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_swarm_completes_machine
+        FOREIGN KEY (machine_fk) REFERENCES machines (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
 CREATE TABLE swarm_complete_sessions (
@@ -1033,6 +1069,15 @@ CREATE TABLE agent_telemetry_runs (
     source_note      TEXT         NULL,
     ai_model         VARCHAR(16)  NOT NULL DEFAULT 'opus',
     effort           VARCHAR(16)  NOT NULL DEFAULT 'high',
+    -- Shared telemetry envelope (req #3202, migration 20260808235540).
+    wall_ms          BIGINT       NULL,
+    tokens_input     INT          NULL,
+    tokens_cache_write INT        NULL,
+    tokens_cache_read INT         NULL,
+    tokens_output    INT          NULL,
+    prompt_text      TEXT         NULL,
+    prompt_sha256    CHAR(64)     NULL,
+    prompt_chars     INT          NULL,
     machine_fk       INT          NULL,
     creator_fk       VARCHAR(64)  NOT NULL,
     create_ts        TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
