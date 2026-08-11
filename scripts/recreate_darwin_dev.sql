@@ -1,12 +1,13 @@
 -- Recreate darwin_dev test/dev tables from scratch
 -- Uses production-identical table names (same DDL as schema.sql)
 -- Idempotent: safe to run repeatedly to reset darwin_dev to canonical state
--- All 59 tables in FK-dependency order
+-- All 57 tables in FK-dependency order
 --
 -- ============================================================================
--- THIS FILE DROPS 59 TABLES. (req #3196; count corrected to include
+-- THIS FILE DROPS 57 TABLES. (req #3196; count corrected to include
 -- requirement_test_cases, req #3378 — it was missing from this file since
--- req #3352 created it, verify via `grep -c '^CREATE TABLE'` on this file)
+-- req #3352 created it; req #3355 dropped `features` and `feature_test_cases`,
+-- migration 20260811033413 — verify via `grep -c '^CREATE TABLE'` on this file)
 -- ============================================================================
 -- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
 -- a `USE` is a statement the caller's loader may strip, reorder or never reach,
@@ -37,7 +38,7 @@ DROP TABLE IF EXISTS orchestration_claims,
     agent_documents, agent_instructions,
     architecture_documents, instructions, agents,
     test_results, test_runs, test_plan_cases, test_plans,
-    requirement_test_cases, feature_test_cases, test_cases, features, epics,
+    requirement_test_cases, test_cases, epics,
     user_integrations,
     map_run_partners, map_partners,
     map_views, map_coordinates, map_runs, map_routes,
@@ -202,11 +203,12 @@ CREATE TABLE machines (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- Agile hierarchy: Epic > Feature > Story(requirement) (req #3111, migration 076).
--- `epics` and `features` are created here, above `requirements`, so that
--- requirements.feature_fk resolves — the same reason `machines` sits above the
--- execution tables. The rest of the validation family stays in the "Swarm Features
--- & Test Cases registry" section below.
+-- Agile hierarchy: Epic tops the containment hierarchy (req #3111, migration
+-- 076); `epics` is created here, above `requirements`, the same reason
+-- `machines` sits above the execution tables. (The Feature tier — Epic >
+-- Feature > Story — and `requirements.feature_fk` were dropped at req #3355,
+-- migration 20260811033413.) The rest of the validation family stays in the
+-- "Swarm Test Cases registry" section below.
 CREATE TABLE epics (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title        VARCHAR(256) NOT NULL,
@@ -224,30 +226,6 @@ CREATE TABLE epics (
         FOREIGN KEY (category_fk) REFERENCES categories (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_epics_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE TABLE features (
-    id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256)    NOT NULL,
-    description     TEXT            NOT NULL,
-    feature_status  VARCHAR(16)     NOT NULL DEFAULT 'draft',   -- draft|active|deprecated
-    epic_fk         INT             NULL DEFAULT NULL,
-                                            -- parent epic (req #3111, migration 076); NULL = unfiled
-    category_fk     INT             NOT NULL,
-    creator_fk      VARCHAR(64)     NOT NULL,
-    closed          TINYINT(1)      NOT NULL DEFAULT 0,
-    sort_order      SMALLINT        NULL,
-    create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_features_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_features_epic
-        FOREIGN KEY (epic_fk) REFERENCES epics (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_features_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
@@ -278,8 +256,6 @@ CREATE TABLE requirements (
                                             -- comma-separated sub-repo override (req #2583); NULL = use category default
     machine_fk      INT             NULL DEFAULT NULL,
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
-    feature_fk      INT             NULL DEFAULT NULL,
-                                            -- parent feature (req #3111, migration 076); NULL = unfiled
     tracking        TINYINT(1)      NOT NULL DEFAULT 0,
                                             -- CONTAINER, not work (req #3123): 1 = holds a plan/epic rather than
                                             -- being work inside it, so it is excluded from a pipeline step's
@@ -295,10 +271,6 @@ CREATE TABLE requirements (
         FOREIGN KEY (machine_fk)
         REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_requirements_feature
-        FOREIGN KEY (feature_fk)
-        REFERENCES features (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
     FOREIGN KEY (creator_fk)
         REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
@@ -649,9 +621,9 @@ CREATE TABLE user_integrations (
     UNIQUE KEY uq_creator_provider (creator_fk, provider)
 );
 
--- Swarm Features & Test Cases registry (req #2380)
--- NOTE: `features` is created ABOVE, next to `epics` — requirements.feature_fk
--- (req #3111, migration 076) forced it above `requirements`.
+-- Swarm Test Cases registry (req #2380). `features` (created here until req
+-- #3355 dropped it, migration 20260811033413) used to force this section
+-- above `requirements`; test_cases has no such dependency of its own.
 
 CREATE TABLE test_cases (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -675,23 +647,11 @@ CREATE TABLE test_cases (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE TABLE feature_test_cases (
-    feature_fk      INT             NOT NULL,
-    test_case_fk    INT             NOT NULL,
-    PRIMARY KEY (feature_fk, test_case_fk),
-    CONSTRAINT fk_ftc_feature
-        FOREIGN KEY (feature_fk) REFERENCES features (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_ftc_case
-        FOREIGN KEY (test_case_fk) REFERENCES test_cases (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
 -- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
 -- re-homes test cases from Feature onto Requirement: a test case asserts a
 -- deliverable and Requirement, not Feature, is the level that organizes
--- deliverables. Stands BESIDE feature_test_cases, not in place of it, until
--- the Feature-era eradication sequencing (req #3334) retires the old table.
+-- deliverables. feature_test_cases (its predecessor) was dropped at req #3355,
+-- migration 20260811033413.
 CREATE TABLE requirement_test_cases (
     requirement_fk  INT             NOT NULL,
     test_case_fk    INT             NOT NULL,

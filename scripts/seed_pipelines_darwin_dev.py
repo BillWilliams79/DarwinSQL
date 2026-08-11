@@ -17,6 +17,18 @@ darwin_dev ONLY. NEVER apply the output to production `darwin`. It used to be sa
 to say `darwin` was simply empty; the Primary's live-plan cutover has since landed
 and production carries the real plan, so this fixture's 9001-band rows would sit
 alongside live ones rather than in an empty table (req #3147).
+
+NO FEATURE LAYER (req #3355). This fixture used to emit `features` rows and a
+`requirements.feature_fk` link, because that chain — requirement -> feature ->
+epic — was 1.0's ONLY path from a requirement to its epic, and the fixture
+demonstrated req #3080 design rule 10 (a launch unit spanning epics) through it.
+Migration 20260811033413 DROPPED `features`, `feature_test_cases` and
+`requirements.feature_fk`, and there is nothing in 1.0 to rewire the chain to: a
+bare 1.0 requirement carries no epic of its own, and only Pipeline 2.0's
+`pipeline2_steps.epic_fk` answers the question now. So the demonstration is gone
+rather than reworked — 1.0 itself is being wound down (req #3356). `epics` are
+UNAFFECTED and still emitted: only the Feature layer between them and the
+requirements went away.
 """
 import json
 import os
@@ -30,7 +42,7 @@ CREATOR = '37df7531-000d-4470-8be4-1792d8261f69'          # Bill W
 # The fixture owns its project + category rather than borrowing production ids.
 # The plan's requirements carry PRODUCTION category_fk values (1, 1052, ...) and
 # categories.category_fk is NOT NULL with ON DELETE RESTRICT — the identical
-# cross-database hazard MACHINE_MAP exists for. Borrowing them happens to work on
+# cross-database hazard `machine_ref` exists for. Borrowing them happens to work on
 # today's darwin_dev only because the ids coincide; on a darwin_dev rebuilt from
 # recreate_darwin_dev.sql (categories empty) the requirements INSERT would die
 # with errno 1452 AFTER the teardown had already dropped the previous fixture.
@@ -46,7 +58,6 @@ OUT = os.path.join(HERE, 'seed_pipelines_darwin_dev.sql')
 # Fixture id allocation. Explicit ids (not AUTO_INCREMENT) so the file is
 # idempotent, re-runnable, and its teardown can be scoped precisely.
 EPIC_BASE = 9000        # epics            9001..9004
-FEATURE_BASE = 9000     # features         9001..90NN
 PIPELINE_ID = 9001      # pipelines        9001
 
 # pipeline_steps.id = STEP_BASE + the plan's step id. NOT the bare step id: those
@@ -57,22 +68,52 @@ PIPELINE_ID = 9001      # pipelines        9001
 # trivially readable (plan step 12 -> 9012) and collision-free.
 STEP_BASE = 9000
 
-# Production machine id -> darwin_dev machine id. The plan's requirements carry
-# production machine_fk values; darwin_dev has its own machines table with
-# different ids, and the FK is RESTRICT, so an unmapped value would fail the load.
-MACHINE_MAP = {2: 74, 3: 75}    # Mac Mini -> Mac mini, MCHP Windows -> WSL box
+# The plan's requirements carry PRODUCTION machine_fk values and `machine_fk` is
+# ON DELETE RESTRICT, so a value darwin_dev has no row for fails the whole load
+# with a 1452. This used to be a HARDCODED id map, `{2: 74, 3: 75}` — production
+# id -> the id the same machine happened to hold in darwin_dev — and it broke
+# exactly the way a hardcoded cross-database id map breaks: darwin_dev was rebuilt,
+# its machines re-registered as ids 2 and 3, and 74/75 stopped existing. Measured
+# 2026-08-11: the fixture aborted at the requirements INSERT on
+# `fk_requirements_machine`, having emitted every earlier statement correctly.
+#
+# So the id is not carried across the databases at all any more. The generator
+# reads the machine's HOSTNAME — a natural key, and the key machines register
+# themselves under — and emits a scalar subquery that resolves it against
+# WHICHEVER machines table the file is loaded into:
+#
+#     machine_fk = (SELECT id FROM machines WHERE hostname = 'Macmini')
+#
+# A hostname darwin_dev does not know yields NULL, which is the documented "Any"
+# fallback the old map also produced for an unmapped value — so an unknown machine
+# still degrades to NULL rather than aborting the load.
+PIPELINE_MACHINE = 2            # the plan's own machine, by PRODUCTION id (Mac Mini)
 
-# The one epic membership the plan states in prose rather than in a column.
-# Plan step 19 batches #3080/#3083 (Swarm Orchestration Feature) together with
-# #3105 in ONE swarm-start and says so explicitly: "cross-epic per rule 10".
-# Design rule 10 exists for exactly this shape — a launch unit that spans epics —
-# and the fixture cannot demonstrate the rule unless one requirement actually
-# sits under a different epic than its step's dominant label. #3105 (swarm-complete
-# takes the RDS snapshot without asking) is substrate doctrine, so it is filed
-# under the Swarm Substrate Rebuild epic via a feature that exists for it.
-CROSS_EPIC = {
-    3105: ('Swarm Doctrine', 'Swarm Substrate Rebuild'),
-}
+
+def machine_ref(prod_machine_id, hostnames):
+    """SQL for `requirements.machine_fk` / `pipelines.machine_fk`.
+
+    Resolved at LOAD time against the target database's own `machines` table, so
+    the fixture carries no assumption about which ids darwin_dev holds. NULL
+    ("Any") for a machine the plan does not pin or the target does not know.
+    """
+    host = hostnames.get(prod_machine_id)
+    if not host:
+        return 'NULL'
+    return '(SELECT id FROM machines WHERE hostname = %s)' % q(host)
+
+
+# CROSS_EPIC used to live here (req #3355 removed it). It filed requirement #3105
+# under the Swarm Substrate Rebuild epic through a feature of its own, so the
+# fixture could demonstrate design rule 10 — a launch unit spanning epics, which
+# is only expressible when labels attach at the requirement. `requirements.feature_fk`
+# is gone, so there is no per-requirement label to disagree with the step's epic
+# and nothing left to demonstrate. #3105 is NOT lost from the fixture: plan step 19
+# links it directly (`reqs` = [3080, 3083, 3105]), so it arrives through the same
+# step link as every other requirement here, and the epic it used to add by hand —
+# Swarm Substrate Rebuild — is already the first epic the plan's own rows produce.
+# Verified against the live plan before the constant was deleted: the requirement
+# set is 67 rows with or without it.
 
 # The s0.4 dual-condition gate (req #3080, plan stage 0): "#3050 session completed
 # AND 2h time gate 06:31:38 PDT — DUAL-condition gate, two independent wait
@@ -243,34 +284,46 @@ def main():
             'bounded slices, or narrow the projection, and re-run.' % truncated[0]['_truncated'])
     live = {r['id']: r for r in requirement_rows if isinstance(r, dict) and 'id' in r}
 
+    # ---- machines: production id -> hostname, read LIVE ------------------
+    # ABORT on an empty read rather than generating from it, for the same reason
+    # the truncation guard above exists: every machine would silently resolve to
+    # NULL, the fixture would LOAD CLEAN, and every requirement would claim it is
+    # pinned to no machine. A wrong fixture that loads is worse than no fixture.
+    machine_rows = mcp_read('darwin://machines')
+    machine_hosts = {
+        m['id']: m['hostname']
+        for m in machine_rows
+        if isinstance(m, dict) and m.get('id') is not None and m.get('hostname')
+    }
+    if not machine_hosts:
+        raise SystemExit(
+            'darwin://machines returned no usable rows — refusing to generate a '
+            'fixture in which every machine_fk resolves to NULL. Check the read '
+            'and re-run.')
+    if PIPELINE_MACHINE not in machine_hosts:
+        raise SystemExit(
+            "machine #%d — the machine this plan ran on — is absent from "
+            "darwin://machines, so the pipeline row's own machine_fk cannot be "
+            "resolved. Check the machines registry and re-run." % PIPELINE_MACHINE)
+
     # ---- epics: first-appearance order in the plan ----------------------
+    # Each plan row still carries a `feature` label as well as an `epic` one, and
+    # it is now deliberately UNREAD (req #3355) — there is no table to put it in.
+    # Left in the PLAN-JSON rather than stripped: the plan is the user's document
+    # and this generator is only a reader of it.
     epic_names = []
     for row in rows:
         if row['epic'] not in epic_names:
             epic_names.append(row['epic'])
-    for _, epic in CROSS_EPIC.values():
-        if epic not in epic_names:
-            epic_names.append(epic)
     epic_id = {name: EPIC_BASE + i + 1 for i, name in enumerate(epic_names)}
 
-    # ---- features: (feature label, epic) pairs, first-appearance order ---
-    feature_pairs = []
-    for row in rows:
-        pair = (row['feature'], row['epic'])
-        if pair not in feature_pairs:
-            feature_pairs.append(pair)
-    for pair in CROSS_EPIC.values():
-        if pair not in feature_pairs:
-            feature_pairs.append(pair)
-    feature_id = {pair: FEATURE_BASE + i + 1 for i, pair in enumerate(feature_pairs)}
-
-    # ---- requirement -> feature ------------------------------------------
-    req_feature = {}
-    for row in rows:
-        for rid in row['reqs']:
-            req_feature.setdefault(rid, (row['feature'], row['epic']))
-    req_feature.update(CROSS_EPIC)
-    req_ids = sorted(req_feature)
+    # ---- the requirement set: every requirement a step actually links ----
+    # Derived straight from the step links, which is the only association left
+    # after req #3355 dropped `requirements.feature_fk`. It used to be derived
+    # from the requirement -> feature map, which carried the same set plus
+    # whatever CROSS_EPIC added by hand; the plan links #3105 on step 19 anyway,
+    # so the two agree row-for-row on the live plan.
+    req_ids = sorted({rid for row in rows for rid in row['reqs']})
 
     # ---- shape facts the header REPORTS ---------------------------------
     # Computed, never spelled out in prose: the plan grows, and a header that
@@ -348,12 +401,17 @@ def main():
     w('--')
     w('-- Source plan: requirement #%d, %d rows, %d distinct requirements,'
       % (REQ_ID, len(rows), len(req_ids)))
-    w('--              %d epics, %d features.' % (len(epic_names), len(feature_pairs)))
+    w('--              %d epics.' % len(epic_names))
+    w('--')
+    w('-- NO FEATURE LAYER (req #3355). Migration 20260811033413 dropped `features`,')
+    w('-- `feature_test_cases` and `requirements.feature_fk`, so this fixture emits')
+    w('-- neither the feature rows nor the requirement->feature link it used to. A')
+    w('-- requirement reaches this plan through its STEP LINK and nothing else. Epics')
+    w('-- are unaffected and still emitted.')
     w('--')
     w('-- ## Id allocation (explicit, so this file is idempotent and self-scoping)')
     w('--')
     w('--   epics                %d..%d' % (EPIC_BASE + 1, EPIC_BASE + len(epic_names)))
-    w('--   features             %d..%d' % (FEATURE_BASE + 1, FEATURE_BASE + len(feature_pairs)))
     w('--   pipelines            %d' % PIPELINE_ID)
     w('--   pipeline_steps       %d + the plan step id (see below)' % STEP_BASE)
     w('--   projects/categories  %d / %d — owned by the fixture, created idempotently'
@@ -399,18 +457,18 @@ def main():
     # list of counts would make the reader zip them across a line break.
     for line in wrap_comment(', '.join('%s(%d)' % pair for pair in multi_req_steps) + '.'):
         w('--                          ' + line)
-    w('--   * cross-epic step      step 19 — #3105 sits under a different epic than the')
-    w('--                          step\'s dominant label, which is why labels attach at')
-    w('--                          the requirement (design rule 10).')
     w('--   * dropped-without-     requirements the user pulled from the plan (#3065/#3074')
     w('--     residue              era) simply are not here — no tombstones, no residue.')
     w('--')
     w('-- Requirement rows are upserted with their LIVE metadata (title, status, model,')
     w('-- effort) because step state is DERIVED from requirement status (design rule 1):')
     w('-- without real statuses the fixture would render every step Scheduled and prove')
-    w('-- nothing. machine_fk is remapped production->darwin_dev (%s); unmappable values'
-      % ', '.join(f'{k}->{v}' for k, v in sorted(MACHINE_MAP.items())))
-    w('-- become NULL ("Any").')
+    w('-- nothing. machine_fk carries no cross-database id: the plan\'s production')
+    w('-- machine is emitted as a HOSTNAME lookup resolved against whichever `machines`')
+    w('-- table this file is loaded into (%s), so a rebuilt darwin_dev'
+      % ', '.join('#%d=%s' % (k, v) for k, v in sorted(machine_hosts.items())))
+    w('-- re-registering its machines under new ids cannot break the load. A hostname')
+    w('-- the target does not know resolves to NULL ("Any").')
     w('--')
     w('-- ## DERIVED STATE vs the plan\'s stored `state`')
     w('--')
@@ -536,18 +594,16 @@ def main():
       '(SELECT id FROM pipeline_steps WHERE pipeline_fk = %d);' % PIPELINE_ID)
     w('DELETE FROM pipeline_steps WHERE pipeline_fk = %d;' % PIPELINE_ID)
     w('DELETE FROM pipelines WHERE id = %d;' % PIPELINE_ID)
-    w('-- Detach requirements before features go, so fk_requirements_feature (SET NULL)')
-    w('-- never has to fire mid-load and leave a half-linked state.')
+    w('--')
+    w('-- There is no `features` teardown any more, and no requirement detach before it')
+    w('-- (req #3355): migration 20260811033413 dropped the table and the')
+    w('-- `requirements.feature_fk` column that used to need clearing first.')
     w('--')
     w('-- Scoped to the EXACT ids this file is about to insert, never a BETWEEN range.')
     w('-- Explicit ids at %d+ leave AUTO_INCREMENT immediately above the fixture band, so'
-      % (FEATURE_BASE + 1))
+      % (EPIC_BASE + 1))
     w('-- the next organically-created row lands exactly where a growing range would')
-    w('-- expand — and a later plan with one more feature label would delete it.')
-    w('UPDATE requirements SET feature_fk = NULL WHERE feature_fk IN (%s);'
-      % ', '.join(str(feature_id[pair]) for pair in feature_pairs))
-    w('DELETE FROM features WHERE id IN (%s);'
-      % ', '.join(str(feature_id[pair]) for pair in feature_pairs))
+    w('-- expand — and a later plan with one more epic label would delete it.')
     w('DELETE FROM epics WHERE id IN (%s);'
       % ', '.join(str(epic_id[name]) for name in epic_names))
     w('')
@@ -579,7 +635,9 @@ def main():
 
     # ---- epics ----------------------------------------------------------
     w('-- ---------------------------------------------------------------------------')
-    w('-- Epics (%d) — the top of Epic > Feature > Story.' % len(epic_names))
+    w('-- Epics (%d) — one per distinct epic label in the plan. Since req #3355 dropped' % len(epic_names))
+    w('-- the Feature layer, nothing in this fixture points at them: a requirement now')
+    w('-- reaches its epic only through the step that links it.')
     w('-- ---------------------------------------------------------------------------')
     w('INSERT INTO epics (id, title, description, category_fk, creator_fk, sort_order) VALUES')
     values = []
@@ -591,31 +649,10 @@ def main():
     w(',\n'.join(values) + ';')
     w('')
 
-    # ---- features -------------------------------------------------------
-    w('-- ---------------------------------------------------------------------------')
-    w('-- Features (%d) — one per distinct feature label, linked to its epic.' % len(feature_pairs))
-    w('-- ---------------------------------------------------------------------------')
-    w('INSERT INTO features (id, title, description, feature_status, epic_fk, '
-      'category_fk, creator_fk, sort_order) VALUES')
-    values = []
-    for i, pair in enumerate(feature_pairs):
-        label, epic = pair
-        note = ('Feature under epic "%s", from the Substrate Rebuild plan (req #%d).'
-                % (epic, REQ_ID))
-        if pair in CROSS_EPIC.values():
-            note = ('Carries the cross-epic requirement in plan step 19 — the launch unit '
-                    'spans epics, which is why labels attach at the requirement '
-                    '(req #3080 design rule 10).')
-        values.append('  (%d, %s, %s, %s, %d, %d, %s, %d)' % (
-            feature_id[pair], q(label), q(note), q('active'),
-            epic_id[epic], FIXTURE_CATEGORY, q(CREATOR), i))
-    w(',\n'.join(values) + ';')
-    w('')
-
     # ---- requirement stubs ----------------------------------------------
     w('-- ---------------------------------------------------------------------------')
-    w('-- Requirements (%d) — upserted with live metadata, then filed under their' % len(req_ids))
-    w('-- feature. pipeline_step_requirements.requirement_fk is ON DELETE RESTRICT, so')
+    w('-- Requirements (%d) — every requirement some step links, upserted with live' % len(req_ids))
+    w('-- metadata. pipeline_step_requirements.requirement_fk is ON DELETE RESTRICT, so')
     w('-- every referenced requirement must exist before the junction rows load.')
     w('--')
     w('-- ON DUPLICATE KEY UPDATE, not plain INSERT: darwin_dev already holds some of')
@@ -623,14 +660,14 @@ def main():
     w('-- from it) without disturbing anything else about the row.')
     w('-- ---------------------------------------------------------------------------')
     w('INSERT INTO requirements (id, title, requirement_status, coordination_type, '
-      'ai_model, effort, category_fk, creator_fk, machine_fk, feature_fk, '
+      'ai_model, effort, category_fk, creator_fk, machine_fk, '
       'tracking, started_at, completed_at) VALUES')
     values = []
     for rid in req_ids:
         src = live.get(rid, {})
         title = src.get('title') or f'Requirement #{rid} (not resolvable at fixture-generation time)'
-        machine = MACHINE_MAP.get(src.get('machine_fk'))
-        values.append('  (%d, %s, %s, %s, %s, %s, %d, %s, %s, %d, %d, %s, %s)' % (
+        machine = machine_ref(src.get('machine_fk'), machine_hosts)
+        values.append('  (%d, %s, %s, %s, %s, %s, %d, %s, %s, %d, %s, %s)' % (
             rid,
             q(title[:256]),
             q(src.get('requirement_status') or 'authoring'),
@@ -639,8 +676,7 @@ def main():
             q(src.get('effort') or 'high'),
             FIXTURE_CATEGORY,
             q(CREATOR),
-            q(machine),
-            feature_id[req_feature[rid]],
+            machine,
             1 if rid in tracking_ids else 0,
             q(src.get('started_at')),
             q(src.get('completed_at'))))
@@ -652,7 +688,6 @@ def main():
     w('  ai_model = new.ai_model,')
     w('  effort = new.effort,')
     w('  machine_fk = new.machine_fk,')
-    w('  feature_fk = new.feature_fk,')
     # In the UPDATE arm too, not just the INSERT arm: darwin_dev already holds
     # most of these ids, so a fixture that only set the flag on first insert
     # would leave a stale 0 on the very row the exemption is about.
@@ -671,9 +706,10 @@ def main():
             'max-parallel feature DAG. Source of truth: requirement #%d.' % REQ_ID)
     w('INSERT INTO pipelines (id, title, description, pipeline_status, machine_fk, '
       'creator_fk, started_at) VALUES')
-    w('  (%d, %s, %s, %s, %d, %s, %s);' % (
+    w('  (%d, %s, %s, %s, %s, %s, %s);' % (
         PIPELINE_ID, q(plan['plan']), q(goal), q('active'),
-        MACHINE_MAP[2], q(CREATOR), q('2026-07-24 00:00:00')))
+        machine_ref(PIPELINE_MACHINE, machine_hosts),
+        q(CREATOR), q('2026-07-24 00:00:00')))
     w('')
 
     # ---- steps ----------------------------------------------------------
@@ -783,9 +819,8 @@ def main():
         with open(OUT, 'w') as handle:
             handle.write(sql)
         print(f'wrote {OUT}')
-        print(f'  {len(epic_names)} epics, {len(feature_pairs)} features, '
-              f'{len(req_ids)} requirements, {len(rows)} steps, '
-              f'{len(links)} links, {len(step_deps)} deps')
+        print(f'  {len(epic_names)} epics, {len(req_ids)} requirements, '
+              f'{len(rows)} steps, {len(links)} links, {len(step_deps)} deps')
 
 
 if __name__ == '__main__':

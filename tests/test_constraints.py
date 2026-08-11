@@ -751,33 +751,11 @@ def test_map_run_stopped_time_default(db_connection, test_creator_fk):
 
 # ---------------------------------------------------------------------------
 # Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044)
+# `features` was dropped at req #3355 (migration 20260811033413); its FK/NOT
+# NULL/default coverage went with it.
 # ---------------------------------------------------------------------------
 
 # FK invalid-parent rejection tests
-
-def test_feature_fk_invalid_category(db_connection, test_creator_fk, seed_test_profile):
-    """INSERT feature with non-existent category_fk → IntegrityError"""
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute(
-                "INSERT INTO features (title, description, category_fk, creator_fk) "
-                "VALUES (%s, %s, %s, %s)",
-                ('orphan feature', 'desc', 999999, test_creator_fk)
-            )
-    db_connection.rollback()
-
-
-def test_feature_fk_invalid_creator(db_connection, test_category_id):
-    """INSERT feature with non-existent creator_fk → IntegrityError"""
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute(
-                "INSERT INTO features (title, description, category_fk, creator_fk) "
-                "VALUES (%s, %s, %s, %s)",
-                ('orphan', 'desc', test_category_id, 'nonexistent-profile-id')
-            )
-    db_connection.rollback()
-
 
 def test_test_case_fk_invalid_category(db_connection, test_creator_fk, seed_test_profile):
     """INSERT test_case with non-existent category_fk → IntegrityError"""
@@ -830,30 +808,6 @@ def test_test_result_fk_invalid_run(db_connection, test_creator_fk, seed_test_pr
 
 # NOT NULL constraint tests
 
-def test_feature_title_not_null(db_connection, test_creator_fk, test_category_id):
-    """INSERT feature with title=NULL → IntegrityError"""
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute(
-                "INSERT INTO features (title, description, category_fk, creator_fk) "
-                "VALUES (%s, %s, %s, %s)",
-                (None, 'desc', test_category_id, test_creator_fk)
-            )
-    db_connection.rollback()
-
-
-def test_feature_description_not_null(db_connection, test_creator_fk, test_category_id):
-    """INSERT feature with description=NULL → IntegrityError (features.description is NOT NULL)."""
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute(
-                "INSERT INTO features (title, description, category_fk, creator_fk) "
-                "VALUES (%s, %s, %s, %s)",
-                ('title', None, test_category_id, test_creator_fk)
-            )
-    db_connection.rollback()
-
-
 def test_test_case_steps_not_null(db_connection, test_creator_fk, test_category_id):
     """INSERT test_case with steps=NULL → IntegrityError"""
     with db_connection.cursor() as cur:
@@ -879,22 +833,6 @@ def test_test_case_expected_not_null(db_connection, test_creator_fk, test_catego
 
 
 # Default value tests
-
-def test_feature_status_default(db_connection, test_creator_fk, test_category_id):
-    """INSERT feature without feature_status → defaults to 'draft'."""
-    with db_connection.cursor() as cur:
-        cur.execute(
-            "INSERT INTO features (title, description, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s)",
-            ('default-status-check', 'desc', test_category_id, test_creator_fk)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        feature_id = cur.fetchone()['id']
-        cur.execute("SELECT feature_status FROM features WHERE id = %s", (feature_id,))
-        row = cur.fetchone()
-        assert row['feature_status'] == 'draft'
-    db_connection.rollback()
-
 
 def test_test_case_type_default(db_connection, test_creator_fk, test_category_id):
     """INSERT test_case without test_type → defaults to 'manual'."""
@@ -1016,41 +954,11 @@ def test_test_results_unique_run_case(db_connection, test_creator_fk, test_categ
 
 # Junction-table composite PK uniqueness
 
-def test_feature_test_cases_composite_pk(db_connection, test_creator_fk, test_category_id):
-    """Second INSERT feature_test_cases with same (feature_fk, test_case_fk) → IntegrityError."""
-    with db_connection.cursor() as cur:
-        cur.execute(
-            "INSERT INTO features (title, description, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s)",
-            ('f-dup', 'd', test_category_id, test_creator_fk)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        f_id = cur.fetchone()['id']
-        cur.execute(
-            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            ('tc-dup', '1', 'ok', test_category_id, test_creator_fk)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        tc_id = cur.fetchone()['id']
-
-        cur.execute(
-            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
-            (f_id, tc_id)
-        )
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute(
-                "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
-                (f_id, tc_id)
-            )
-    db_connection.rollback()
-
-
 # COVERS: SCH-031
 def test_requirement_test_cases_composite_pk(db_connection, test_creator_fk, test_category_id):
     """req #3352 — Second INSERT requirement_test_cases with same
-    (requirement_fk, test_case_fk) → IntegrityError. Mirrors
-    test_feature_test_cases_composite_pk above."""
+    (requirement_fk, test_case_fk) → IntegrityError (the successor of the
+    now-dropped feature_test_cases junction, req #3355)."""
     with db_connection.cursor() as cur:
         cur.execute(
             "INSERT INTO requirements (title, category_fk, creator_fk, "
@@ -1664,9 +1572,8 @@ def test_agent_instructions_delete_then_repost_swap_is_legal(
 #               and a requirement in a plan cannot be deleted.
 #   CASCADE   — the delete must take the children (pipeline -> steps, step ->
 #               its links and its own dep conditions).
-#   SET NULL  — the delete must DEMOTE, not destroy (epic -> features,
-#               feature -> requirements). Deleting an epic must never take
-#               requirement history with it.
+#   SET NULL  — the delete must DEMOTE, not destroy (e.g. requirements.project_fk).
+#               Deleting a parent must never take child history with it.
 # ---------------------------------------------------------------------------
 
 def _insert_epic(cur, creator_fk, category_fk, title=None):
@@ -1677,19 +1584,11 @@ def _insert_epic(cur, creator_fk, category_fk, title=None):
     return cur.lastrowid
 
 
-def _insert_feature(cur, creator_fk, category_fk, epic_fk=None):
+def _insert_requirement(cur, creator_fk, category_fk):
     cur.execute(
-        "INSERT INTO features (title, description, category_fk, creator_fk, epic_fk) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (f'feat-{uuid.uuid4().hex[:6]}', 'fixture feature', category_fk, creator_fk, epic_fk))
-    return cur.lastrowid
-
-
-def _insert_requirement(cur, creator_fk, category_fk, feature_fk=None):
-    cur.execute(
-        "INSERT INTO requirements (title, category_fk, creator_fk, ai_model, effort, feature_fk) "
-        "VALUES (%s, %s, %s, 'opus', 'high', %s)",
-        (f'req-{uuid.uuid4().hex[:6]}', category_fk, creator_fk, feature_fk))
+        "INSERT INTO requirements (title, category_fk, creator_fk, ai_model, effort) "
+        "VALUES (%s, %s, %s, 'opus', 'high')",
+        (f'req-{uuid.uuid4().hex[:6]}', category_fk, creator_fk))
     return cur.lastrowid
 
 
@@ -1723,7 +1622,7 @@ def test_epics_category_fk_invalid_rejected(db_connection, test_creator_fk):
 
 def test_epics_category_delete_restricted(db_connection, test_creator_fk, seed_test_profile):
     """epics -> categories is RESTRICT: you cannot orphan an epic by deleting its
-    category. Move it first. Same policy as requirements/features."""
+    category. Move it first. Same policy as requirements."""
     with db_connection.cursor() as cur:
         cur.execute("INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
                     ('epic-restrict proj', test_creator_fk))
@@ -1738,59 +1637,10 @@ def test_epics_category_delete_restricted(db_connection, test_creator_fk, seed_t
     db_connection.rollback()
 
 
-# --- features.epic_fk (SET NULL) -------------------------------------------
-
-def test_feature_epic_fk_set_null_on_epic_delete(
-        db_connection, test_creator_fk, test_category_id):
-    """Deleting an epic DEMOTES its features to unfiled — it must never delete
-    them. SET NULL is the only policy that allows the delete to succeed while
-    keeping the feature."""
-    with db_connection.cursor() as cur:
-        epic = _insert_epic(cur, test_creator_fk, test_category_id)
-        feature = _insert_feature(cur, test_creator_fk, test_category_id, epic_fk=epic)
-
-        cur.execute("DELETE FROM epics WHERE id = %s", (epic,))
-
-        cur.execute("SELECT epic_fk FROM features WHERE id = %s", (feature,))
-        row = cur.fetchone()
-        assert row is not None, 'deleting an epic must not delete its features'
-        assert row['epic_fk'] is None
-    db_connection.rollback()
-
-
-def test_feature_epic_fk_invalid_rejected(db_connection, test_creator_fk, test_category_id):
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            _insert_feature(cur, test_creator_fk, test_category_id, epic_fk=999999)
-    db_connection.rollback()
-
-
-# --- requirements.feature_fk (SET NULL) ------------------------------------
-
-def test_requirement_feature_fk_set_null_on_feature_delete(
-        db_connection, test_creator_fk, test_category_id):
-    """Deleting a feature must not delete requirement history — the requirement
-    is demoted to unfiled."""
-    with db_connection.cursor() as cur:
-        feature = _insert_feature(cur, test_creator_fk, test_category_id)
-        req = _insert_requirement(cur, test_creator_fk, test_category_id, feature_fk=feature)
-
-        cur.execute("DELETE FROM features WHERE id = %s", (feature,))
-
-        cur.execute("SELECT feature_fk FROM requirements WHERE id = %s", (req,))
-        row = cur.fetchone()
-        assert row is not None, 'deleting a feature must not delete its requirements'
-        assert row['feature_fk'] is None
-    db_connection.rollback()
-
-
-def test_requirement_feature_fk_invalid_rejected(
-        db_connection, test_creator_fk, test_category_id):
-    with db_connection.cursor() as cur:
-        with pytest.raises(pymysql.IntegrityError):
-            _insert_requirement(cur, test_creator_fk, test_category_id, feature_fk=999999)
-    db_connection.rollback()
-
+# `features` and `requirements.feature_fk` were dropped at req #3355
+# (migration 20260811033413) — the Feature tier's SET NULL/FK coverage went
+# with them. Pipeline 2.0 seats a step under an epic directly (epic_fk on the
+# step), never through Feature.
 
 # --- pipelines -------------------------------------------------------------
 

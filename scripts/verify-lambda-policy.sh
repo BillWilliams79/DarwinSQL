@@ -32,11 +32,16 @@ REGION="us-west-1"
 STAGE="eng"
 BASE_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/${STAGE}"
 
-# The 23 Sids req #3002 removes — the redundant apigateway-darwin-<table>
+# The 21 Sids req #3002 removes — the redundant apigateway-darwin-<table>
 # statements, all fully subsumed by apigateway-darwin-wildcard.
+# `apigateway-darwin-features` and `apigateway-darwin-feature_test_cases` left
+# this list at req #3355 (migration 20260811033413): the `features` and
+# `feature_test_cases` tables — and their `/darwin/*`, `/darwin_dev/*` gateway
+# resources — no longer exist, so there is nothing left to verify the absence
+# of a redundant statement FOR.
 REMOVED_SIDS=(
-    apigateway-darwin-features apigateway-darwin-test_cases
-    apigateway-darwin-feature_test_cases apigateway-darwin-test_plans
+    apigateway-darwin-test_cases
+    apigateway-darwin-test_plans
     apigateway-darwin-test_plan_cases apigateway-darwin-test_runs
     apigateway-darwin-test_results apigateway-darwin-swarm_starts
     apigateway-darwin-swarm_start_sessions apigateway-darwin-agents
@@ -82,9 +87,9 @@ ADDED_ACTUAL=$(comm -13 <(echo "$BEFORE_SIDS") <(echo "$AFTER_SIDS"))
 EXPECTED_REMOVED=$(printf '%s\n' "${REMOVED_SIDS[@]}" | sort)
 
 if [ "$REMOVED_ACTUAL" = "$EXPECTED_REMOVED" ]; then
-    pass "exactly the 23 target Sids were removed, nothing more / nothing less"
+    pass "exactly the 21 target Sids were removed, nothing more / nothing less"
 else
-    fail "removed-Sid set does not match the expected 23 — diff:"
+    fail "removed-Sid set does not match the expected 21 — diff:"
     diff <(echo "$EXPECTED_REMOVED") <(echo "$REMOVED_ACTUAL") >&2 || true
 fi
 
