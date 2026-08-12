@@ -1224,16 +1224,15 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_row_docs (
 CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);
 
 -- ---------------------------------------------------------------------------
--- Pipeline 2.0 — the plan layer (req #3328 design; parallel era)
+-- The plan layer (req #3328 design)
 -- ---------------------------------------------------------------------------
--- The plan layer. It stood BESIDE the first-generation five (`pipelines`,
--- `pipeline_steps`, `pipeline_step_requirements`, `pipeline_step_deps`,
--- `epics`) while both eras ran in parallel; that first generation was
--- archived and dropped at req #3356 (migration 20260812175325). Requirements
--- were never doubled: one `requirements` table, one plan layer above it. The
--- `2` in these table names is a transitional era marker scheduled for removal
--- once every consumer (schema, MCP surface, skills, frontend) is renamed in
--- one pass — see req #3356's own follow-on for that rename.
+-- It stood BESIDE the first-generation five (`pipelines`, `pipeline_steps`,
+-- `pipeline_step_requirements`, `pipeline_step_deps`, `epics`) while both
+-- eras ran in parallel; that first generation was archived and dropped at
+-- req #3356 (migration 20260812175325), and this layer was renamed into its
+-- freed plain names in the same requirement's second half (migration
+-- 20260812184333) — there is only one era now. Requirements were never
+-- doubled: one `requirements` table, one plan layer above it.
 --
 -- CONTAINMENT IS IN THE DDL, NOT IN CONVENTION. An epic belongs to exactly one
 -- pipeline and a step to exactly one epic, both NOT NULL. That single change is
