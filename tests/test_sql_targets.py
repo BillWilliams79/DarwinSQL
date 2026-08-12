@@ -141,7 +141,8 @@ def test_target_declarations_are_well_formed(path):
 
 RESTRICTED = {
     'scripts/recreate_darwin_dev.sql': ['darwin_dev'],
-    'scripts/seed_pipelines_darwin_dev.sql': ['darwin_dev'],
+    # `scripts/seed_pipelines_darwin_dev.sql` was here until req #3356 deleted
+    # it with the rest of the 1.0 plan layer.
     'migrations/057_drop_build_visualizer_from_production.sql': ['darwin'],
 }
 
@@ -155,7 +156,7 @@ def test_restricted_files_declare_their_target(relpath, expected):
 
 
 def test_recreate_darwin_dev_is_declared_destructive():
-    """It DROPs 53 tables. `--destructive` is the only way it runs."""
+    """It DROPs 52 tables. `--destructive` is the only way it runs."""
     path = os.path.join(DARWINSQL_ROOT, 'scripts', 'recreate_darwin_dev.sql')
     with open(path) as handle:
         body = handle.read()
@@ -238,20 +239,6 @@ def test_scratch_db_cannot_address_a_real_database():
         with pytest.raises(db_guard.GuardError, match='not a scratch database'):
             scratch_db.require_scratch_name(name)
     assert scratch_db.require_scratch_name('darwin_scratch_parity') == 'darwin_scratch_parity'
-
-
-def test_seed_pipelines_generator_emits_no_use_statement():
-    """The fixture .sql is GENERATED. Fixing the output without fixing the
-    generator would put the `USE` back on the next regeneration."""
-    path = os.path.join(DARWINSQL_ROOT, 'scripts', 'seed_pipelines_darwin_dev.py')
-    with open(path) as handle:
-        source = handle.read()
-    assert "w('USE " not in source, (
-        'seed_pipelines_darwin_dev.py emits a USE statement into the fixture'
-    )
-    assert "w('-- darwin:targets = darwin_dev')" in source, (
-        'seed_pipelines_darwin_dev.py must emit the darwin_dev target declaration'
-    )
 
 
 # ---------------------------------------------------------------------------

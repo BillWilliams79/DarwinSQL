@@ -87,11 +87,11 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # parallel-era family. Order does not matter here — measured with the
         # real regex, no new name matches inside any other new name or any 1.0
         # name in either direction — but listed longest-first as house style.
-        'pipeline2_step_requirements',
-        'pipeline2_step_deps',
-        'pipeline2_steps',
-        'pipeline2_epics',
-        'pipeline2_pipelines',
+        'pipeline_step_requirements',
+        'pipeline_step_deps',
+        'pipeline_steps',
+        'epics',
+        'pipelines',
         # Req #3096 — per-document actual-token rows (migration 074), child of
         # agent_telemetry_rows. Listed before agent_telemetry_rows/runs (longest-
         # first): agent_telemetry_row_docs must precede the shorter `agents` token
@@ -268,7 +268,7 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Migration 20260808115509 — Pipeline 2.0 plan layer (req #3337).
         # 11 fk_p2_*, 1 uq_p2_*, 3 ix_p2_* (the fourth, ix_p2_psr_requirement_fk,
         # does not exist — the stage-2 gate ruling made requirement_fk the sole
-        # PRIMARY KEY of pipeline2_step_requirements, which already serves that
+        # PRIMARY KEY of pipeline_step_requirements, which already serves that
         # lookup). The three ix_p2_* names are, like ix_orchestration_claims_epic_fk
         # above, NOT optional: CREATE INDEX has no IF NOT EXISTS in MySQL.
         'fk_p2_pipelines_machine', 'fk_p2_pipelines_creator',
@@ -280,6 +280,25 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'ix_p2_epics_pipeline_fk', 'ix_p2_steps_epic_fk', 'ix_p2_psd_dep_step_fk',
         # Migration 20260809002149 — requirement_test_cases (req #3352)
         'fk_rtc_requirement', 'fk_rtc_case',
+        # Migration 20260812184333 — rename pipeline2_* to plain (req #3356).
+        # `fk_pipelines_machine`/`_creator`, `fk_psr_step`/`_requirement`,
+        # `fk_psd_step`/`_dep_step`, `uq_pipeline_step_deps`,
+        # `ix_pipeline_steps_pipeline_fk`... wait, no: those five plus
+        # `ix_psr_requirement_fk`/`ix_psd_dep_step_fk` are ALREADY registered
+        # above (migration 076) and this migration's `ADD CONSTRAINT`/
+        # `RENAME INDEX` calls reuse those exact freed names, so the existing
+        # entries already cover them via the same string-replace. Only the
+        # names that are NEW in this migration — not reused from migration
+        # 076 — need adding:
+        'fk_epics_pipeline', 'ix_epics_pipeline_fk',
+        'fk_pipeline_steps_epic', 'ix_pipeline_steps_epic_fk',
+        # `fk_swarm_sessions_pipeline`/`_epic` are ALSO reused-from-076 names
+        # (see above) and so are already covered; `fk_swarm_sessions_pipeline2`/
+        # `_epic2` (migration 20260809081441, req #3350) were NEVER registered
+        # at all — a pre-existing gap this migration's own DROP FOREIGN KEY
+        # calls exposed (every ALTER on the prefixed `swarm_sessions` touching
+        # these four names was silently skipped by tolerant mode until now).
+        'fk_swarm_sessions_pipeline2', 'fk_swarm_sessions_epic2',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -356,14 +375,17 @@ ALL_TABLE_SUFFIXES = [
     'orchestration_claims',
     # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509), parallel
     # era. Placed BEFORE the 1.0 pipeline family, leaves first: deps/links, then
-    # steps, then epics, then pipelines. Unlike 1.0's epics, pipeline2_epics
+    # steps, then epics, then pipelines. Unlike 1.0's epics, epics
     # needs no relationship to features — 2.0's epic has no feature_fk pointing
     # at it — so it drops with its own family instead of near features below.
-    'pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
-    'pipeline2_epics', 'pipeline2_pipelines',
-    # Req #3111 — Swarm Orchestration foundation. FK-safe order: the dep/link
-    # leaves, then steps, then pipelines. `epics` drops near features (below),
-    # since features.epic_fk is SET NULL and imposes no ordering of its own.
+    'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
+    'epics', 'pipelines',
+    # Req #3111 — Swarm Orchestration 1.0. The tables were DROPPED from every
+    # live database by req #3356 (migration 20260812175325), but migration 076
+    # still CREATES them during a replay, so their prefixed copies still have to
+    # be cleaned up. FK-safe order: the dep/link leaves, then steps, then
+    # pipelines. `epics` drops near features (below), since features.epic_fk is
+    # SET NULL and imposes no ordering of its own.
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps', 'pipelines',
     # Req #3096 — per-document actual-token rows, child of agent_telemetry_rows.
     # Req #3031 — agent context telemetry. FK-safe: row_docs, then rows, then runs.
@@ -414,9 +436,14 @@ ALL_TABLE_SUFFIXES = [
 def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
     """§ 5.4 item 2: the five 2.0 names precede the 1.0 pipeline family, and
     within the 2.0 family the edge tables precede steps precede epics precede
-    pipelines — leaves first."""
-    p2 = ['pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
-          'pipeline2_epics', 'pipeline2_pipelines']
+    pipelines — leaves first.
+
+    Still live after req #3356 dropped the 1.0 tables: this list governs the
+    REPLAY cleanup, and migration 076 still creates prefixed 1.0 copies that
+    have to come down in FK-safe order.
+    """
+    p2 = ['pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
+          'epics', 'pipelines']
     p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps')
 
     p2_positions = [ALL_TABLE_SUFFIXES.index(name) for name in p2]
@@ -612,17 +639,22 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'agent_telemetry_runs', 'agent_telemetry_rows',
             # Req #3096 — per-document actual-token rows (migration 074)
             'agent_telemetry_row_docs',
-            # Req #3111 — Swarm Orchestration foundation (migration 076)
-            'epics',
-            'pipelines', 'pipeline_steps',
-            'pipeline_step_requirements', 'pipeline_step_deps',
+            # Req #3111 — Swarm Orchestration 1.0 (migration 076) CREATES
+            # `epics`, `pipelines`, `pipeline_steps`,
+            # `pipeline_step_requirements` and `pipeline_step_deps`; req #3356
+            # (migration 20260812175325) DROPS all five. Like the Feature and
+            # Build Visualizer tables above, they are created and destroyed
+            # inside the replay and so do NOT appear in the final state. Their
+            # names stay in `table_names`, `named_constraints` and
+            # `ALL_TABLE_SUFFIXES` — those registries describe the migrations
+            # the replay REPLAYS, not the current schema, and dropping a name
+            # from them would let 076's CREATE land unprefixed on darwin_dev.
             # Req #3224 — the durable orchestration reservation
             # (migration 20260801150404)
             'orchestration_claims',
-            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509),
-            # parallel era. Stands beside the 1.0 five above; not a replacement.
-            'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
-            'pipeline2_step_requirements', 'pipeline2_step_deps',
+            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
+            'pipelines', 'epics', 'pipeline_steps',
+            'pipeline_step_requirements', 'pipeline_step_deps',
             # Req #3352 — requirement_test_cases (migration 20260809002149),
             # the sole test-case junction since req #3355 dropped
             # feature_test_cases.
