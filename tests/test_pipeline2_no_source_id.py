@@ -5,7 +5,7 @@ file asserts is a property of `schema.sql`'s own text, so it runs anywhere,
 exactly like `test_migration_naming.py`.
 
 memory/pipeline-2-data-architecture.md § 7.1: the three id-mapped 2.0 tables
-(pipeline2_pipelines, pipeline2_epics, pipeline2_steps) have no natural key
+(pipelines, epics, pipeline_steps) have no natural key
 back to their 1.0 source row, and the answer is deliberately NOT a stored
 `source_id` column — "schema that exists only for the migration, survives
 eradication, and states a fact about a table that will not exist." The
@@ -26,8 +26,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _SCHEMA_PATH = os.path.join(_REPO_ROOT, 'schema.sql')
 
 _PIPELINE2_TABLES = (
-    'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
-    'pipeline2_step_requirements', 'pipeline2_step_deps',
+    'pipelines', 'epics', 'pipeline_steps',
+    'pipeline_step_requirements', 'pipeline_step_deps',
 )
 
 

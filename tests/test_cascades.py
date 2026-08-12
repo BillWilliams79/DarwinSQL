@@ -1457,7 +1457,7 @@ def test_delete_profile_cascades_to_row_docs(db_connection):
 
 
 # ============================================================================
-# swarm_sessions orchestration attribution. `pipeline2_fk` and `epic2_fk` are
+# swarm_sessions orchestration attribution. `pipeline_fk` and `epic_fk` are
 # ON DELETE SET NULL, and that choice is the whole safety argument for the
 # columns: session history must never be the reason a plan or an epic cannot be
 # deleted. RESTRICT here would be the grief-lock shape req #3125 catalogues — a
@@ -1475,7 +1475,7 @@ def test_delete_profile_cascades_to_row_docs(db_connection):
 # ============================================================================
 
 def test_delete_pipeline_sets_session_pipeline2_fk_null(db_connection):
-    """DELETE plan → swarm_sessions.pipeline2_fk = NULL, session survives."""
+    """DELETE plan → swarm_sessions.pipeline_fk = NULL, session survives."""
     test_creator = 'cascade-test-attribution-pipeline'
 
     with db_connection.cursor() as cur:
@@ -1484,14 +1484,14 @@ def test_delete_pipeline_sets_session_pipeline2_fk_null(db_connection):
             (test_creator, 'Cascade Test Profile', 'cascade-attr-p@test.com')
         )
         cur.execute(
-            "INSERT INTO pipeline2_pipelines (title, creator_fk) VALUES (%s, %s)",
+            "INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
             ('cascade-test-plan', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         pipeline_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO swarm_sessions (swarm_status, task_name, pipeline2_fk, creator_fk) "
+            "INSERT INTO swarm_sessions (swarm_status, task_name, pipeline_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s)",
             ('active', 'cascade-test-task', pipeline_id, test_creator)
         )
@@ -1499,14 +1499,14 @@ def test_delete_pipeline_sets_session_pipeline2_fk_null(db_connection):
         session_id = cur.fetchone()['id']
 
         # The delete must SUCCEED — a RESTRICT here would raise 1451.
-        cur.execute("DELETE FROM pipeline2_pipelines WHERE id = %s", (pipeline_id,))
+        cur.execute("DELETE FROM pipelines WHERE id = %s", (pipeline_id,))
 
-        cur.execute("SELECT pipeline2_fk, task_name FROM swarm_sessions WHERE id = %s",
+        cur.execute("SELECT pipeline_fk, task_name FROM swarm_sessions WHERE id = %s",
                     (session_id,))
         row = cur.fetchone()
         assert row is not None, "session was deleted; SET NULL must preserve it"
-        assert row['pipeline2_fk'] is None, \
-            "pipeline2_fk should be NULLed by ON DELETE SET NULL"
+        assert row['pipeline_fk'] is None, \
+            "pipeline_fk should be NULLed by ON DELETE SET NULL"
         assert row['task_name'] == 'cascade-test-task', \
             "the rest of the session must survive the cascade unchanged"
 
@@ -1514,10 +1514,10 @@ def test_delete_pipeline_sets_session_pipeline2_fk_null(db_connection):
 
 
 def test_delete_epic_sets_session_epic2_fk_null(db_connection, test_category_id):
-    """DELETE epic → swarm_sessions.epic2_fk = NULL, session survives.
+    """DELETE epic → swarm_sessions.epic_fk = NULL, session survives.
 
     The epic is deleted DIRECTLY, not through its pipeline: deleting the
-    pipeline would cascade to the epic and NULL the session's `pipeline2_fk`
+    pipeline would cascade to the epic and NULL the session's `pipeline_fk`
     too, so a passing assertion would not tell you which FK did the work.
     """
     test_creator = 'cascade-test-attribution-epic'
@@ -1528,13 +1528,13 @@ def test_delete_epic_sets_session_epic2_fk_null(db_connection, test_category_id)
             (test_creator, 'Cascade Test Profile', 'cascade-attr-e@test.com')
         )
         cur.execute(
-            "INSERT INTO pipeline2_pipelines (title, creator_fk) VALUES (%s, %s)",
+            "INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
             ('cascade-test-epic-plan', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         pipeline_id = cur.fetchone()['id']
         cur.execute(
-            "INSERT INTO pipeline2_epics (pipeline_fk, title, category_fk, creator_fk) "
+            "INSERT INTO epics (pipeline_fk, title, category_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s)",
             (pipeline_id, 'cascade-test-epic', test_category_id, test_creator)
         )
@@ -1542,21 +1542,21 @@ def test_delete_epic_sets_session_epic2_fk_null(db_connection, test_category_id)
         epic_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO swarm_sessions (swarm_status, task_name, epic2_fk, creator_fk) "
+            "INSERT INTO swarm_sessions (swarm_status, task_name, epic_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s)",
             ('active', 'cascade-test-task', epic_id, test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         session_id = cur.fetchone()['id']
 
-        cur.execute("DELETE FROM pipeline2_epics WHERE id = %s", (epic_id,))
+        cur.execute("DELETE FROM epics WHERE id = %s", (epic_id,))
 
-        cur.execute("SELECT epic2_fk, task_name FROM swarm_sessions WHERE id = %s",
+        cur.execute("SELECT epic_fk, task_name FROM swarm_sessions WHERE id = %s",
                     (session_id,))
         row = cur.fetchone()
         assert row is not None, "session was deleted; SET NULL must preserve it"
-        assert row['epic2_fk'] is None, \
-            "epic2_fk should be NULLed by ON DELETE SET NULL"
+        assert row['epic_fk'] is None, \
+            "epic_fk should be NULLed by ON DELETE SET NULL"
         assert row['task_name'] == 'cascade-test-task', \
             "the rest of the session must survive the cascade unchanged"
 

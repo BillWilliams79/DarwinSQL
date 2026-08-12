@@ -90,8 +90,8 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM requirements WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
         # Req #3337: the Pipeline 2.0 plan layer.
-        # `pipeline2_step_requirements.requirement_fk` and
-        # `pipeline2_step_deps.dep_step_fk` are both ON DELETE RESTRICT, so the
+        # `pipeline_step_requirements.requirement_fk` and
+        # `pipeline_step_deps.dep_step_fk` are both ON DELETE RESTRICT, so the
         # plan graph MUST be torn down before requirements and steps — a
         # leftover row blocks the deletes below. (The identical 1.0 teardown
         # stood here until req #3356, migration 20260812175325, dropped that
@@ -107,19 +107,19 @@ def seed_test_profile(db_connection, test_creator_fk):
         # teardown down with it — leaking the test profile, domain, area,
         # project and category into darwin_dev for every later run to
         # accumulate on.
-        cur.execute("DELETE FROM pipeline2_step_deps WHERE step_fk IN "
-                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s) "
+        cur.execute("DELETE FROM pipeline_step_deps WHERE step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
                     "OR dep_step_fk IN "
-                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s)",
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline2_step_requirements WHERE step_fk IN "
-                    "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s) "
+        cur.execute("DELETE FROM pipeline_step_requirements WHERE step_fk IN "
+                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
                     "OR requirement_fk IN "
                     "(SELECT id FROM requirements WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline2_steps WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM pipeline2_epics WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM pipeline2_pipelines WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
         # Req #2943: swarm_starts + machines. machine_fk is ON DELETE RESTRICT on
@@ -152,7 +152,7 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM test_plans WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_plans WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
-        # `pipeline2_epics -> categories` is RESTRICT; the epics are already
+        # `epics -> categories` is RESTRICT; the epics are already
         # cleared above, with the rest of the plan layer. (1.0's `epics` was
         # deleted here for the same reason until req #3356 dropped it.)
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
