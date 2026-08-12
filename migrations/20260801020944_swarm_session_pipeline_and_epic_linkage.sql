@@ -34,7 +34,8 @@
 --               advancing" has exactly one correct answer — the one true when it
 --               ran — and only a stamp preserves it.
 --
---           Precedent: memory/swarm-orchestration-doctrine.md §8. Req #3123 met
+--           Precedent: memory/pipeline-2-guide.md § 3.3 — the durable signal is
+--           the COLUMN, not a judgement made per session. Req #3123 met
 --           the same class of question (a durable signal the schema did not
 --           carry) and chose a COLUMN over a derivation in the engine, because
 --           choosing the signal is a schema decision.

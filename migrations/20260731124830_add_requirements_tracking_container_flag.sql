@@ -19,10 +19,12 @@
 --           REQUIREMENT and not of a plan or of a link: #3083 is a container
 --           whether or not any pipeline exists, and an epic-container
 --           requirement is a container in every plan that links it. Both kinds
---           memory/swarm-orchestration-doctrine.md §4 names are intrinsic.
+--           memory/pipeline-2-guide.md § 3.3 names — a requirement that holds a
+--           PLAN and one that holds an EPIC — are intrinsic.
 --
---           The obvious alternatives, and why not (full memo in
---           memory/swarm-orchestration.md):
+--           The obvious alternatives, and why not (the full memo was in
+--           memory/swarm-orchestration.md, deleted with the first generation at
+--           req #3356; both options are restated here so nothing is lost):
 --
 --             * `pipelines.tracking_requirement_fk` — records a global fact in a
 --               plan-scoped slot. One plan, one tracker; cannot express an
