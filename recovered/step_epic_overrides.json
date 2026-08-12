@@ -1,0 +1,37 @@
+{
+  "_why": [
+    "Explicit, human-reviewed epic placements for 1.0 steps that CANNOT resolve an",
+    "epic from their requirements, keyed source_pipeline_id -> source_step_id -> epic_id.",
+    "",
+    "A 1.0 step's epic was always DERIVED by tallying the epics of its linked",
+    "requirements (pipeline_derive.dominant_labels). A step with NO requirements is",
+    "a manual gate, so it has nothing to tally and resolves to None -- before req",
+    "#3355 dropped the Feature chain as much as after. import_plan_1to2.py refuses",
+    "to guess in that case (check_epic_resolution, section 7.2) and stops, which is",
+    "correct: a guessed epic silently mis-files a step forever.",
+    "",
+    "This file is the recorded ANSWER, not a guess, and each entry states how it was",
+    "determined so a reader can re-check it. Entries are only legitimate where the",
+    "graph settles the question; where it does not, the right move is still to stop",
+    "and ask."
+  ],
+  "overrides": {
+    "2": {
+      "11": {
+        "epic_id": 5,
+        "step_title": "Green Baseline",
+        "epic_title": "Swarm Cloned Git",
+        "determined_by": [
+          "Step 11 is the ONLY requirement-less step in 1.0 pipeline 2, so it is the",
+          "only entry this file needs.",
+          "Its immediate upstream (step 10 'Test Repair') derives epic 5.",
+          "Its immediate downstream (step 14 'Mirror Layer + Clone Substrate Core')",
+          "derives epic 5.",
+          "Its wider neighbourhood -- steps 9, 12, 13 -- also derives epic 5.",
+          "Both sides of the dependency graph agree, so the placement is forced."
+        ],
+        "recorded_by": "req #3485, 2026-08-12"
+      }
+    }
+  }
+}
