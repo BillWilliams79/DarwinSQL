@@ -32,8 +32,8 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS orchestration_claims,
-    pipeline2_step_deps, pipeline2_step_requirements, pipeline2_steps,
-    pipeline2_epics, pipeline2_pipelines,
+    pipeline_step_deps, pipeline_step_requirements, pipeline_steps,
+    epics, pipelines,
     agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
     customers,
@@ -208,7 +208,7 @@ CREATE TABLE machines (
 -- The 1.0 agile hierarchy (`epics`, req #3111 migration 076) was created here,
 -- above `requirements`. It was dropped whole at req #3356, migration
 -- 20260812175325, with the rest of the 1.0 plan layer; 2.0's own epic table is
--- `pipeline2_epics`, further down, and is contained by its pipeline rather than
+-- `epics`, further down, and is contained by its pipeline rather than
 -- standing above `requirements`. (The Feature tier — Epic > Feature > Story —
 -- and `requirements.feature_fk` had already gone at req #3355, migration
 -- 20260811033413.)
@@ -262,7 +262,7 @@ CREATE TABLE requirements (
 -- Swarm session management
 
 -- FK checks relaxed across this one CREATE: `swarm_sessions` forward-references
--- `pipeline2_pipelines`, which this script does not declare until much further
+-- `pipelines`, which this script does not declare until much further
 -- down (req #3350). Mirrors the identical relaxation in schema.sql, which this file
 -- must stay column-for-column identical to (see memory/database.md § parity gate).
 SET FOREIGN_KEY_CHECKS = 0;
@@ -290,8 +290,8 @@ CREATE TABLE swarm_sessions (
     -- requirement-link time; NULL = work outside any plan. (The 1.0 pair,
     -- `pipeline_fk`/`epic_fk`, req #3186, was archived and dropped at
     -- req #3356, migration 20260812175325.)
-    pipeline2_fk    INT             NULL DEFAULT NULL,
-    epic2_fk        INT             NULL DEFAULT NULL,
+    pipeline_fk     INT             NULL DEFAULT NULL,
+    epic_fk         INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     -- Phase accumulators (req #2332, migration 059)
@@ -338,11 +338,11 @@ CREATE TABLE swarm_sessions (
     CONSTRAINT fk_swarm_sessions_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_swarm_sessions_pipeline2
-        FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
+    CONSTRAINT fk_swarm_sessions_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_swarm_sessions_epic2
-        FOREIGN KEY (epic2_fk) REFERENCES pipeline2_epics (id)
+    CONSTRAINT fk_swarm_sessions_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE SET NULL
 );
 
@@ -1087,12 +1087,15 @@ CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row
 -- ============================================================================
 -- Swarm Orchestration 1.0 (req #3111, migration 076) — DROPPED
 -- ============================================================================
--- `pipelines`, `pipeline_steps`, `pipeline_step_requirements` and
--- `pipeline_step_deps` were declared here. All four were dropped whole at
--- req #3356, migration 20260812175325, together with `epics` and the 1.0
--- attribution columns on `swarm_sessions` and `orchestration_claims`. The
--- `pipeline2_*` five below are the live plan layer and carry the design
--- rules 1.0 expressed (no state column, no seq column, dependencies as rows).
+-- The first-generation `pipelines`, `pipeline_steps`,
+-- `pipeline_step_requirements`, `pipeline_step_deps` and `epics` were
+-- declared here, along with the 1.0 attribution columns on `swarm_sessions`
+-- and `orchestration_claims`. All were dropped whole at req #3356
+-- (migration 20260812175325); the five tables below are the surviving
+-- second-generation plan layer, renamed into these freed plain names in
+-- the same requirement's second half (migration 20260812184333). They
+-- carry the design rules the first generation expressed (no state column,
+-- no seq column, dependencies as rows).
 
 -- ---------------------------------------------------------------------------
 -- FIVE tables standing BESIDE the 1.0 five, not replacing them. Both eras run
@@ -1111,7 +1114,7 @@ CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row
 -- own them, so membership is an edge table. Three levels of ownership, one of
 -- membership — the one asymmetry in the chain, and deliberate.
 
-CREATE TABLE pipeline2_pipelines (
+CREATE TABLE pipelines (
     id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal; PURPOSE only (design rule 11)
@@ -1129,10 +1132,10 @@ CREATE TABLE pipeline2_pipelines (
     completed_at    TIMESTAMP    NULL,                     -- ditto; never passed by a caller
     create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_p2_pipelines_machine
+    CONSTRAINT fk_pipelines_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_p2_pipelines_creator
+    CONSTRAINT fk_pipelines_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
@@ -1154,7 +1157,7 @@ CREATE TABLE pipeline2_pipelines (
 -- this record's original NOT NULL DEFAULT 0): NULL = derived order (started
 -- epics by start date earliest-first, unstarted after in creation order); a
 -- non-NULL value is manual placement and wins over the derivation.
-CREATE TABLE pipeline2_epics (
+CREATE TABLE epics (
     id          INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     pipeline_fk INT          NOT NULL,                     -- CONTAINMENT
     title       VARCHAR(256) NOT NULL,
@@ -1166,18 +1169,18 @@ CREATE TABLE pipeline2_epics (
     creator_fk  VARCHAR(64)  NOT NULL,
     create_ts   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_p2_epics_pipeline
-        FOREIGN KEY (pipeline_fk) REFERENCES pipeline2_pipelines (id)
+    CONSTRAINT fk_epics_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_p2_epics_category
+    CONSTRAINT fk_epics_category
         FOREIGN KEY (category_fk) REFERENCES categories (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_p2_epics_creator
+    CONSTRAINT fk_epics_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE INDEX ix_p2_epics_pipeline_fk ON pipeline2_epics (pipeline_fk);
+CREATE INDEX ix_epics_pipeline_fk ON epics (pipeline_fk);
 
 -- NO `pipeline_fk`. A step's pipeline is its epic's, and § 6 shows the composed
 -- read costs one FEWER gateway read without it, not one more — so storing both
@@ -1201,7 +1204,7 @@ CREATE INDEX ix_p2_epics_pipeline_fk ON pipeline2_epics (pipeline_fk);
 -- `completed_at` stays a manual stamp valid ONLY for a step with no GATING
 -- requirement. A requirement-backed step's state is DERIVED and has no column,
 -- here as in 1.0.
-CREATE TABLE pipeline2_steps (
+CREATE TABLE pipeline_steps (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
     epic_fk      INT          NOT NULL,                     -- CONTAINMENT; the pipeline is derived
     title        VARCHAR(256) NOT NULL,
@@ -1212,15 +1215,15 @@ CREATE TABLE pipeline2_steps (
     creator_fk   VARCHAR(64)  NOT NULL,
     create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_p2_steps_epic
-        FOREIGN KEY (epic_fk) REFERENCES pipeline2_epics (id)
+    CONSTRAINT fk_pipeline_steps_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_p2_steps_creator
+    CONSTRAINT fk_pipeline_steps_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE INDEX ix_p2_steps_epic_fk ON pipeline2_steps (epic_fk);
+CREATE INDEX ix_pipeline_steps_epic_fk ON pipeline_steps (epic_fk);
 
 -- Membership, not ownership. Asymmetric on purpose and unchanged from 1.0:
 -- `step_fk` CASCADE because the links are the step's own data, `requirement_fk`
@@ -1237,15 +1240,15 @@ CREATE INDEX ix_p2_steps_epic_fk ON pipeline2_steps (epic_fk);
 -- this record's original composite PK: ONE STEP PER REQUIREMENT, structural (a
 -- requirement must not run twice; duplicate it if it needs to run 2). `step_fk`
 -- stays NOT NULL beside it. No `ix_p2_psr_requirement_fk`: the PK already serves
--- lookup by `requirement_fk`, and the `fk_p2_psr_step` FK auto-index covers
+-- lookup by `requirement_fk`, and the `fk_psr_step` FK auto-index covers
 -- lookup by `step_fk` for the composed read.
-CREATE TABLE pipeline2_step_requirements (
+CREATE TABLE pipeline_step_requirements (
     step_fk        INT NOT NULL,
     requirement_fk INT NOT NULL PRIMARY KEY,
-    CONSTRAINT fk_p2_psr_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline2_steps (id)
+    CONSTRAINT fk_psr_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_p2_psr_requirement
+    CONSTRAINT fk_psr_requirement
         FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
         ON UPDATE CASCADE ON DELETE RESTRICT
 );
@@ -1278,20 +1281,20 @@ CREATE TABLE pipeline2_step_requirements (
 -- AN EDGE MAY NOT CROSS AN EPIC, and the schema cannot say so — the constraint
 -- is between two rows' parents. Enforced in the service layer, the same place
 -- the cycle check and the cross-pipeline check already live.
-CREATE TABLE pipeline2_step_deps (
+CREATE TABLE pipeline_step_deps (
     id          INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
     step_fk     INT NOT NULL,
     dep_step_fk INT NOT NULL,                              -- NOT NULL: the time gate is a step column now
-    UNIQUE KEY uq_p2_step_deps (step_fk, dep_step_fk),
-    CONSTRAINT fk_p2_psd_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline2_steps (id)
+    UNIQUE KEY uq_pipeline_step_deps (step_fk, dep_step_fk),
+    CONSTRAINT fk_psd_step
+        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_p2_psd_dep_step
-        FOREIGN KEY (dep_step_fk) REFERENCES pipeline2_steps (id)
+    CONSTRAINT fk_psd_dep_step
+        FOREIGN KEY (dep_step_fk) REFERENCES pipeline_steps (id)
         ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
-CREATE INDEX ix_p2_psd_dep_step_fk ON pipeline2_step_deps (dep_step_fk);
+CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
 
 -- Orchestration reservations (req #3224, migration 20260801150404).
 --
@@ -1311,9 +1314,9 @@ CREATE INDEX ix_p2_psd_dep_step_fk ON pipeline2_step_deps (dep_step_fk);
 
 CREATE TABLE orchestration_claims (
     id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    pipeline2_fk  INT          NULL DEFAULT NULL,       -- scope; NULL only if epic2_fk names it
-    epic2_fk      INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
-    epic2_key     INT          AS (COALESCE(epic2_fk, 0)) VIRTUAL, -- carries uq_..._scope2
+    pipeline_fk   INT          NULL DEFAULT NULL,       -- scope; NULL only if epic_fk names it
+    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
+    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL, -- carries uq_..._scope
     machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
     terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
     engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
@@ -1322,12 +1325,12 @@ CREATE TABLE orchestration_claims (
     creator_fk    VARCHAR(64)  NOT NULL,
     create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
-    UNIQUE KEY uq_orchestration_claims_scope2 (pipeline2_fk, epic2_key),
-    CONSTRAINT fk_oc_pipeline2
-        FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
+    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
+    CONSTRAINT fk_oc_pipeline
+        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_oc_epic2
-        FOREIGN KEY (epic2_fk) REFERENCES pipeline2_epics (id)
+    CONSTRAINT fk_oc_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_oc_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
@@ -1337,4 +1340,4 @@ CREATE TABLE orchestration_claims (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE INDEX ix_orchestration_claims_epic2_fk ON orchestration_claims (epic2_fk);
+CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);
