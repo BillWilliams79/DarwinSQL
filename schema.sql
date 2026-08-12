@@ -1,5 +1,5 @@
 -- Darwin Database Schema — Current State
--- This file reflects the final state of all 57 tables after all migrations.
+-- This file reflects the final state of all 52 tables after all migrations.
 -- It can be run against a fresh MySQL instance to create the complete schema.
 -- Table order respects FK dependencies.
 --
@@ -179,49 +179,6 @@ CREATE TABLE IF NOT EXISTS machines (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- ============================================================================
--- Agile hierarchy: Epic > Feature > Story(requirement)  (req #3111, migration 076)
--- ============================================================================
--- `epics` and `features` are defined HERE, above `requirements`, so that
--- requirements.feature_fk resolves on a fresh end-to-end run of this file — the
--- same reason `machines` sits above the execution tables. The rest of the
--- validation family (test_cases, test_plans, test_runs, test_results and their
--- junctions) stays in the "Swarm Features & Test Cases registry" section below.
---
--- Labels attach at the REQUIREMENT level, never at a pipeline step (req #3080
--- design rule 10): a launch unit may legitimately span epics, and a step derives
--- its dominant label at render time instead of storing a wrong one.
-
-CREATE TABLE IF NOT EXISTS epics (
-    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title        VARCHAR(256) NOT NULL,
-    description  TEXT         NULL,
-    epic_status  VARCHAR(16)  NOT NULL DEFAULT 'active',  -- active|paused (req #3223,
-                                            -- migration 20260801125029). SUPPRESSION, not
-                                            -- lifecycle: `closed` still says an epic is
-                                            -- finished, this says whether its work may be
-                                            -- swarm-started. `paused` stops the Pipeline
-                                            -- Engine announcing launches for the epic's
-                                            -- steps under ANY orchestrator — an epic-scoped
-                                            -- one and a whole-plan one alike — and nothing
-                                            -- else: orchestration, running sessions and a
-                                            -- directly user-initiated /swarm-start are all
-                                            -- unaffected. Read for free by
-                                            -- darwin://pipeline/{id}.
-    category_fk  INT          NOT NULL,
-    creator_fk   VARCHAR(64)  NOT NULL,
-    closed       TINYINT(1)   NOT NULL DEFAULT 0,
-    sort_order   SMALLINT     NULL,
-    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_epics_category
-        FOREIGN KEY (category_fk) REFERENCES categories (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_epics_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
 CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
@@ -327,25 +284,17 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     terminal_number INT             NULL DEFAULT NULL,
     -- Orchestration attribution (req #3186, migration 20260801020944). WHICH
     -- PIPELINE / WHICH EPIC this session was advancing — stamped ONCE by
-    -- darwin-mcp's link_requirement_session and never overwritten, because the
-    -- links a derivation would walk (requirements.feature_fk, features.epic_fk,
-    -- pipeline_step_requirements) are all mutable and would rewrite a finished
-    -- session's history. NULL = no plan/epic context, or pre-#3186 and not
-    -- derivable at backfill time. ON DELETE SET NULL: session history must never
-    -- block deleting a pipeline or an epic.
-    pipeline_fk     INT             NULL DEFAULT NULL,
-    epic_fk         INT             NULL DEFAULT NULL,
     -- 2.0 orchestration attribution (req #3350, migration 20260809081441).
-    -- Sits BESIDE the 1.0 pair above rather than replacing it — an FK is a
-    -- static declaration, not an alternation, so re-pointing the 1.0 columns
-    -- at the pipeline2_* tables would fail every still-live 1.0 stamp
-    -- outright (memory/pipeline-2-data-architecture.md § 9.4). One walk
-    -- (pipeline2_step_requirements -> pipeline2_steps -> pipeline2_epics ->
-    -- pipeline2_pipelines) produces BOTH pipeline2_fk and epic2_fk together,
-    -- so unlike the 1.0 pair they cannot disagree. TRANSITIONAL — both pairs
-    -- are archived and dropped at #3356, not retired in place. ON DELETE SET
-    -- NULL for the same reason as the 1.0 pair: session history must never
-    -- block deleting a pipeline2 plan or epic.
+    -- Stamped by darwin-mcp's link_requirement_session and never overwritten,
+    -- because the links a derivation would walk (pipeline2_step_requirements
+    -- -> pipeline2_steps -> pipeline2_epics -> pipeline2_pipelines) are all
+    -- mutable and would rewrite a finished session's history. NULL = no
+    -- plan/epic context, or not derivable at backfill time. ON DELETE SET
+    -- NULL: session history must never block deleting a pipeline2 plan or
+    -- epic. One walk produces BOTH pipeline2_fk and epic2_fk together, so
+    -- they cannot disagree the way the retired 1.0 pair independently could
+    -- (the 1.0 pair — pipeline_fk/epic_fk — was archived and dropped at
+    -- req #3356, migration 20260812175325).
     pipeline2_fk    INT             NULL DEFAULT NULL,
     epic2_fk        INT             NULL DEFAULT NULL,
     started_at      TIMESTAMP       NULL,
@@ -423,12 +372,6 @@ CREATE TABLE IF NOT EXISTS swarm_sessions (
     CONSTRAINT fk_swarm_sessions_machine
         FOREIGN KEY (machine_fk) REFERENCES machines (id)
         ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_swarm_sessions_pipeline
-        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_swarm_sessions_epic
-        FOREIGN KEY (epic_fk) REFERENCES epics (id)
-        ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_swarm_sessions_pipeline2
         FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
@@ -1276,117 +1219,17 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_row_docs (
 
 CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row_fk);
 
--- ============================================================================
--- Swarm Orchestration — pipelines as data (req #3111, migration 076)
--- ============================================================================
--- A pipeline is a durable multi-requirement execution plan: data in MySQL,
--- rendered live, interpreted by a judgment-capable Primary Claude. Req #3080
--- rejected a coded DAG because the 2026-07-25 Substrate Rebuild plan mutated ~12
--- times under contact with reality; what survives mutation is the artifact.
---
--- What is ABSENT from pipeline_steps is as much of the design as what is present:
---   * no state/status column — a step's state is DERIVED from its linked
---     requirements (design rule 1). The POC's step 13 launched five sessions
---     while the plan still read "Scheduled"; a column that can disagree with
---     reality is the bug, so the column does not exist.
---   * no seq/sort_order — display order is computed at render: topological, then
---     state bands (Complete > Running > Scheduled), then streams (design rule 3).
---   * no epic/feature — labels attach at the requirement (design rule 10).
---   * no gate_expr prose — dependencies are rows (design rule 4).
---
--- Defined at the end of the file: pipelines -> machines, pipeline_step_deps ->
--- pipeline_steps, pipeline_step_requirements -> requirements, all above.
-
-CREATE TABLE IF NOT EXISTS pipelines (
-    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    title           VARCHAR(256) NOT NULL,
-    description     TEXT         NULL,                     -- the goal
-    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
-    execution_mode  ENUM('parallel', 'serial')
-                              NOT NULL DEFAULT 'parallel', -- req #3388: parallel = every epic at
-                                                           -- once; serial = one at a time, live
-                                                           -- epic DERIVED
-    machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
-    creator_fk      VARCHAR(64)  NOT NULL,
-    started_at      TIMESTAMP    NULL,                     -- set on draft -> active (NULL-able: a
-                                                           -- pipeline is born `draft`, not running)
-    completed_at    TIMESTAMP    NULL,                     -- set on -> completed|aborted
-    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_pipelines_machine
-        FOREIGN KEY (machine_fk) REFERENCES machines (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT,
-    CONSTRAINT fk_pipelines_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS pipeline_steps (
-    id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
-    pipeline_fk  INT          NOT NULL,
-    title        VARCHAR(256) NOT NULL,                             -- the step summary
-    run          VARCHAR(8)   NOT NULL DEFAULT 'auto',              -- auto|manual
-    notes        TEXT         NULL,                                 -- evidence / findings / dispositions
-    completed_at TIMESTAMP    NULL,                                 -- manual stamp ONLY for zero-requirement
-                                                                    -- steps; requirement-backed steps derive
-    creator_fk   VARCHAR(64)  NOT NULL,
-    create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
-    update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_pipeline_steps_pipeline
-        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_pipeline_steps_creator
-        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
-        ON UPDATE CASCADE ON DELETE CASCADE
-);
-
-CREATE INDEX ix_pipeline_steps_pipeline_fk ON pipeline_steps (pipeline_fk);
-
--- Asymmetric on purpose: step_fk CASCADE (the links are the step's own data),
--- requirement_fk RESTRICT (a requirement that appears in a plan cannot be
--- deleted). This deviates from the junction default of CASCADE on both sides.
-CREATE TABLE IF NOT EXISTS pipeline_step_requirements (
-    step_fk        INT NOT NULL,
-    requirement_fk INT NOT NULL,
-    PRIMARY KEY (step_fk, requirement_fk),
-    CONSTRAINT fk_psr_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_psr_requirement
-        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT
-);
-
-CREATE INDEX ix_psr_requirement_fk ON pipeline_step_requirements (requirement_fk);
-
--- One row = one condition on one step. Convention (application-enforced):
--- exactly one of dep_step_fk / time_at per row. A dual-condition gate is simply
--- two rows on one step. dep_step_fk is RESTRICT — design rule 4's teeth: a step
--- something else gates on cannot be deleted or merged away.
-CREATE TABLE IF NOT EXISTS pipeline_step_deps (
-    id          INT       NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    step_fk     INT       NOT NULL,
-    dep_step_fk INT       NULL,          -- gate on another step
-    time_at     TIMESTAMP NULL,          -- gate on wall clock (plan's T:<ISO8601>)
-    UNIQUE KEY uq_pipeline_step_deps (step_fk, dep_step_fk),
-    CONSTRAINT fk_psd_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_psd_dep_step
-        FOREIGN KEY (dep_step_fk) REFERENCES pipeline_steps (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT
-);
-
-CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
-
 -- ---------------------------------------------------------------------------
 -- Pipeline 2.0 — the plan layer (req #3328 design; parallel era)
 -- ---------------------------------------------------------------------------
--- FIVE tables standing BESIDE the 1.0 five, not replacing them. Both eras run
--- at once until 1.0 is eradicated, and requirements are NOT doubled: one
--- `requirements` table carries two plan layers above it, because duplicating a
--- requirement row would split its sessions, history and identity across two ids
--- for the same work.
+-- The plan layer. It stood BESIDE the first-generation five (`pipelines`,
+-- `pipeline_steps`, `pipeline_step_requirements`, `pipeline_step_deps`,
+-- `epics`) while both eras ran in parallel; that first generation was
+-- archived and dropped at req #3356 (migration 20260812175325). Requirements
+-- were never doubled: one `requirements` table, one plan layer above it. The
+-- `2` in these table names is a transitional era marker scheduled for removal
+-- once every consumer (schema, MCP surface, skills, frontend) is renamed in
+-- one pass — see req #3356's own follow-on for that rename.
 --
 -- CONTAINMENT IS IN THE DDL, NOT IN CONVENTION. An epic belongs to exactly one
 -- pipeline and a step to exactly one epic, both NOT NULL. That single change is
@@ -1635,11 +1478,8 @@ CREATE INDEX ix_p2_psd_dep_step_fk ON pipeline2_step_deps (dep_step_fk);
 -- mapping between two id spaces that is itself data.
 CREATE TABLE IF NOT EXISTS orchestration_claims (
     id            INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    pipeline_fk   INT          NULL DEFAULT NULL,       -- 1.0 scope; NULL on a 2.0 claim
-    epic_fk       INT          NULL DEFAULT NULL,       -- NULL = 1.0 whole-plan scope
-    epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL,  -- carries uq_..._scope
-    pipeline2_fk  INT          NULL DEFAULT NULL,       -- 2.0 scope; NULL on a 1.0 claim
-    epic2_fk      INT          NULL DEFAULT NULL,       -- NULL = 2.0 whole-plan scope
+    pipeline2_fk  INT          NULL DEFAULT NULL,       -- scope; NULL only if epic2_fk names it
+    epic2_fk      INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
     epic2_key     INT          AS (COALESCE(epic2_fk, 0)) VIRTUAL, -- carries uq_..._scope2
     machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
     terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
@@ -1649,14 +1489,7 @@ CREATE TABLE IF NOT EXISTS orchestration_claims (
     creator_fk    VARCHAR(64)  NOT NULL,
     create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
-    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
     UNIQUE KEY uq_orchestration_claims_scope2 (pipeline2_fk, epic2_key),
-    CONSTRAINT fk_oc_pipeline
-        FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_oc_epic
-        FOREIGN KEY (epic_fk) REFERENCES epics (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_oc_pipeline2
         FOREIGN KEY (pipeline2_fk) REFERENCES pipeline2_pipelines (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
@@ -1671,5 +1504,4 @@ CREATE TABLE IF NOT EXISTS orchestration_claims (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE INDEX ix_orchestration_claims_epic_fk ON orchestration_claims (epic_fk);
 CREATE INDEX ix_orchestration_claims_epic2_fk ON orchestration_claims (epic2_fk);
