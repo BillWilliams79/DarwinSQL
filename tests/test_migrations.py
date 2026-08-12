@@ -361,9 +361,12 @@ ALL_TABLE_SUFFIXES = [
     # at it — so it drops with its own family instead of near features below.
     'pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
     'pipeline2_epics', 'pipeline2_pipelines',
-    # Req #3111 — Swarm Orchestration foundation. FK-safe order: the dep/link
-    # leaves, then steps, then pipelines. `epics` drops near features (below),
-    # since features.epic_fk is SET NULL and imposes no ordering of its own.
+    # Req #3111 — Swarm Orchestration 1.0. The tables were DROPPED from every
+    # live database by req #3356 (migration 20260812175325), but migration 076
+    # still CREATES them during a replay, so their prefixed copies still have to
+    # be cleaned up. FK-safe order: the dep/link leaves, then steps, then
+    # pipelines. `epics` drops near features (below), since features.epic_fk is
+    # SET NULL and imposes no ordering of its own.
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps', 'pipelines',
     # Req #3096 — per-document actual-token rows, child of agent_telemetry_rows.
     # Req #3031 — agent context telemetry. FK-safe: row_docs, then rows, then runs.
@@ -414,7 +417,12 @@ ALL_TABLE_SUFFIXES = [
 def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
     """§ 5.4 item 2: the five 2.0 names precede the 1.0 pipeline family, and
     within the 2.0 family the edge tables precede steps precede epics precede
-    pipelines — leaves first."""
+    pipelines — leaves first.
+
+    Still live after req #3356 dropped the 1.0 tables: this list governs the
+    REPLAY cleanup, and migration 076 still creates prefixed 1.0 copies that
+    have to come down in FK-safe order.
+    """
     p2 = ['pipeline2_step_deps', 'pipeline2_step_requirements', 'pipeline2_steps',
           'pipeline2_epics', 'pipeline2_pipelines']
     p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps')
@@ -612,15 +620,20 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'agent_telemetry_runs', 'agent_telemetry_rows',
             # Req #3096 — per-document actual-token rows (migration 074)
             'agent_telemetry_row_docs',
-            # Req #3111 — Swarm Orchestration foundation (migration 076)
-            'epics',
-            'pipelines', 'pipeline_steps',
-            'pipeline_step_requirements', 'pipeline_step_deps',
+            # Req #3111 — Swarm Orchestration 1.0 (migration 076) CREATES
+            # `epics`, `pipelines`, `pipeline_steps`,
+            # `pipeline_step_requirements` and `pipeline_step_deps`; req #3356
+            # (migration 20260812175325) DROPS all five. Like the Feature and
+            # Build Visualizer tables above, they are created and destroyed
+            # inside the replay and so do NOT appear in the final state. Their
+            # names stay in `table_names`, `named_constraints` and
+            # `ALL_TABLE_SUFFIXES` — those registries describe the migrations
+            # the replay REPLAYS, not the current schema, and dropping a name
+            # from them would let 076's CREATE land unprefixed on darwin_dev.
             # Req #3224 — the durable orchestration reservation
             # (migration 20260801150404)
             'orchestration_claims',
-            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509),
-            # parallel era. Stands beside the 1.0 five above; not a replacement.
+            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
             'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
             'pipeline2_step_requirements', 'pipeline2_step_deps',
             # Req #3352 — requirement_test_cases (migration 20260809002149),

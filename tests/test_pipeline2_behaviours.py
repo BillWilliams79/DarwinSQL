@@ -126,10 +126,12 @@ def test_step_carries_no_pipeline_reference(db_connection):
 
 
 # ---------------------------------------------------------------------------
-# SCH-004 — no step table in either era carries a state column
+# SCH-004 — no step table carries a state column
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize('table', ['pipeline_steps', 'pipeline2_steps'])
+# Parametrized over both eras until req #3356 (migration 20260812175325)
+# dropped `pipeline_steps`; the design rule it carried forward is 2.0's now.
+@pytest.mark.parametrize('table', ['pipeline2_steps'])
 def test_no_step_table_carries_a_state_column(db_connection, table):
     with db_connection.cursor() as cur:
         cols = _columns(cur, table)

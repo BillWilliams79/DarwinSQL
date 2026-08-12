@@ -89,35 +89,24 @@ def seed_test_profile(db_connection, test_creator_fk):
         cur.execute("DELETE FROM requirement_sessions WHERE requirement_fk IN "
                     "(SELECT id FROM requirements WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM dev_servers WHERE creator_fk = %s", (test_creator_fk,))
-        # Req #3111: pipelines. pipeline_step_requirements.requirement_fk and
-        # pipeline_step_deps.dep_step_fk are both ON DELETE RESTRICT, so the plan
-        # graph MUST be torn down before requirements and steps — a leftover row
-        # blocks the deletes below.
+        # Req #3337: the Pipeline 2.0 plan layer.
+        # `pipeline2_step_requirements.requirement_fk` and
+        # `pipeline2_step_deps.dep_step_fk` are both ON DELETE RESTRICT, so the
+        # plan graph MUST be torn down before requirements and steps — a
+        # leftover row blocks the deletes below. (The identical 1.0 teardown
+        # stood here until req #3356, migration 20260812175325, dropped that
+        # layer.)
         #
         # Scoped from BOTH ends on purpose. Deleting only rows whose step_fk
         # belongs to the test creator misses the row that points the other way,
-        # and that row is constructible: darwin_dev permanently holds the seeded
-        # Substrate Rebuild fixture, whose steps are owned by the real user. A
-        # test that links its own requirement to a FIXTURE step (or gates a
-        # fixture step on its own step) would otherwise survive teardown, fail
-        # the requirements DELETE with a 1451, and take the whole session-scoped
-        # teardown down with it — leaking the test profile, domain, area, project
-        # and category into darwin_dev for every later run to accumulate on.
-        cur.execute("DELETE FROM pipeline_step_deps WHERE step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
-                    "OR dep_step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s)",
-                    (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline_step_requirements WHERE step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
-                    "OR requirement_fk IN "
-                    "(SELECT id FROM requirements WHERE creator_fk = %s)",
-                    (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
-        # Req #3337: Pipeline 2.0 plan layer, parallel era. Same both-ends
-        # scoping as the 1.0 pair just above, and for the identical reason —
-        # `pipeline2_step_requirements.requirement_fk` is ON DELETE RESTRICT.
+        # and that row is constructible: darwin_dev permanently holds seeded
+        # plan fixtures whose steps are owned by the real user. A test that
+        # links its own requirement to a FIXTURE step (or gates a fixture step
+        # on its own step) would otherwise survive teardown, fail the
+        # requirements DELETE with a 1451, and take the whole session-scoped
+        # teardown down with it — leaking the test profile, domain, area,
+        # project and category into darwin_dev for every later run to
+        # accumulate on.
         cur.execute("DELETE FROM pipeline2_step_deps WHERE step_fk IN "
                     "(SELECT id FROM pipeline2_steps WHERE creator_fk = %s) "
                     "OR dep_step_fk IN "
@@ -163,9 +152,9 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM test_plans WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_plans WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
-        # Req #3111: epics -> categories is RESTRICT, so epics must go before
-        # categories.
-        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
+        # `pipeline2_epics -> categories` is RESTRICT; the epics are already
+        # cleared above, with the rest of the plan layer. (1.0's `epics` was
+        # deleted here for the same reason until req #3356 dropped it.)
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM projects WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM tasks WHERE creator_fk = %s", (test_creator_fk,))
