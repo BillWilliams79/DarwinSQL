@@ -14,12 +14,17 @@
 -- (req #3147).
 --
 -- Source plan: requirement #3083, 42 rows, 67 distinct requirements,
---              4 epics, 23 features.
+--              4 epics.
+--
+-- NO FEATURE LAYER (req #3355). Migration 20260811033413 dropped `features`,
+-- `feature_test_cases` and `requirements.feature_fk`, so this fixture emits
+-- neither the feature rows nor the requirement->feature link it used to. A
+-- requirement reaches this plan through its STEP LINK and nothing else. Epics
+-- are unaffected and still emitted.
 --
 -- ## Id allocation (explicit, so this file is idempotent and self-scoping)
 --
 --   epics                9001..9004
---   features             9001..9023
 --   pipelines            9001
 --   pipeline_steps       9000 + the plan step id (see below)
 --   projects/categories  9001 / 9001 — owned by the fixture, created idempotently
@@ -51,21 +56,21 @@
 --                          pairs (design rule 2):
 --                          1(5), 33(2), 12(7), 13(5), 19(3), 38(3), 39(2),
 --                          40(4), 47(2), 49(3), 51(2).
---   * cross-epic step      step 19 — #3105 sits under a different epic than the
---                          step's dominant label, which is why labels attach at
---                          the requirement (design rule 10).
 --   * dropped-without-     requirements the user pulled from the plan (#3065/#3074
 --     residue              era) simply are not here — no tombstones, no residue.
 --
 -- Requirement rows are upserted with their LIVE metadata (title, status, model,
 -- effort) because step state is DERIVED from requirement status (design rule 1):
 -- without real statuses the fixture would render every step Scheduled and prove
--- nothing. machine_fk is remapped production->darwin_dev (2->74, 3->75); unmappable values
--- become NULL ("Any").
+-- nothing. machine_fk carries no cross-database id: the plan's production
+-- machine is emitted as a HOSTNAME lookup resolved against whichever `machines`
+-- table this file is loaded into (#2=Macmini, #3=SJO-LT-C72929B), so a rebuilt darwin_dev
+-- re-registering its machines under new ids cannot break the load. A hostname
+-- the target does not know resolves to NULL ("Any").
 --
 -- ## DERIVED STATE vs the plan's stored `state`
 --
--- Deriving state from this fixture reproduces the plan's own `state` field for 37
+-- Deriving state from this fixture reproduces the plan's own `state` field for 35
 -- of 42 rows.
 --
 -- ### RESOLVED — the tracking-requirement divergence (req #3123)
@@ -98,15 +103,17 @@
 --
 --   step 31  plan says pending  derivation says done
 --   step 18  plan says pending  derivation says done
+--   step 20  plan says pending  derivation says done
 --   step 43  plan says pending  derivation says done
 --   step 45  plan says active   derivation says done
 --   step 47  plan says pending  derivation says done
+--   step 51  plan says pending  derivation says done
 --
 -- The fixture is NOT adjusted to match. It stores no state at all, by design,
 -- and hand-correcting the inputs to make a rule come out right is exactly the
 -- move design rule 1 forbids. Causes found in THIS list:
 --
---   * PLAN LAG — steps 31, 18, 43, 45, 47. Here the DERIVATION is the correct value: the stored
+--   * PLAN LAG — steps 31, 18, 20, 43, 45, 47, 51. Here the DERIVATION is the correct value: the stored
 --     `state` field is hand-maintained and drifts the moment a session
 --     starts or closes. That lag is the exact failure design rule 1 names
 --     (plan row 13 read "Scheduled" while five sessions ran), so these rows
@@ -142,15 +149,15 @@ DELETE FROM pipeline_step_deps WHERE step_fk IN (SELECT id FROM pipeline_steps W
 DELETE FROM pipeline_step_requirements WHERE step_fk IN (SELECT id FROM pipeline_steps WHERE pipeline_fk = 9001);
 DELETE FROM pipeline_steps WHERE pipeline_fk = 9001;
 DELETE FROM pipelines WHERE id = 9001;
--- Detach requirements before features go, so fk_requirements_feature (SET NULL)
--- never has to fire mid-load and leave a half-linked state.
+--
+-- There is no `features` teardown any more, and no requirement detach before it
+-- (req #3355): migration 20260811033413 dropped the table and the
+-- `requirements.feature_fk` column that used to need clearing first.
 --
 -- Scoped to the EXACT ids this file is about to insert, never a BETWEEN range.
 -- Explicit ids at 9001+ leave AUTO_INCREMENT immediately above the fixture band, so
 -- the next organically-created row lands exactly where a growing range would
--- expand — and a later plan with one more feature label would delete it.
-UPDATE requirements SET feature_fk = NULL WHERE feature_fk IN (9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9011, 9012, 9013, 9014, 9015, 9016, 9017, 9018, 9019, 9020, 9021, 9022, 9023);
-DELETE FROM features WHERE id IN (9001, 9002, 9003, 9004, 9005, 9006, 9007, 9008, 9009, 9010, 9011, 9012, 9013, 9014, 9015, 9016, 9017, 9018, 9019, 9020, 9021, 9022, 9023);
+-- expand — and a later plan with one more epic label would delete it.
 DELETE FROM epics WHERE id IN (9001, 9002, 9003, 9004);
 
 -- ---------------------------------------------------------------------------
@@ -176,7 +183,9 @@ INSERT INTO categories (id, category_name, project_fk, creator_fk) VALUES
 AS new ON DUPLICATE KEY UPDATE category_name = new.category_name;
 
 -- ---------------------------------------------------------------------------
--- Epics (4) — the top of Epic > Feature > Story.
+-- Epics (4) — one per distinct epic label in the plan. Since req #3355 dropped
+-- the Feature layer, nothing in this fixture points at them: a requirement now
+-- reaches its epic only through the step that links it.
 -- ---------------------------------------------------------------------------
 INSERT INTO epics (id, title, description, category_fk, creator_fk, sort_order) VALUES
   (9001, 'Swarm Substrate Rebuild', 'Epic from the 2026-07-25 Substrate Rebuild plan (req #3083).', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 0),
@@ -185,110 +194,82 @@ INSERT INTO epics (id, title, description, category_fk, creator_fk, sort_order) 
   (9004, 'Primary and Swarm Agentic Integration', 'Epic from the 2026-07-25 Substrate Rebuild plan (req #3083).', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 3);
 
 -- ---------------------------------------------------------------------------
--- Features (23) — one per distinct feature label, linked to its epic.
--- ---------------------------------------------------------------------------
-INSERT INTO features (id, title, description, feature_status, epic_fk, category_fk, creator_fk, sort_order) VALUES
-  (9001, 'Session Drain', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 0),
-  (9002, 'MCP Hardening', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 1),
-  (9003, 'Substrate Safety', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 2),
-  (9004, 'Green Baseline', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 3),
-  (9005, 'WSL Parity', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 4),
-  (9006, 'WSL Backlog', 'Feature under epic "Application Backlog", from the Substrate Rebuild plan (req #3083).', 'active', 9002, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 5),
-  (9007, 'Agentic Telemetry', 'Feature under epic "Application Backlog", from the Substrate Rebuild plan (req #3083).', 'active', 9002, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 6),
-  (9008, 'Clone Substrate', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 7),
-  (9009, 'Backlog Wave', 'Feature under epic "Application Backlog", from the Substrate Rebuild plan (req #3083).', 'active', 9002, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 8),
-  (9010, 'Post-Wave Batch', 'Feature under epic "Application Backlog", from the Substrate Rebuild plan (req #3083).', 'active', 9002, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 9),
-  (9011, 'Primary Parity', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 10),
-  (9012, 'Swarm Orchestration Feature', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 11),
-  (9013, 'Agent Infra Leverage', 'Feature under epic "Primary and Swarm Agentic Integration", from the Substrate Rebuild plan (req #3083).', 'active', 9004, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 12),
-  (9014, 'Foundation Wave', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 13),
-  (9015, 'API & Table Wave', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 14),
-  (9016, 'Visualizer & Doctrine Wave', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 15),
-  (9017, 'Acceptance', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 16),
-  (9018, 'Polish & Showcase', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 17),
-  (9019, 'Design Discussion', 'Feature under epic "Swarm Orchestration Feature", from the Substrate Rebuild plan (req #3083).', 'active', 9003, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 18),
-  (9020, 'Substrate Hygiene', 'Feature under epic "Swarm Substrate Rebuild", from the Substrate Rebuild plan (req #3083).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 19),
-  (9021, 'Data Integrity', 'Feature under epic "Application Backlog", from the Substrate Rebuild plan (req #3083).', 'active', 9002, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 20),
-  (9022, 'Agentic Refactor', 'Feature under epic "Primary and Swarm Agentic Integration", from the Substrate Rebuild plan (req #3083).', 'active', 9004, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 21),
-  (9023, 'Swarm Doctrine', 'Carries the cross-epic requirement in plan step 19 — the launch unit spans epics, which is why labels attach at the requirement (req #3080 design rule 10).', 'active', 9001, 9001, '37df7531-000d-4470-8be4-1792d8261f69', 22);
-
--- ---------------------------------------------------------------------------
--- Requirements (67) — upserted with live metadata, then filed under their
--- feature. pipeline_step_requirements.requirement_fk is ON DELETE RESTRICT, so
+-- Requirements (67) — every requirement some step links, upserted with live
+-- metadata. pipeline_step_requirements.requirement_fk is ON DELETE RESTRICT, so
 -- every referenced requirement must exist before the junction rows load.
 --
 -- ON DUPLICATE KEY UPDATE, not plain INSERT: darwin_dev already holds some of
 -- these ids, and the fixture must refresh their status (step state is derived
 -- from it) without disturbing anything else about the row.
 -- ---------------------------------------------------------------------------
-INSERT INTO requirements (id, title, requirement_status, coordination_type, ai_model, effort, category_fk, creator_fk, machine_fk, feature_fk, tracking, started_at, completed_at) VALUES
-  (3041, 'Make the DarwinAI-Config base clone handled commonly with all sub-repos: hygiene preconditions must be ff-only SYNC, never SAVE. No operation may commit/push the live base clone except the primary''s own /save-primary-claude.', 'wontfix', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9003, 0, NULL, '2026-07-25T11:03:58'),
-  (3045, 'Collect agent telemetry ', 'met', 'deployed', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T08:55:39'),
-  (3050, 'darwin-mcp rearchitecture: Lambda-Rest as single DB gateway (clean-sheet REST transport)', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9001, 0, NULL, '2026-07-25T17:34:59'),
-  (3051, 'Documents page becomes editable', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T10:41:50'),
-  (3056, 'Views show autonomy', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9001, 0, NULL, '2026-07-25T10:05:13'),
-  (3057, 'Junction POST returns 500 after committing the row (breaks Features linking)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T09:15:30'),
-  (3058, 'memory/api-gateway.md route tables are stale — full reconciliation', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T08:24:48'),
-  (3059, 'Map pymysql IntegrityError to HTTP 409 in Lambda-Rest', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T10:04:37'),
-  (3060, 'E2E coverage for the editable agent instruction registry', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9010, 0, NULL, '2026-07-26T11:46:23'),
-  (3061, 'Two stale backend test files fail on schema drift', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9004, 0, NULL, '2026-07-26T00:59:00'),
-  (3063, 'Instruction Edit In Place', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9001, 0, NULL, '2026-07-25T11:26:25'),
-  (3064, 'Aggregator Card Polish', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9001, 0, NULL, '2026-07-25T09:54:20'),
-  (3065, 'Agent Context Polish', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9006, 0, NULL, '2026-07-26T11:03:04'),
-  (3067, 'Instructions Table View — hardened generic edit-in-place table pattern', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T23:30:27'),
-  (3068, 'Instructions need proper English titles, not kebab-case slugs', 'met', 'planned', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9001, 0, NULL, '2026-07-25T11:26:26'),
-  (3069, 'Statusline DevServ indicator never shows on dash-based /bin/sh (WSL/Linux) — works on macOS only', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9003, 0, NULL, '2026-07-25T22:45:09'),
-  (3071, 'Replace remaining window.confirm calls under /agents with the house dialog pattern', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T09:13:37'),
-  (3072, 'Swarm substrate Phase 0+1 — eliminate shared-clone git corruption class (de-symlink, Primary-only sync, remove worker-to-Primary writes, full git audit)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9003, 0, NULL, '2026-07-25T20:49:24'),
-  (3074, 'Primary and Swarm AI leverage Agent Infra', 'authoring', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9013, 0, NULL, NULL),
-  (3075, 'agent_instructions.sort_order has no per-agent uniqueness guard — decide the invariant', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T09:49:34'),
-  (3076, 'Test InstructionDeleteDialog data-loss vs boot-impact wording', 'met', 'deployed', 'opus', 'low', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9009, 0, NULL, '2026-07-26T08:53:14'),
-  (3077, 'Swarm substrate Phases 2-4 — per-session clone provisioning from local mirrors; retire git-worktree machinery (full worker independence)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T02:53:18'),
-  (3078, 'darwin-mcp: bounded list reads — Lambda 6 MB response ceiling 502s large resources', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9002, 0, NULL, '2026-07-25T19:03:14'),
-  (3079, 'WSL: migrate mcp_credentials.sh to the #3050 Cognito variable set (new darwin-mcp daemon fails with ''DB_HOST'' error until done)', 'met', 'discuss', 'sonnet', 'medium', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9005, 0, NULL, '2026-07-26T02:14:10'),
-  (3080, 'Swarm Orchestration Feature: discuss session to spec and file the requirements for a durable pipeline data type (plans stored in Darwin, rendered in SwarmView, executed by Primary AI)', 'met', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9012, 0, NULL, '2026-07-27T01:25:19'),
-  (3082, 'Primary AI substrate parity - relocate Primary to ~/darwin/primary via the unified clone pattern (pipeline Stage 5)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9011, 0, NULL, '2026-07-27T07:10:46'),
-  (3083, 'Substrate Rebuild Pipeline - plan tracking (single source of truth for the plan page)', 'met', 'implemented', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9012, 1, NULL, '2026-07-27T10:53:33'),
-  (3084, 'WSL verification 1 of 3: full MCP validation', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9005, 0, NULL, '2026-07-26T03:19:32'),
-  (3085, 'WSL verification 2 of 3: full swarm session independence', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9005, 0, NULL, '2026-07-26T09:42:38'),
-  (3086, 'WSL verification 3 of 3: full primary session independence', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9005, 0, NULL, '2026-07-31T09:19:49'),
-  (3087, 'Primary gate execution + B5a cutover for clone substrate (#3077 Stage 3/4)', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T06:01:35'),
-  (3088, 'Substrate remediation: R18 freshness contract, R19 no-hardlinks, B3 skill cutover, R6 attribution coverage + gap tests', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T05:25:08'),
-  (3089, 'provision-repo.sh venv step uses system python3 (3.9) — fastmcp needs 3.10+; canary-1 venv=failed', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9010, 0, NULL, '2026-07-26T11:28:16'),
-  (3090, 'Clone substrate canary-2: multi-repo session lifecycle validation (throwaway)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T08:14:15'),
-  (3091, 'Clone sessions hit the Claude Code folder-trust dialog — pre-trust session dirs at launch (blocks all autonomous workers)', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9008, 0, NULL, '2026-07-26T08:00:25'),
-  (3092, 'Persist per-repo provisioning telemetry (mirror_action, venv) into the swarm session record', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9010, 0, NULL, '2026-07-26T11:48:11'),
-  (3093, '/swarm-complete Step 5.6 worker guard never fires — mcp-restart-if-stale.sh reads $PWD, but Step 0(d) cd s to mainRepoPath', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9010, 0, NULL, '2026-07-26T11:29:45'),
-  (3094, 'POST /profiles read-back returns other users rows (WHERE id=0 on a non-auto-increment id)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9010, 0, NULL, '2026-07-26T11:33:28'),
-  (3095, 'Ground-truth breakdown of the Claude Code base token figure', 'met', 'planned', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 75, 9007, 0, NULL, '2026-07-27T04:12:53'),
-  (3096, 'Per-document actual-token capture for architecture/autoload docs', 'met', 'deployed', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9007, 0, NULL, '2026-07-26T12:43:30'),
-  (3097, 'Post-relocation Primary verification battery (Mac mini) — executed by the NEW primary session', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9011, 0, NULL, '2026-07-27T18:56:50'),
-  (3098, 'Capture machine, model, and effort for agent telemetry runs', 'met', 'deployed', 'sonnet', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9007, 0, NULL, '2026-07-26T22:06:34'),
-  (3105, 'Swarm-Complete can RDS Snapshot', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9023, 0, NULL, '2026-07-27T00:33:55'),
-  (3108, 'Cooperative inter-Claude message system: proactive status communication between Primary(s) and workers — design discussion', 'deferred', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9019, 0, NULL, NULL),
-  (3110, 'Swarm Orchestration: groom the full design intent into Swarm Architect documentation', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9014, 0, NULL, '2026-07-27T01:52:32'),
-  (3111, 'Swarm Orchestration: schema foundation - epic hierarchy + pipelines data type (migration, routes, darwin_dev fixtures)', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9014, 0, NULL, '2026-07-27T02:48:28'),
-  (3112, 'Swarm Orchestration: ordering & derivation engine - pure JS module with self-checking invariants (vitest)', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9014, 0, NULL, '2026-07-27T02:14:14'),
-  (3113, 'Swarm Orchestration: MCP pipelines API - bounded resources + echo-verified mutation tools', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9015, 0, NULL, '2026-07-27T04:43:18'),
-  (3114, 'Swarm Orchestration: SwarmView pipelines UI - hooks, routes, list page + plan-rows table view', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9015, 0, NULL, '2026-07-27T03:47:50'),
-  (3115, 'Swarm Orchestration: Plan visualizer (no time anchor) - epic bands, swim lanes, batch boxes, drag-pan + three-level zoom', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9016, 0, NULL, '2026-07-27T05:53:33'),
-  (3116, 'Swarm Orchestration: Primary execution doctrine + fail-loud pipeline watchdog', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9016, 0, NULL, '2026-07-27T06:08:09'),
-  (3117, 'Swarm Orchestration: cost rollup - server-side precompute at session completion + Time/Tokens display', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9016, 0, NULL, '2026-07-27T06:17:49'),
-  (3118, 'Swarm Orchestration: E2E + mutation-case acceptance battery', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9017, 0, NULL, '2026-07-27T07:38:52'),
-  (3119, 'Swarm Orchestration: final polish & showcase - full live 3083 plan in darwin_dev, dev-server walkthrough, executive summary', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9018, 0, NULL, '2026-07-27T10:53:28'),
-  (3121, 'DarwinSQL migration-number allocation collides across concurrent sessions (046/050/074x3) - decide scheme + normalize + enforce', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9020, 0, NULL, '2026-07-27T05:16:29'),
-  (3122, 'Pipeline junction scoping: creator_fk authorization call for pipeline_step_deps surrogate-id addressability (pre/post #3113 MCP exposure)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9016, 0, NULL, '2026-07-27T06:04:54'),
-  (3124, 'darwin_dev schema tests vs concurrent session DDL - shared-mutable-state isolation policy', 'deferred', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9021, 0, NULL, NULL),
-  (3125, 'Cross-tenant FK grief-lock: ownership-check FK targets on all creator_fk-bearing tables (test_runs.test_plan_fk + 10 siblings)', 'met', 'implemented', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9021, 0, NULL, '2026-07-27T09:12:47'),
-  (3126, 'STRICT_TRANS_TABLES decision: enable strict sql_mode on RDS (parameter-group change + staged regression)', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9021, 0, NULL, '2026-07-27T08:54:00'),
-  (3127, 'Primary cutover execution P3-P6: relocate Primary to ~/darwin/primary per runbook (follow-on to 3082)', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', 74, 9011, 0, NULL, '2026-07-27T18:56:51'),
-  (3128, 'Instruction: executive summary', 'met', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, '2026-07-27T08:21:04'),
-  (3129, 'Instructions refactor', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, '2026-07-27T10:00:27'),
-  (3130, 'instruction: Polish pattern', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, '2026-07-27T08:34:18'),
-  (3131, 'instruction: Reflection Pattern', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, '2026-07-27T08:30:05'),
-  (3132, 'swarm-complete closeout gate: refuse session completion that leaves its requirement non-terminal (from 3082 breach)', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9020, 0, NULL, '2026-07-27T08:00:48'),
-  (3136, 'AWS Architect guiding principles document', 'authoring', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, NULL),
-  (3137, 'Agents Architect guiding principles document', 'authoring', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 9022, 0, NULL, NULL)
+INSERT INTO requirements (id, title, requirement_status, coordination_type, ai_model, effort, category_fk, creator_fk, machine_fk, tracking, started_at, completed_at) VALUES
+  (3041, 'Make the DarwinAI-Config base clone handled commonly with all sub-repos: hygiene preconditions must be ff-only SYNC, never SAVE. No operation may commit/push the live base clone except the primary''s own /save-primary-claude.', 'wontfix', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-25T11:03:58'),
+  (3045, 'Collect agent telemetry ', 'met', 'deployed', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T08:55:39'),
+  (3050, 'darwin-mcp rearchitecture: Lambda-Rest as single DB gateway (clean-sheet REST transport)', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-25T17:34:59'),
+  (3051, 'Documents page becomes editable', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T10:41:50'),
+  (3056, 'Views show autonomy', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-25T10:05:13'),
+  (3057, 'Junction POST returns 500 after committing the row (breaks Features linking)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T09:15:30'),
+  (3058, 'memory/api-gateway.md route tables are stale — full reconciliation', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T08:24:48'),
+  (3059, 'Map pymysql IntegrityError to HTTP 409 in Lambda-Rest', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T10:04:37'),
+  (3060, 'E2E coverage for the editable agent instruction registry', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T11:46:23'),
+  (3061, 'Two stale backend test files fail on schema drift', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T00:59:00'),
+  (3063, 'Instruction Edit In Place', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-25T11:26:25'),
+  (3064, 'Aggregator Card Polish', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-25T09:54:20'),
+  (3065, 'Agent Context Polish', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-26T11:03:04'),
+  (3067, 'Instructions Table View — hardened generic edit-in-place table pattern', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T23:30:27'),
+  (3068, 'Instructions need proper English titles, not kebab-case slugs', 'met', 'planned', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-25T11:26:26'),
+  (3069, 'Statusline DevServ indicator never shows on dash-based /bin/sh (WSL/Linux) — works on macOS only', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-25T22:45:09'),
+  (3071, 'Replace remaining window.confirm calls under /agents with the house dialog pattern', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T09:13:37'),
+  (3072, 'Swarm substrate Phase 0+1 — eliminate shared-clone git corruption class (de-symlink, Primary-only sync, remove worker-to-Primary writes, full git audit)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-25T20:49:24'),
+  (3074, 'Agent Harness for Primary AI and Swarm', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-08-09T00:27:00'),
+  (3075, 'agent_instructions.sort_order has no per-agent uniqueness guard — decide the invariant', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T09:49:34'),
+  (3076, 'Test InstructionDeleteDialog data-loss vs boot-impact wording', 'met', 'deployed', 'opus', 'low', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T08:53:14'),
+  (3077, 'Swarm substrate Phases 2-4 — per-session clone provisioning from local mirrors; retire git-worktree machinery (full worker independence)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T02:53:18'),
+  (3078, 'darwin-mcp: bounded list reads — Lambda 6 MB response ceiling 502s large resources', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-25T19:03:14'),
+  (3079, 'WSL: migrate mcp_credentials.sh to the #3050 Cognito variable set (new darwin-mcp daemon fails with ''DB_HOST'' error until done)', 'met', 'discuss', 'sonnet', 'medium', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-26T02:14:10'),
+  (3080, 'Swarm Orchestration Feature: discuss session to spec and file the requirements for a durable pipeline data type (plans stored in Darwin, rendered in SwarmView, executed by Primary AI)', 'met', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T01:25:19'),
+  (3082, 'Primary AI substrate parity - relocate Primary to ~/darwin/primary via the unified clone pattern (pipeline Stage 5)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T07:10:46'),
+  (3083, 'Substrate Rebuild Pipeline - plan tracking (single source of truth for the plan page)', 'met', 'implemented', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 1, NULL, '2026-07-27T10:53:33'),
+  (3084, 'WSL verification 1 of 3: full MCP validation', 'met', 'implemented', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-26T03:19:32'),
+  (3085, 'WSL verification 2 of 3: full swarm session independence', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-26T09:42:38'),
+  (3086, 'WSL verification 3 of 3: full primary session independence', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-31T09:19:49'),
+  (3087, 'Primary gate execution + B5a cutover for clone substrate (#3077 Stage 3/4)', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T06:01:35'),
+  (3088, 'Substrate remediation: R18 freshness contract, R19 no-hardlinks, B3 skill cutover, R6 attribution coverage + gap tests', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T05:25:08'),
+  (3089, 'provision-repo.sh venv step uses system python3 (3.9) — fastmcp needs 3.10+; canary-1 venv=failed', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T11:28:16'),
+  (3090, 'Clone substrate canary-2: multi-repo session lifecycle validation (throwaway)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T08:14:15'),
+  (3091, 'Clone sessions hit the Claude Code folder-trust dialog — pre-trust session dirs at launch (blocks all autonomous workers)', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T08:00:25'),
+  (3092, 'Persist per-repo provisioning telemetry (mirror_action, venv) into the swarm session record', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T11:48:11'),
+  (3093, '/swarm-complete Step 5.6 worker guard never fires — mcp-restart-if-stale.sh reads $PWD, but Step 0(d) cd s to mainRepoPath', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T11:29:45'),
+  (3094, 'POST /profiles read-back returns other users rows (WHERE id=0 on a non-auto-increment id)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-26T11:33:28'),
+  (3095, 'Ground-truth breakdown of the Claude Code base token figure', 'met', 'planned', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'SJO-LT-C72929B'), 0, NULL, '2026-07-27T04:12:53'),
+  (3096, 'Per-document actual-token capture for architecture/autoload docs', 'met', 'deployed', 'sonnet', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-26T12:43:30'),
+  (3097, 'Post-relocation Primary verification battery (Mac mini) — executed by the NEW primary session', 'met', 'implemented', 'fable', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T18:56:50'),
+  (3098, 'Capture machine, model, and effort for agent telemetry runs', 'met', 'deployed', 'sonnet', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-26T22:06:34'),
+  (3105, 'Swarm-Complete can RDS Snapshot', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T00:33:55'),
+  (3108, 'Cooperative inter-Claude message system: proactive status communication between Primary(s) and workers — design discussion', 'deferred', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, NULL),
+  (3110, 'Swarm Orchestration: groom the full design intent into Swarm Architect documentation', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T01:52:32'),
+  (3111, 'Swarm Orchestration: schema foundation - epic hierarchy + pipelines data type (migration, routes, darwin_dev fixtures)', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T02:48:28'),
+  (3112, 'Swarm Orchestration: ordering & derivation engine - pure JS module with self-checking invariants (vitest)', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T02:14:14'),
+  (3113, 'Swarm Orchestration: MCP pipelines API - bounded resources + echo-verified mutation tools', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T04:43:18'),
+  (3114, 'Swarm Orchestration: SwarmView pipelines UI - hooks, routes, list page + plan-rows table view', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T03:47:50'),
+  (3115, 'Swarm Orchestration: Plan visualizer (no time anchor) - epic bands, swim lanes, batch boxes, drag-pan + three-level zoom', 'met', 'deployed', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T05:53:33'),
+  (3116, 'Swarm Orchestration: Primary execution doctrine + fail-loud pipeline watchdog', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T06:08:09'),
+  (3117, 'Swarm Orchestration: cost rollup - server-side precompute at session completion + Time/Tokens display', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T06:17:49'),
+  (3118, 'Swarm Orchestration: E2E + mutation-case acceptance battery', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T07:38:52'),
+  (3119, 'Swarm Orchestration: final polish & showcase - full live 3083 plan in darwin_dev, dev-server walkthrough, executive summary', 'met', 'implemented', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T10:53:28'),
+  (3121, 'DarwinSQL migration-number allocation collides across concurrent sessions (046/050/074x3) - decide scheme + normalize + enforce', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T05:16:29'),
+  (3122, 'Pipeline junction scoping: creator_fk authorization call for pipeline_step_deps surrogate-id addressability (pre/post #3113 MCP exposure)', 'met', 'deployed', 'opus', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T06:04:54'),
+  (3124, 'darwin_dev schema tests vs concurrent session DDL - shared-mutable-state isolation policy', 'deferred', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, NULL),
+  (3125, 'Cross-tenant FK grief-lock: ownership-check FK targets on all creator_fk-bearing tables (test_runs.test_plan_fk + 10 siblings)', 'met', 'implemented', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T09:12:47'),
+  (3126, 'STRICT_TRANS_TABLES decision: enable strict sql_mode on RDS (parameter-group change + staged regression)', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T08:54:00'),
+  (3127, 'Primary cutover execution P3-P6: relocate Primary to ~/darwin/primary per runbook (follow-on to 3082)', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', (SELECT id FROM machines WHERE hostname = 'Macmini'), 0, NULL, '2026-07-27T18:56:51'),
+  (3128, 'Instruction: executive summary', 'met', 'discuss', 'fable', 'xhigh', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T08:21:04'),
+  (3129, 'Instructions refactor', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T10:00:27'),
+  (3130, 'instruction: Polish pattern', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T08:34:18'),
+  (3131, 'instruction: Reflection Pattern', 'met', 'discuss', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T08:30:05'),
+  (3132, 'swarm-complete closeout gate: refuse session completion that leaves its requirement non-terminal (from 3082 breach)', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-07-27T08:00:48'),
+  (3136, 'AWS Architect guiding principles document', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-08-02T12:14:40'),
+  (3137, 'Agents Architect guiding principles document', 'met', 'deployed', 'opus', 'high', 9001, '37df7531-000d-4470-8be4-1792d8261f69', NULL, 0, NULL, '2026-08-02T12:04:32')
 AS new ON DUPLICATE KEY UPDATE
   title = new.title,
   requirement_status = new.requirement_status,
@@ -296,7 +277,6 @@ AS new ON DUPLICATE KEY UPDATE
   ai_model = new.ai_model,
   effort = new.effort,
   machine_fk = new.machine_fk,
-  feature_fk = new.feature_fk,
   tracking = new.tracking,
   started_at = new.started_at,
   completed_at = new.completed_at;
@@ -306,7 +286,7 @@ AS new ON DUPLICATE KEY UPDATE
 -- intent about the plan as a whole — the only hand-set lifecycle in the feature.
 -- ---------------------------------------------------------------------------
 INSERT INTO pipelines (id, title, description, pipeline_status, machine_fk, creator_fk, started_at) VALUES
-  (9001, 'Substrate Rebuild Pipeline', 'Recover from the .git/index corruption incident, eliminate the shared-clone corruption class, rebuild provisioning on per-session clones, then run the max-parallel feature DAG. Source of truth: requirement #3083.', 'active', 74, '37df7531-000d-4470-8be4-1792d8261f69', '2026-07-24 00:00:00');
+  (9001, 'Substrate Rebuild Pipeline', 'Recover from the .git/index corruption incident, eliminate the shared-clone corruption class, rebuild provisioning on per-session clones, then run the max-parallel feature DAG. Source of truth: requirement #3083.', 'active', (SELECT id FROM machines WHERE hostname = 'Macmini'), '37df7531-000d-4470-8be4-1792d8261f69', '2026-07-24 00:00:00');
 
 -- ---------------------------------------------------------------------------
 -- Steps (42) — one per plan row, id = plan step id.

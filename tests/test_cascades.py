@@ -838,6 +838,10 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
 
 # ---------------------------------------------------------------------------
 # Req #2380 — Swarm Features & Test Cases registry CASCADE/RESTRICT
+# `features` and `feature_test_cases` were dropped at req #3355 (migration
+# 20260811033413); their cascade coverage is superseded by
+# test_delete_requirement_cascades_to_requirement_test_cases and
+# test_delete_test_case_cascades_to_requirement_test_cases below.
 # ---------------------------------------------------------------------------
 
 def _setup_validation_creator(cur, prefix):
@@ -867,20 +871,6 @@ def _setup_validation_creator(cur, prefix):
     return creator, project_id, category_id
 
 
-def test_delete_category_with_features_rejected(db_connection):
-    """DELETE category with live features → IntegrityError (ON DELETE RESTRICT)."""
-    with db_connection.cursor() as cur:
-        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-feat-cat')
-        cur.execute(
-            "INSERT INTO features (title, description, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s)",
-            ('blocker feature', 'd', category_id, creator)
-        )
-        with pytest.raises(pymysql.IntegrityError):
-            cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
-    db_connection.rollback()
-
-
 def test_delete_category_with_test_cases_rejected(db_connection):
     """DELETE category with live test_cases → IntegrityError (ON DELETE RESTRICT)."""
     with db_connection.cursor() as cur:
@@ -908,87 +898,10 @@ def test_delete_category_with_test_plans_rejected(db_connection):
     db_connection.rollback()
 
 
-def test_delete_feature_cascades_to_feature_test_cases(db_connection):
-    """DELETE feature → CASCADE removes its feature_test_cases rows."""
-    with db_connection.cursor() as cur:
-        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-feat-del')
-        cur.execute(
-            "INSERT INTO features (title, description, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s)",
-            ('feat', 'd', category_id, creator)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        feature_id = cur.fetchone()['id']
-
-        cur.execute(
-            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            ('case', '1', 'ok', category_id, creator)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        case_id = cur.fetchone()['id']
-
-        cur.execute(
-            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
-            (feature_id, case_id)
-        )
-
-        cur.execute("DELETE FROM features WHERE id = %s", (feature_id,))
-
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM feature_test_cases "
-            "WHERE feature_fk = %s OR test_case_fk = %s",
-            (feature_id, case_id)
-        )
-        assert cur.fetchone()['c'] == 0  # CASCADE removed the junction row
-        # Test case itself is untouched
-        cur.execute("SELECT id FROM test_cases WHERE id = %s", (case_id,))
-        assert cur.fetchone() is not None
-    db_connection.rollback()
-
-
-def test_delete_test_case_cascades_to_feature_test_cases(db_connection):
-    """DELETE test_case → CASCADE removes its feature_test_cases rows."""
-    with db_connection.cursor() as cur:
-        creator, _project, category_id = _setup_validation_creator(cur, 'cascade-case-del')
-        cur.execute(
-            "INSERT INTO features (title, description, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s)",
-            ('feat', 'd', category_id, creator)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        feature_id = cur.fetchone()['id']
-
-        cur.execute(
-            "INSERT INTO test_cases (title, steps, expected, category_fk, creator_fk) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            ('case', '1', 'ok', category_id, creator)
-        )
-        cur.execute("SELECT LAST_INSERT_ID() AS id")
-        case_id = cur.fetchone()['id']
-
-        cur.execute(
-            "INSERT INTO feature_test_cases (feature_fk, test_case_fk) VALUES (%s, %s)",
-            (feature_id, case_id)
-        )
-
-        cur.execute("DELETE FROM test_cases WHERE id = %s", (case_id,))
-
-        cur.execute(
-            "SELECT COUNT(*) AS c FROM feature_test_cases WHERE test_case_fk = %s",
-            (case_id,)
-        )
-        assert cur.fetchone()['c'] == 0
-        # Feature itself untouched
-        cur.execute("SELECT id FROM features WHERE id = %s", (feature_id,))
-        assert cur.fetchone() is not None
-    db_connection.rollback()
-
-
 # COVERS: SCH-031
 def test_delete_requirement_cascades_to_requirement_test_cases(db_connection):
     """req #3352 — DELETE requirement → CASCADE removes its requirement_test_cases
-    rows. Mirrors test_delete_feature_cascades_to_feature_test_cases above."""
+    rows (the successor of the now-dropped feature_test_cases junction)."""
     with db_connection.cursor() as cur:
         creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-del')
         cur.execute(
@@ -1029,7 +942,7 @@ def test_delete_requirement_cascades_to_requirement_test_cases(db_connection):
 # COVERS: SCH-031
 def test_delete_test_case_cascades_to_requirement_test_cases(db_connection):
     """req #3352 — DELETE test_case → CASCADE removes its requirement_test_cases
-    rows. Mirrors test_delete_test_case_cascades_to_feature_test_cases above."""
+    rows (the successor of the now-dropped feature_test_cases junction)."""
     with db_connection.cursor() as cur:
         creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-case-del')
         cur.execute(

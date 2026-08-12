@@ -40,11 +40,11 @@ re-derives them from the SQL's own INSERT tuples, with a quote- and comment-awar
 parser, and fails on any disagreement. Seven families are covered — a closed
 enumeration, matching the table in `memory/database.md` § Seed data:
 
-  1. `-- Source plan:` header — plan rows, distinct requirements, epics, features
-  2. `-- ## Id allocation` — the epics / features / pipelines id ranges
+  1. `-- Source plan:` header — plan rows, distinct requirements, epics
+  2. `-- ## Id allocation` — the epics / pipelines id ranges
   3. `-- ## plan step id -> pipeline_steps.id` — the whole offset map
   4. `-- * multi-req steps ... 1(5), 33(2), ...` — the launch-unit pairs
-  5. `-- Epics (N)` / `-- Features (N)` / ... — the per-INSERT block captions
+  5. `-- Epics (N)` / `-- Requirements (N)` / ... — the per-INSERT block captions
   6. `-- reproduces the plan's own state field for N of M rows` + the exception list
   7. `-- (this plan has N of them)` and the footer `SELECT COUNT(*) ... -- N` crib
 
@@ -64,10 +64,25 @@ deliberately outside that boundary, so do not read a green run as covering them:
     dep target passes green — and status is exactly what derived step state reads
     (design rule 1).
   * The structural acceptance criteria the header narrates: `req-less step 7`,
-    `dual-condition gate step 3`, `cross-epic step 19`, `Flagged as containers in
-    this generation: #3083`, and the `machine_fk` remap `(2->74, 3->75)`.
+    `dual-condition gate step 3`, `Flagged as containers in this generation:
+    #3083`, and the `machine_fk` remap `(2->74, 3->75)`.
 
 The defence for both is regenerating rather than hand-editing.
+
+NO FEATURE LAYER (req #3355)
+---------------------------
+Migration 20260811033413 dropped `features`, `feature_test_cases` and
+`requirements.feature_fk`, so the fixture emits no `features` INSERT block, no
+`features` id range, no feature count in the `-- Source plan:` header, and no
+`feature_fk` column in the requirements upsert. The `cross-epic step 19` claim
+went with them: it demonstrated req #3080 design rule 10, which is only
+expressible while a requirement carries its own epic label, and 1.0 has nothing
+left to carry one. Requirement #3105 is still in the fixture — plan step 19
+links it directly — so the requirement count is unchanged; only the label is
+gone. `epics` are untouched and still asserted below, and
+`test_fixture_no_longer_emits_the_feature_layer` pins the absence so a
+regeneration against an old generator fails loudly instead of re-emitting rows
+for a table the database no longer has.
 """
 import os
 import re
@@ -373,18 +388,17 @@ def test_header_source_plan_counts_match_the_rows(seed_sql, rows):
     match = re.search(
         r'--\s*Source plan:\s*requirement\s*#(\d+),\s*(\d+)\s*rows,\s*'
         r'(\d+)\s*distinct requirements,\s*\n'
-        r'--\s*(\d+)\s*epics,\s*(\d+)\s*features\.',
+        r'--\s*(\d+)\s*epics\.',
         seed_sql,
     )
     assert match, "header `-- Source plan:` block not found or reformatted"
 
-    _req_id, steps, requirements, epics, features = (int(g) for g in match.groups())
+    _req_id, steps, requirements, epics = (int(g) for g in match.groups())
 
     for label, claimed, table in (
         ('plan rows', steps, 'pipeline_steps'),
         ('distinct requirements', requirements, 'requirements'),
         ('epics', epics, 'epics'),
-        ('features', features, 'features'),
     ):
         assert claimed == len(rows[table]), (
             f"header says {claimed} {label}, file inserts {len(rows[table])} "
@@ -440,8 +454,8 @@ def test_header_states_production_carries_the_live_plan(seed_sql):
 # ---------------------------------------------------------------------------
 
 def test_id_allocation_ranges_match_the_rows(seed_sql, by_table):
-    """`--   features   9001..9023` must be the range the file actually inserts."""
-    for table in ('epics', 'features'):
+    """`--   epics   9001..9004` must be the range the file actually inserts."""
+    for table in ('epics',):
         match = re.search(rf'--\s+{table}\s+(\d+)\.\.(\d+)\s*$', seed_sql, re.M)
         assert match, f"id-allocation line for `{table}` not found or reformatted"
         low, high = int(match.group(1)), int(match.group(2))
@@ -540,7 +554,6 @@ def test_multi_req_step_pairs_match_the_links(seed_sql, by_table):
 # silently re-point a caption at the wrong block.
 BLOCK_CAPTIONS = (
     (r'--\s*Epics \((\d+)\)', 'epics'),
-    (r'--\s*Features \((\d+)\)', 'features'),
     (r'--\s*Requirements \((\d+)\)', 'requirements'),
     (r'--\s*Steps \((\d+)\)', 'pipeline_steps'),
     (r'--\s*Step -> requirement links \((\d+)\)', 'pipeline_step_requirements'),
@@ -704,6 +717,72 @@ def test_fixture_owns_its_project_and_category(by_table):
     for table in ('projects', 'categories'):
         ids = [i for block in by_table[table] for i in _ints(block, 'id')]
         assert ids == [9001], f"{table} fixture row ids are {ids}, expected [9001]"
+
+
+# ---------------------------------------------------------------------------
+# The Feature layer is gone (req #3355)
+# ---------------------------------------------------------------------------
+
+DROPPED_TABLES = ('features', 'feature_test_cases')
+DROPPED_COLUMN = 'feature_fk'
+
+
+def test_fixture_no_longer_emits_the_feature_layer(seed_sql, blocks):
+    """Migration 20260811033413 dropped `features` / `feature_test_cases` /
+    `requirements.feature_fk`, so a fixture naming any of them cannot LOAD.
+
+    Asserted on the EXECUTABLE body, not the raw text: comments legitimately
+    explain what was removed and why, and requirement titles legitimately say
+    "Features" (`#3057`, "breaks Features linking"). Both are blanked first, so
+    what remains is table names, column names and structure — the only places a
+    dropped object would actually reach the database from.
+
+    This is the positive replacement for the feature assertions this module used
+    to carry. They checked that a `features` block existed and agreed with its
+    caption; the same claim, after the drop, is that no such block exists — which
+    is what catches a regeneration run against a stale generator.
+    """
+    body = _blank_literals(_blank_comments(seed_sql))
+
+    for table in DROPPED_TABLES:
+        hit = [b.table for b in blocks if b.table.split('.')[-1] == table]
+        assert not hit, (
+            f"the fixture still INSERTs into `{table}`, which migration "
+            f"20260811033413 dropped — regenerate with "
+            f"scripts/seed_pipelines_darwin_dev.py"
+        )
+        assert not re.search(rf'\b{table}\b', body), (
+            f"`{table}` is still referenced in the executable body of the fixture"
+        )
+
+    offenders = sorted({
+        b.table for b in blocks if DROPPED_COLUMN in b.columns
+    })
+    assert not offenders, (
+        f"`{DROPPED_COLUMN}` is still an INSERT column on {offenders}; the "
+        f"column was dropped from `requirements` by migration 20260811033413"
+    )
+    assert not re.search(rf'\b{DROPPED_COLUMN}\b', body), (
+        f"`{DROPPED_COLUMN}` still appears in the executable body of the fixture"
+    )
+
+
+def test_header_makes_no_feature_claims(seed_sql):
+    """The header must not advertise counts or id ranges for rows it cannot emit.
+
+    Pinned separately from the block-caption table above, which only checks the
+    captions it lists: a re-introduced `-- Features (N)` caption would sit there
+    unread otherwise.
+    """
+    for pattern, what in (
+        (r'--\s*Features \(\d+\)', 'a `-- Features (N)` INSERT-block caption'),
+        (r'--\s+features\s+\d+\.\.\d+', 'a `features` id-allocation range'),
+        (r'\d+\s*epics,\s*\d+\s*features', 'a feature count in `-- Source plan:`'),
+    ):
+        assert not re.search(pattern, seed_sql, re.M), (
+            f"the fixture header still carries {what}, but the Feature layer was "
+            f"dropped by migration 20260811033413 (req #3355)"
+        )
 
 
 # ---------------------------------------------------------------------------

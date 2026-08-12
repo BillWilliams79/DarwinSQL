@@ -5,6 +5,8 @@ Verifies that DESCRIBE output for each table matches the expected schema.sql
 definitions. Uses darwin_dev test database (profiles, domains, areas, tasks).
 """
 
+import pytest
+
 
 def test_profiles_columns(db_connection):
     """Verify profiles column definitions match schema.sql.
@@ -433,12 +435,9 @@ def test_requirements_columns(db_connection):
     # Tolerate both pre- and post-migration-066 state (req #2978 added machine_fk).
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
-    # Req #3111, migration 076 — the story tier of Epic > Feature > Story.
-    # Asserted unconditionally: 076 lands in darwin_dev and production together
-    # (coordination_type=deployed), so there is no window in which a live
-    # database legitimately lacks it — unlike the tolerated columns above, which
-    # were added by dev-first migrations that could lag.
-    expected_fields.append('feature_fk')
+    # `feature_fk` (req #3111, migration 076 — the story tier of Epic > Feature
+    # > Story) was dropped at req #3355 (migration 20260811033413), so it is no
+    # longer asserted here.
     # Req #3123, migration 20260731124830 — the CONTAINER flag. Asserted
     # unconditionally for the same reason feature_fk is: the migration lands in
     # darwin_dev and production together, so no live database legitimately lacks
@@ -1540,52 +1539,6 @@ def test_map_run_partners_columns(db_connection):
     assert 'timestamp' in columns['create_ts']['Type']
 
 
-def test_features_columns(db_connection):
-    """Verify features column definitions match schema.sql (migration 042)."""
-    with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE features")
-        columns = {row['Field']: row for row in cur.fetchall()}
-
-    expected_fields = ['id', 'title', 'description', 'feature_status',
-                       'epic_fk',   # req #3111, migration 076 — parent epic
-                       'category_fk', 'creator_fk', 'closed', 'sort_order',
-                       'create_ts', 'update_ts']
-    assert set(columns.keys()) == set(expected_fields), \
-        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
-
-    assert columns['id']['Type'] == 'int'
-    assert columns['id']['Key'] == 'PRI'
-    assert columns['id']['Extra'] == 'auto_increment'
-
-    assert columns['title']['Type'] == 'varchar(256)'
-    assert columns['title']['Null'] == 'NO'
-
-    assert columns['description']['Type'] == 'text'
-    assert columns['description']['Null'] == 'NO'
-
-    assert columns['feature_status']['Type'] == 'varchar(16)'
-    assert columns['feature_status']['Null'] == 'NO'
-    assert columns['feature_status']['Default'] == 'draft'
-
-    assert columns['category_fk']['Type'] == 'int'
-    assert columns['category_fk']['Null'] == 'NO'
-
-    assert columns['creator_fk']['Type'] == 'varchar(64)'
-    assert columns['creator_fk']['Null'] == 'NO'
-
-    assert 'tinyint' in columns['closed']['Type']
-    assert columns['closed']['Null'] == 'NO'
-    assert columns['closed']['Default'] == '0'
-
-    assert columns['sort_order']['Type'] == 'smallint'
-    assert columns['sort_order']['Null'] == 'YES'
-
-    assert 'timestamp' in columns['create_ts']['Type']
-    assert columns['create_ts']['Default'] == 'CURRENT_TIMESTAMP'
-    assert 'timestamp' in columns['update_ts']['Type']
-    assert columns['update_ts']['Extra'] == 'on update CURRENT_TIMESTAMP'
-
-
 def test_test_cases_columns(db_connection):
     """Verify test_cases column definitions match schema.sql (migration 042)."""
     with db_connection.cursor() as cur:
@@ -1633,32 +1586,12 @@ def test_test_cases_columns(db_connection):
     assert columns['sort_order']['Null'] == 'YES'
 
 
-def test_feature_test_cases_columns(db_connection):
-    """Verify feature_test_cases junction (migration 042) — composite PK, no id."""
-    with db_connection.cursor() as cur:
-        cur.execute("DESCRIBE feature_test_cases")
-        columns = {row['Field']: row for row in cur.fetchall()}
-
-    expected_fields = ['feature_fk', 'test_case_fk']
-    assert set(columns.keys()) == set(expected_fields), \
-        f"Unexpected columns: {set(columns.keys()) - set(expected_fields)}"
-
-    # Both FKs are primary key parts (composite PK)
-    assert columns['feature_fk']['Type'] == 'int'
-    assert columns['feature_fk']['Null'] == 'NO'
-    assert columns['feature_fk']['Key'] == 'PRI'
-
-    assert columns['test_case_fk']['Type'] == 'int'
-    assert columns['test_case_fk']['Null'] == 'NO'
-    # MySQL reports non-leading composite PK columns as 'MUL'
-    assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
-
-
 # COVERS: SCH-031, SCH-034
 def test_requirement_test_cases_columns(db_connection):
     """req #3352 — requirement_test_cases junction (migration 20260809002149),
-    composite PK, no id. Mirrors test_feature_test_cases_columns above — both
-    junctions exist at once, feature_test_cases is not dropped by this one."""
+    composite PK, no id. Its predecessor, feature_test_cases, was dropped at
+    req #3355 (migration 20260811033413) — this is now the only test-case
+    junction."""
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirement_test_cases")
         columns = {row['Field']: row for row in cur.fetchall()}
@@ -1677,12 +1610,50 @@ def test_requirement_test_cases_columns(db_connection):
     # MySQL reports non-leading composite PK columns as 'MUL'
     assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
 
-    # feature_test_cases still exists — both eras run at once (req #3334's
-    # eradication sequencing is what would eventually drop it, not this one).
+    # feature_test_cases is gone — req #3355 dropped it in the same migration
+    # that this test's own requirement's precondition (a) verified every one
+    # of its rows had a requirement_test_cases equivalent.
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES LIKE 'feature_test_cases'")
-        assert cur.fetchone() is not None, \
-            "feature_test_cases must not be dropped by the junction requirement"
+        assert cur.fetchone() is None, \
+            "feature_test_cases must be dropped by req #3355"
+
+
+# COVERS: ERA-008
+def test_requirement_test_cases_carries_the_pre_drop_migration(db_connection):
+    """req #3355 precondition (a) — verified 2026-08-11 by direct PRODUCTION
+    query before the drop (the durable proof; this test cannot re-run that
+    query, `feature_test_cases` no longer exists to compare against): all 28
+    production `feature_test_cases` rows had a `requirement_test_cases` row
+    sharing the same `test_case_fk`, spread across four requirements
+    (3158:9, 3159:7, 3163:7, 3174:5) that darwin_dev's own migration carried
+    identically at measurement time.
+
+    This test regression-locks darwin_dev's copy of that outcome — but
+    darwin_dev is rebuilt from `recreate_darwin_dev.sql` (schema only, no
+    data) with some regularity, and nothing under `DarwinSQL/scripts/`
+    re-seeds this junction afterward. A CLEAN reset — all four requirements
+    at zero — is that expected, harmless case and is SKIPPED rather than
+    failed. A PARTIAL count (some but not all rows present, or a nonzero
+    count short of what was measured) is never expected from a clean reset
+    and fails loudly: that shape means the migrated data was damaged, not
+    that darwin_dev was rebuilt."""
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "SELECT requirement_fk, COUNT(*) AS c FROM requirement_test_cases "
+            "WHERE requirement_fk IN (3158, 3159, 3163, 3174) "
+            "GROUP BY requirement_fk")
+        counts = {row['requirement_fk']: row['c'] for row in cur.fetchall()}
+    expected = {3158: 9, 3159: 7, 3163: 7, 3174: 5}
+    if not counts:
+        pytest.skip('requirement_test_cases carries none of the four measured '
+                    'requirements — darwin_dev was likely reset from '
+                    'recreate_darwin_dev.sql (schema only, no data) since this '
+                    'junction was last backfilled; nothing to regression-lock')
+    for rid, want in expected.items():
+        assert counts.get(rid, 0) >= want, (
+            f'requirement #{rid} carries {counts.get(rid, 0)} requirement_test_cases '
+            f'rows, expected at least {want} — the pre-drop migration may have lost data')
 
 
 def test_test_plans_columns(db_connection):
@@ -1868,8 +1839,9 @@ def test_table_count(db_connection):
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
         'map_partners', 'map_run_partners',
         'user_integrations',  # Migration 036
-        # Req #2380 — Swarm Features & Test Cases registry
-        'features', 'test_cases', 'feature_test_cases',
+        # Req #2380 — Swarm Features & Test Cases registry. `features` and
+        # `feature_test_cases` dropped at req #3355 (migration 20260811033413).
+        'test_cases',
         'test_plans', 'test_plan_cases',
         'test_runs', 'test_results',
         # Req #2422 — swarm-start data type
@@ -1894,8 +1866,9 @@ def test_table_count(db_connection):
         # Req #3096 — per-document actual-token rows (child of agent_telemetry_rows)
         'agent_telemetry_row_docs',
         # Req #3111 — Swarm Orchestration schema foundation (migration 076).
-        # epics tops the agile hierarchy (Epic > Feature > Story); the four
-        # pipeline tables are the execution artifact.
+        # epics tops the containment hierarchy; the four pipeline tables are
+        # the execution artifact. (Epic > Feature > Story's Feature tier was
+        # retired at req #3355 — a step seats an epic directly.)
         'epics',
         'pipelines', 'pipeline_steps',
         'pipeline_step_requirements', 'pipeline_step_deps',
@@ -1909,9 +1882,8 @@ def test_table_count(db_connection):
         'pipeline2_pipelines', 'pipeline2_epics', 'pipeline2_steps',
         'pipeline2_step_requirements', 'pipeline2_step_deps',
         # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
-        # Requirement (migration 20260809002149). Stands beside
-        # feature_test_cases above, not in its place, until req #3334's
-        # eradication sequencing.
+        # Requirement (migration 20260809002149). The sole test-case junction
+        # since req #3355 dropped feature_test_cases.
         'requirement_test_cases',
     }
     assert expected_tables == tables, \
@@ -2533,10 +2505,10 @@ def test_epics_status_is_suppression_not_lifecycle(db_connection):
     launching yesterday stops launching because a column appeared.
 
     VARCHAR(16), matching `pipelines.pipeline_status` /
-    `requirements.requirement_status` / `features.feature_status` rather than an
-    ENUM, because every status column in this schema is a VARCHAR whose value set
-    is enforced in the service layer — an ENUM here would be the one table where
-    adding a value needs DDL.
+    `requirements.requirement_status` rather than an ENUM, because every status
+    column in this schema is a VARCHAR whose value set is enforced in the
+    service layer — an ENUM here would be the one table where adding a value
+    needs DDL.
     """
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'epics')
@@ -2548,29 +2520,20 @@ def test_epics_status_is_suppression_not_lifecycle(db_connection):
     assert cols['epic_status']['Key'] == ''
 
 
-def test_features_epic_fk_column(db_connection):
-    """features.epic_fk — the middle tier. NULL-able because features predate
-    epics and an unfiled feature is legitimate."""
+def test_features_table_dropped(db_connection):
+    """`features`, `feature_test_cases` and `requirements.feature_fk` (the
+    Epic > Feature > Story chain) were dropped at req #3355, migration
+    20260811033413. A step's epic is now read directly off the step
+    (`epic_fk`) — see test_features_epic_fk_column's and
+    test_requirements_feature_fk_column's history for the columns this
+    replaces."""
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'features')
-    assert 'epic_fk' in cols
-    assert cols['epic_fk']['Type'] == 'int'
-    assert cols['epic_fk']['Null'] == 'YES'
-    assert cols['epic_fk']['Default'] is None
-    assert cols['epic_fk']['Key'] == 'MUL'          # indexed FK
-
-
-def test_requirements_feature_fk_column(db_connection):
-    """requirements.feature_fk — the story tier, and the ONLY place epic/feature
-    labels attach (req #3080 design rule 10). NULL-able: the overwhelming
-    majority of Darwin's requirements have no feature and never will."""
-    with db_connection.cursor() as cur:
+        cur.execute("SHOW TABLES LIKE 'features'")
+        assert cur.fetchone() is None
+        cur.execute("SHOW TABLES LIKE 'feature_test_cases'")
+        assert cur.fetchone() is None
         cols = _columns(cur, 'requirements')
-    assert 'feature_fk' in cols
-    assert cols['feature_fk']['Type'] == 'int'
-    assert cols['feature_fk']['Null'] == 'YES'
-    assert cols['feature_fk']['Default'] is None
-    assert cols['feature_fk']['Key'] == 'MUL'       # indexed FK
+    assert 'feature_fk' not in cols
 
 
 def test_requirements_tracking_column(db_connection):
