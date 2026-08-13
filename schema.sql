@@ -1176,6 +1176,15 @@ CREATE TABLE IF NOT EXISTS agent_telemetry_rows (
     mcp_tools_tokens            INT          NULL,   -- MCP tools/resources listing (req #3095, migration 074)
     skills_tokens               INT          NULL,   -- available-skills listing (req #3095, migration 074)
     custom_agents_tokens        INT          NULL,   -- other-custom-agent listing (req #3095, migration 074)
+    -- req #3472, migration 20260813 — the DEFERRED halves Claude Code 2.1.226 split off
+    -- `System tools` and `MCP tools`. NOT consumption: a deferred tool schema is an index the
+    -- model may expand on demand, Claude Code excludes both from the session total, and real
+    -- API `usage` for a billed turn matched the resident-only sum to 0.12%. Kept beside the
+    -- resident figures and never summed into them. NULL on every row captured before the split
+    -- (and on any harness that defers nothing), which is what keeps a pre-deferral capture from
+    -- being silently compared against a post-deferral one.
+    system_tools_deferred_tokens INT         NULL,   -- deferred built-in tool schemas (req #3472)
+    mcp_tools_deferred_tokens   INT          NULL,   -- deferred MCP tool schemas (req #3472)
     claude_md_tokens            INT          NULL,
     charter_stub_tokens         INT          NULL,
     boot_payload_tokens         INT          NULL,
