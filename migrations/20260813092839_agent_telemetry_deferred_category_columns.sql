@@ -1,0 +1,71 @@
+-- 20260813092839_agent_telemetry_deferred_category_columns.sql
+--
+-- Req #3472: record the DEFERRED halves of Claude Code's split `/context` categories,
+--            distinctly from the resident figures they were split off from.
+--
+-- PROBLEM.  Claude Code 2.1.226 split two `/context` categories in two. It now emits
+--           `System tools (deferred)` and `MCP tools (deferred)` alongside the resident
+--           `System tools` / `MCP tools` rows, and EXCLUDES both deferred rows from the
+--           session total. Measured on this harness 2026-08-10: MCP tools 0 resident +
+--           40,200 deferred, system tools 12,700 resident + 14,400 deferred.
+--
+--           `agent_telemetry_rows` has no column for either figure, so a capture taken
+--           today records 54,600 measured tokens nowhere at all. Worse, the row it DOES
+--           write is indistinguishable from a pre-split one: production run 9's
+--           `mcp_tools_tokens` is a whole-category figure, a fresh run's is a
+--           resident-only figure (or NULL — the probe matched labels exactly and simply
+--           did not see the renamed row), and nothing in the data says the definition
+--           moved between them.
+--
+-- SHAPE.    Two nullable INT columns beside the five req #3095 breakdown columns:
+--           `system_tools_deferred_tokens`, `mcp_tools_deferred_tokens`.
+--
+--           SEPARATE columns rather than folding the deferred figure into the resident
+--           one, because a deferred tool schema is NOT consumption — it is an index the
+--           model may expand on demand. Claude Code excludes it from its own total, and
+--           real API `usage` for the billed seed turn (61,126 tokens) matched the
+--           resident-only sum to 0.12%. Summing the two would break the real-usage
+--           cross-check the breakdown columns exist to support.
+--
+--           NULLABLE and with no default, so an existing row keeps NULL — the same
+--           never-fabricate-a-zero rule migration 074 followed for the five columns it
+--           added. That NULL is also the DISTINGUISHER the requirement asks for: a
+--           pre-split capture has NULL here, a post-split one has integers, and a
+--           post-split capture on a harness that defers nothing has NULL because
+--           nothing was deferred — in which case the old and new definitions agree and
+--           the two captures genuinely are comparable.
+--
+--           No version/marker column was added. One would encode in a flag what the
+--           measurements already state, and would have to be maintained by hand at every
+--           future harness change; the probe's own unrecognized-label warning (req #3472)
+--           is what detects the NEXT relabelling, and it lands on the row as a footnote.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           This migration applies to BOTH databases, so it declares no target
+--           constraint.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260813092839_agent_telemetry_deferred_category_columns.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260813092839_agent_telemetry_deferred_category_columns.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20260813092839` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260813092839 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE agent_telemetry_rows
+    ADD COLUMN system_tools_deferred_tokens INT NULL AFTER custom_agents_tokens,
+    ADD COLUMN mcp_tools_deferred_tokens    INT NULL AFTER system_tools_deferred_tokens;

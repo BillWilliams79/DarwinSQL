@@ -2397,6 +2397,9 @@ def test_agent_telemetry_rows_columns(db_connection):
                 'boot_time_ms', 'cc_base_tokens',
                 'system_prompt_tokens', 'system_tools_tokens', 'mcp_tools_tokens',
                 'skills_tokens', 'custom_agents_tokens',
+                # req #3472, migration 20260813092839 — the DEFERRED halves of two of
+                # those categories under cc-2.1.226+
+                'system_tools_deferred_tokens', 'mcp_tools_deferred_tokens',
                 'claude_md_tokens',
                 'charter_stub_tokens', 'boot_payload_tokens', 'autoload_tokens',
                 'docs_loaded', 'docs_expected', 'start_work_context_tokens',
@@ -2419,9 +2422,15 @@ def test_agent_telemetry_rows_columns(db_connection):
               # ground-truth CC-base breakdown (req #3095, migration 074) — nullable,
               # a row's breakdown may not have been captured
               'system_prompt_tokens', 'system_tools_tokens', 'mcp_tools_tokens',
-              'skills_tokens', 'custom_agents_tokens'):
+              'skills_tokens', 'custom_agents_tokens',
+              # req #3472 — deferred halves; nullable for a SECOND reason beyond
+              # "not captured": NULL is also how a pre-deferral capture (and a
+              # harness that defers nothing) is told apart from a post-deferral one,
+              # so a DEFAULT 0 here would erase exactly the distinction it exists for
+              'system_tools_deferred_tokens', 'mcp_tools_deferred_tokens'):
         assert cols[c]['Null'] == 'YES', c
         assert cols[c]['Type'] in ('int', 'int(11)'), (c, cols[c]['Type'])
+        assert cols[c]['Default'] is None, c
     assert cols['footnote']['Type'] == 'varchar(512)'
     assert cols['footnote']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
