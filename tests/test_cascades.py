@@ -539,9 +539,14 @@ def test_delete_swarm_session_cascades_to_requirement_sessions(db_connection, te
     db_connection.rollback()
 
 
-def test_delete_swarm_start_cascades_to_swarm_start_sessions(db_connection):
-    """DELETE swarm_start → associated swarm_start_sessions rows are deleted.
-    The linked swarm_session itself survives."""
+def test_delete_swarm_start_with_linked_session_rejected(db_connection):
+    """DELETE swarm_start with a linked swarm_start_sessions row → IntegrityError
+    (ON DELETE RESTRICT, req #3382 — previously CASCADE, migration
+    20260814170847). A swarm_start with linked session history must not
+    silently lose that history when the parent row is deleted through a path
+    that skips the application-level guard in darwin-mcp's delete_swarm_start.
+    Unlinking first lets the delete proceed.
+    """
     test_creator = 'cascade-test-swarm-start-1'
 
     with db_connection.cursor() as cur:
@@ -569,15 +574,18 @@ def test_delete_swarm_start_cascades_to_swarm_start_sessions(db_connection):
             (swarm_start_id, session_id)
         )
 
-        cur.execute("DELETE FROM swarm_starts WHERE id = %s", (swarm_start_id,))
+        with pytest.raises(pymysql.IntegrityError):
+            cur.execute("DELETE FROM swarm_starts WHERE id = %s", (swarm_start_id,))
 
+        # Unlink first, then the delete succeeds.
         cur.execute(
-            "SELECT * FROM swarm_start_sessions WHERE swarm_start_fk = %s",
-            (swarm_start_id,)
+            "DELETE FROM swarm_start_sessions WHERE swarm_start_fk = %s AND session_fk = %s",
+            (swarm_start_id, session_id)
         )
-        assert cur.fetchone() is None
+        cur.execute("DELETE FROM swarm_starts WHERE id = %s", (swarm_start_id,))
+        assert cur.rowcount == 1
 
-        # Linked swarm_session itself survives
+        # Linked swarm_session itself survives either way.
         cur.execute("SELECT id FROM swarm_sessions WHERE id = %s", (session_id,))
         assert cur.fetchone() is not None
 

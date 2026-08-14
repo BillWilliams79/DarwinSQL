@@ -464,9 +464,13 @@ CREATE TABLE IF NOT EXISTS swarm_start_sessions (
     swarm_start_fk  INT             NOT NULL,
     session_fk      INT             NOT NULL,
     PRIMARY KEY (swarm_start_fk, session_fk),
+    -- ON DELETE RESTRICT (not CASCADE — req #3382, migration 20260814170847):
+    -- a swarm_start with linked sessions must not silently lose that history
+    -- when the parent row is deleted through a path that skips the
+    -- application-level guard in delete_swarm_start.
     CONSTRAINT fk_sss_swarm_start
         FOREIGN KEY (swarm_start_fk) REFERENCES swarm_starts (id)
-        ON UPDATE CASCADE ON DELETE CASCADE,
+        ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT fk_sss_session
         FOREIGN KEY (session_fk) REFERENCES swarm_sessions (id)
         ON UPDATE CASCADE ON DELETE CASCADE
