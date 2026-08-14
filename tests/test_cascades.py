@@ -845,10 +845,10 @@ def test_delete_area_does_not_affect_sibling_areas(db_connection):
 
 
 # ---------------------------------------------------------------------------
-# Req #2380 — Swarm Features & Test Cases registry CASCADE/RESTRICT
-# `features` and `feature_test_cases` were dropped at req #3355 (migration
-# 20260811033413); their cascade coverage is superseded by
-# test_delete_requirement_cascades_to_requirement_test_cases and
+# Req #2380 — Swarm Test Cases registry CASCADE/RESTRICT
+# The Feature-tier catalog table and its test-case junction were dropped at
+# req #3355 (migration 20260811033413); their cascade coverage is superseded
+# by test_delete_requirement_cascades_to_requirement_test_cases and
 # test_delete_test_case_cascades_to_requirement_test_cases below.
 # ---------------------------------------------------------------------------
 
@@ -909,7 +909,7 @@ def test_delete_category_with_test_plans_rejected(db_connection):
 # COVERS: SCH-031
 def test_delete_requirement_cascades_to_requirement_test_cases(db_connection):
     """req #3352 — DELETE requirement → CASCADE removes its requirement_test_cases
-    rows (the successor of the now-dropped feature_test_cases junction)."""
+    rows (the successor of the now-dropped Feature-tier test-case junction)."""
     with db_connection.cursor() as cur:
         creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-del')
         cur.execute(
@@ -950,7 +950,7 @@ def test_delete_requirement_cascades_to_requirement_test_cases(db_connection):
 # COVERS: SCH-031
 def test_delete_test_case_cascades_to_requirement_test_cases(db_connection):
     """req #3352 — DELETE test_case → CASCADE removes its requirement_test_cases
-    rows (the successor of the now-dropped feature_test_cases junction)."""
+    rows (the successor of the now-dropped Feature-tier test-case junction)."""
     with db_connection.cursor() as cur:
         creator, _project, category_id = _setup_validation_creator(cur, 'cascade-req-case-del')
         cur.execute(

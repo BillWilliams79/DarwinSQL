@@ -438,9 +438,9 @@ def test_requirements_columns(db_connection):
     # Tolerate both pre- and post-migration-066 state (req #2978 added machine_fk).
     if 'machine_fk' in columns:
         expected_fields.append('machine_fk')
-    # `feature_fk` (req #3111, migration 076 — the story tier of Epic > Feature
-    # > Story) was dropped at req #3355 (migration 20260811033413), so it is no
-    # longer asserted here.
+    # The requirement's link into the (since-retired) Feature tier (req #3111,
+    # migration 076) was dropped at req #3355 (migration 20260811033413), so
+    # it is no longer asserted here.
     # Req #3123, migration 20260731124830 — the CONTAINER flag. Asserted
     # unconditionally rather than tolerated: the migration lands in darwin_dev
     # and production together, so no live database legitimately lacks it.
@@ -1601,9 +1601,8 @@ def test_test_cases_columns(db_connection):
 # COVERS: SCH-031, SCH-034
 def test_requirement_test_cases_columns(db_connection):
     """req #3352 — requirement_test_cases junction (migration 20260809002149),
-    composite PK, no id. Its predecessor, feature_test_cases, was dropped at
-    req #3355 (migration 20260811033413) — this is now the only test-case
-    junction."""
+    composite PK, no id. Its predecessor junction was dropped at req #3355
+    (migration 20260811033413) — this is now the only test-case junction."""
     with db_connection.cursor() as cur:
         cur.execute("DESCRIBE requirement_test_cases")
         columns = {row['Field']: row for row in cur.fetchall()}
@@ -1622,9 +1621,9 @@ def test_requirement_test_cases_columns(db_connection):
     # MySQL reports non-leading composite PK columns as 'MUL'
     assert columns['test_case_fk']['Key'] in ('PRI', 'MUL')
 
-    # feature_test_cases is gone — req #3355 dropped it in the same migration
-    # that this test's own requirement's precondition (a) verified every one
-    # of its rows had a requirement_test_cases equivalent.
+    # The predecessor junction is gone — req #3355 dropped it in the same
+    # migration that this test's own requirement's precondition (a) verified
+    # every one of its rows had a requirement_test_cases equivalent.
     with db_connection.cursor() as cur:
         cur.execute("SHOW TABLES LIKE 'feature_test_cases'")
         assert cur.fetchone() is None, \
@@ -1635,9 +1634,10 @@ def test_requirement_test_cases_columns(db_connection):
 def test_requirement_test_cases_carries_the_pre_drop_migration(db_connection):
     """req #3355 precondition (a) — verified 2026-08-11 by direct PRODUCTION
     query before the drop (the durable proof; this test cannot re-run that
-    query, `feature_test_cases` no longer exists to compare against): all 28
-    production `feature_test_cases` rows had a `requirement_test_cases` row
-    sharing the same `test_case_fk`, spread across four requirements
+    query, the predecessor junction no longer exists to compare against): all
+    28 production rows of that predecessor junction had a
+    `requirement_test_cases` row sharing the same `test_case_fk`, spread
+    across four requirements
     (3158:9, 3159:7, 3163:7, 3174:5) that darwin_dev's own migration carried
     identically at measurement time.
 
@@ -1683,7 +1683,7 @@ def test_test_plans_columns(db_connection):
     assert columns['title']['Type'] == 'varchar(256)'
     assert columns['title']['Null'] == 'NO'
     assert columns['description']['Type'] == 'text'
-    assert columns['description']['Null'] == 'YES'  # nullable (distinct from features.description)
+    assert columns['description']['Null'] == 'YES'  # nullable
     assert columns['category_fk']['Null'] == 'NO'
     assert columns['creator_fk']['Null'] == 'NO'
     assert columns['closed']['Default'] == '0'
@@ -1851,8 +1851,9 @@ def test_table_count(db_connection):
         'map_routes', 'map_runs', 'map_coordinates', 'map_views',
         'map_partners', 'map_run_partners',
         'user_integrations',  # Migration 036
-        # Req #2380 — Swarm Features & Test Cases registry. `features` and
-        # `feature_test_cases` dropped at req #3355 (migration 20260811033413).
+        # Req #2380 — Swarm Test Cases registry. Its Feature-tier catalog table
+        # and test-case junction were dropped at req #3355 (migration
+        # 20260811033413).
         'test_cases',
         'test_plans', 'test_plan_cases',
         'test_runs', 'test_results',
@@ -1891,7 +1892,7 @@ def test_table_count(db_connection):
         'pipeline_step_requirements', 'pipeline_step_deps',
         # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
         # Requirement (migration 20260809002149). The sole test-case junction
-        # since req #3355 dropped feature_test_cases.
+        # since req #3355 dropped its predecessor.
         'requirement_test_cases',
     }
     assert expected_tables == tables, \

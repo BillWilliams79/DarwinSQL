@@ -784,9 +784,9 @@ def test_map_run_stopped_time_default(db_connection, test_creator_fk):
 
 
 # ---------------------------------------------------------------------------
-# Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044)
-# `features` was dropped at req #3355 (migration 20260811033413); its FK/NOT
-# NULL/default coverage went with it.
+# Req #2380 — Swarm Test Cases registry (migrations 042/043/044)
+# The Feature-tier catalog table was dropped at req #3355 (migration
+# 20260811033413); its FK/NOT NULL/default coverage went with it.
 # ---------------------------------------------------------------------------
 
 # FK invalid-parent rejection tests
@@ -992,7 +992,7 @@ def test_test_results_unique_run_case(db_connection, test_creator_fk, test_categ
 def test_requirement_test_cases_composite_pk(db_connection, test_creator_fk, test_category_id):
     """req #3352 — Second INSERT requirement_test_cases with same
     (requirement_fk, test_case_fk) → IntegrityError (the successor of the
-    now-dropped feature_test_cases junction, req #3355)."""
+    now-dropped Feature-tier test-case junction, req #3355)."""
     with db_connection.cursor() as cur:
         cur.execute(
             "INSERT INTO requirements (title, category_fk, creator_fk, "

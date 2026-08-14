@@ -742,15 +742,13 @@ CREATE TABLE IF NOT EXISTS user_integrations (
 );
 
 -- ============================================================================
--- Swarm Features & Test Cases registry (req #2380 — migrations 042/043/044)
--- Phase 1: features + test_cases + feature_test_cases
+-- Swarm Test Cases registry (req #2380 — migrations 042/043/044; its original
+-- Phase 1 catalog table was dropped by the Feature-era eradication cutover,
+-- req #3355, migration 20260811033413 — test_cases now links to Requirement
+-- via requirement_test_cases, below)
 -- Phase 2: test_plans + test_plan_cases
 -- Phase 3: test_runs + test_results
 -- ============================================================================
--- NOTE: `features` itself is defined ABOVE, in the "Agile hierarchy" section
--- next to `epics` — requirements.feature_fk (req #3111, migration 076) forced it
--- above `requirements` so a fresh end-to-end run of this file resolves. Only the
--- rest of the validation family lives here.
 
 CREATE TABLE IF NOT EXISTS test_cases (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -777,8 +775,8 @@ CREATE TABLE IF NOT EXISTS test_cases (
 -- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
 -- re-homes test cases from Feature onto Requirement: a test case asserts a
 -- deliverable and Requirement, not Feature, is the level that organizes
--- deliverables. feature_test_cases (its predecessor) was dropped by the
--- Feature-era eradication cutover (req #3355, migration 20260811033413).
+-- deliverables. Its predecessor junction was dropped by the Feature-era
+-- eradication cutover (req #3355, migration 20260811033413).
 CREATE TABLE IF NOT EXISTS requirement_test_cases (
     requirement_fk  INT             NOT NULL,
     test_case_fk    INT             NOT NULL,
@@ -1346,8 +1344,9 @@ CREATE INDEX ix_epics_pipeline_fk ON epics (pipeline_fk);
 -- would buy nothing and cost the invariant that they agree.
 --
 -- `epic_fk` NOT NULL also deletes a derivation. In 1.0 a step's epic was reached
--- through its requirements' `feature_fk` -> `features.epic_fk`, and a step with
--- no requirements INHERITED the label from a dependency: 17 of the 188 steps
+-- by walking from its requirements through the now-dropped Feature tier's own
+-- epic link, and a step with no requirements INHERITED the label from a
+-- dependency: 17 of the 188 steps
 -- measured before the drop did exactly that. Here the epic is stored, so
 -- `label_inherited` and the whole inheritance walk stop existing.
 --
