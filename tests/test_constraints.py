@@ -545,6 +545,40 @@ def test_requirement_status_default(db_connection, test_creator_fk, test_categor
     db_connection.rollback()
 
 
+def test_requirement_ai_model_and_effort_default(db_connection, test_creator_fk,
+                                                 test_category_id):
+    """INSERT requirement omitting ai_model/effort → 'opus'/'high' (req #3434).
+
+    This is the behaviour, not the DDL — `test_data_types.py` asserts the column
+    DEFAULT exists, this asserts it actually applies to an omitted field on this
+    server. The distinction is the whole point of req #3434: until migration
+    20260814132630 both columns were NOT NULL with no DEFAULT, and under this
+    instance's non-strict sql_mode an omitted field did NOT raise — it stored
+    the EMPTY STRING. 26 production rows carried '' when this was measured
+    (2026-08-14), and `/swarm-start` reads both straight into the launch
+    command, so each of them would have launched `claude --model '' --effort ''`.
+
+    Asserting the values explicitly and not merely `!= ''`: a blank was only the
+    symptom, and the fix has to land the documented defaults that CLAUDE.md and
+    MCP create_requirement already claim.
+    """
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
+            ('req3434 omitted model/effort', test_creator_fk, test_category_id)
+        )
+        cur.execute("SELECT LAST_INSERT_ID() AS id")
+        requirement_id = cur.fetchone()['id']
+
+        cur.execute("SELECT ai_model, effort FROM requirements WHERE id = %s",
+                    (requirement_id,))
+        row = cur.fetchone()
+        assert row['ai_model'] == 'opus'
+        assert row['effort'] == 'high'
+
+    db_connection.rollback()
+
+
 def test_swarm_status_default(db_connection, test_creator_fk):
     """INSERT swarm_session without status → defaults to 'starting'"""
     with db_connection.cursor() as cur:
