@@ -1,0 +1,183 @@
+-- 20260814132630_requirements_ai_model_effort_column_defaults.sql
+--
+-- Req #3434: `requirements.ai_model` and `requirements.effort` are NOT NULL with
+-- no column DEFAULT, so an omitted field stores the EMPTY STRING instead of the
+-- documented default. Give both columns a DEFAULT and repair the rows.
+--
+-- PROBLEM.  Both columns are `VARCHAR(16) NOT NULL` with no DEFAULT — req
+--           #3007's deliberate call, recorded in the schema comment as "NO
+--           column default - caller must provide". That reasoning was sound for
+--           the caller population it assumed: humans filling a form, who can be
+--           required to pick. A value arriving from the database, chosen by
+--           nobody, would show up in the UI with no explicable origin.
+--
+--           The caller population changed. Requirements are now written
+--           overwhelmingly by LLM/agentic callers, which omit fields they were
+--           not told to set — and an omitted NOT NULL VARCHAR with no DEFAULT
+--           does NOT fail under this instance's non-strict `sql_mode`. It
+--           stores `''`. So #3007's decision now produces the exact harm it was
+--           written to prevent, reached from the other direction: a value
+--           nobody chose, unexplainable in the UI, and additionally illegal
+--           against the documented value set (haiku|sonnet|opus|fable and
+--           low|medium|high|xhigh|ultracode).
+--
+--           MEASURED on production `darwin`, 2026-08-14, across all 1368
+--           requirements:  17 rows with `ai_model = ''`, 23 with `effort = ''`,
+--           26 distinct rows affected. Earliest `create_ts` 2026-07-23
+--           02:57:19, latest 2026-08-14 10:08:35 — the same day this migration
+--           was written, so the defect is live and not historical. The two
+--           columns fail INDEPENDENTLY: #3397 and #3505 carry a real
+--           `ai_model` next to a blank `effort`.
+--
+--           CONSEQUENCE. `/swarm-start` reads both straight into the launch
+--           command, so an affected requirement launches as
+--           `claude --model '' --effort ''`, and every reader that switches on
+--           the value falls through — `''` matches no branch.
+--
+-- SHAPE.    Two `ALTER TABLE ... MODIFY COLUMN`, adding `DEFAULT 'opus'` and
+--           `DEFAULT 'high'`. `MODIFY` and not `ALTER COLUMN ... SET DEFAULT`
+--           because the full column definition is what `SHOW CREATE TABLE`
+--           reports and what `schema.sql` must match; restating it keeps the
+--           two artifacts comparable line for line. Type, nullability, charset,
+--           collation, comment and ordinal position were all verified unchanged
+--           after the apply — the restatement dropped nothing. The apply itself
+--           completed without incident on 1368 rows; whether MySQL took the
+--           INSTANT path or an INPLACE rebuild was NOT measured, so this header
+--           does not claim it. (`ALTER COLUMN ... SET DEFAULT` is the exact
+--           inverse of migration 068 and is the form MySQL documents as
+--           instant; it was not used, because it does not restate the
+--           definition `schema.sql` has to match.)
+--
+--           THE COST OF `MODIFY`: it is idempotent against ITSELF, but it is
+--           not inert against LATER changes. Re-applying this file after a
+--           future migration adds a COMMENT to either column, or widens it,
+--           would silently revert that — because `MODIFY` asserts the WHOLE
+--           definition, not just the default. Re-apply is safe today and stays
+--           safe only while these two columns are otherwise untouched.
+--
+--           `opus` and `high` are NOT invented here. They are the defaults
+--           CLAUDE.md already documents and the MCP `create_requirement` tool
+--           already applies in Python (`darwin-mcp/services/requirements.py`,
+--           `ai_model='opus', effort='high'`). This makes the DATABASE agree
+--           with what every other layer already claims, which is why a value
+--           arriving from the column is explicable: it is the same value the
+--           rest of the system would have supplied.
+--
+--           Then two `UPDATE`s repairing the existing `''` rows to those same
+--           values. They run AFTER the ALTERs, and are `WHERE col = ''`, so the
+--           file is idempotent — a second apply matches zero rows. The repair
+--           lives here rather than in the complementary req #3432 because this
+--           is the change that applies DDL.
+--
+--           A CHECK constraint enforcing the value set is deliberately NOT
+--           added. Darwin does not use CHECK constraints (same call as req
+--           #3390), the value set lives in the application layer where a new
+--           enum member can ship without a migration, and refusing an explicit
+--           blank at the gateway is req #3432's job, not the schema's.
+--
+--           NOT IN SCOPE, deliberately: switching the RDS parameter group to
+--           strict `sql_mode`. Under strict mode the omitted-column case
+--           becomes a hard INSERT error rather than an empty string, which
+--           sounds like the better fix and is not this migration's to make — it
+--           changes the behaviour of every write Darwin performs, across the
+--           whole schema, at once.
+--
+--           SCHEMA-WIDE CENSUS (req #3434 deliverable C), production `darwin`,
+--           2026-08-14. Every NOT NULL column with no DEFAULT was enumerated
+--           from `information_schema.COLUMNS` (excluding AUTO_INCREMENT and
+--           GENERATED), and every string-typed one was counted for `''`. Only
+--           five columns anywhere in the schema actually hold a blank:
+--
+--             requirements.effort               23   <- fixed here
+--             requirements.ai_model             17   <- fixed here
+--             profiles.name                      3
+--             tasks.description                  3
+--             user_integrations.creator_fk       1
+--
+--           None of the other three is fixed here, and none is actively
+--           producing: `profiles.name` and `tasks.description` are FREE TEXT
+--           with no value set to violate — a blank is ugly, not illegal — and
+--           their newest blank row is `tasks` id 7092 from 2026-02-13, six
+--           months old. `user_integrations.creator_fk` is a single row (id 1,
+--           provider `strava`) predating the req #3050 gateway change that made
+--           `creator_fk` token-derived and therefore unforgeable; it is one
+--           orphaned OAuth row, not a live writer, and is reported rather than
+--           repaired because deciding whose integration it is is a judgement
+--           this migration cannot make.
+--
+--           A ZERO BLANK COUNT IS NOT THE SAME AS BEING SAFE, and the rest of
+--           the no-DEFAULT population splits four ways, not three. Three shapes
+--           genuinely cannot fail this way: FK integers (a `0` fill violates the
+--           foreign key and fails LOUDLY), `creator_fk` on every other table
+--           (injected by API Gateway from the Cognito token since req #3050,
+--           never caller-supplied), and required free-text identifiers a caller
+--           cannot sensibly omit (`title`, `name`) — free text has no value set
+--           for `''` to violate.
+--
+--           THE FOURTH SHAPE HAS EXACTLY THIS DEFECT AND IS NOT FIXED HERE.
+--           Six BOUNDED-DOMAIN columns are still NOT NULL with no DEFAULT, so
+--           an omitted field stores `''`, `''` is illegal against their value
+--           sets, and every reader that switches on the value falls through —
+--           this migration's own defect statement, verbatim:
+--
+--             branches.branch_type          varchar(32)
+--             machines.platform             varchar(16)
+--             machines.arch                 varchar(16)
+--             recurring_tasks.recurrence    varchar(16)
+--             swarm_completes.skill_name    varchar(64)
+--             user_integrations.provider    varchar(50)
+--
+--           All six measured ZERO blank rows on production 2026-08-14, so none
+--           is ACTIVELY producing bad rows and req #3434 deliberately leaves
+--           them (deliverable C: report with the column list, fix only what is
+--           actively producing). They are not unguarded: the last two are the
+--           columns req #3432 had to register BY HAND in `ENUM_COLUMNS`
+--           (`Lambda-Rest/auth_utils.py`) because they are declared wider than
+--           its ≤32-char sweep, and that gateway guard refuses an explicit
+--           blank on all six. What no guard covers is the OMISSION case, which
+--           is what a DEFAULT closes — so giving these six a DEFAULT is the
+--           natural follow-on, and it is a separate change because each needs
+--           its own defensible default value and this migration must not invent
+--           six of them.
+--
+--           Non-FK integers — `tasks.priority`, `builds.position`,
+--           `map_runs.run_time_sec`, `user_integrations.expires_at`,
+--           `agent_telemetry_row_docs.actual_tokens` — do take a silent `0`
+--           fill under non-strict mode, but `0` is a legal member of each of
+--           their domains, so the omission is undetectable by census; that is
+--           the case strict `sql_mode` would close and this migration will not.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260814132630_requirements_ai_model_effort_column_defaults.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20260814132630_requirements_ai_model_effort_column_defaults.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20260814132630` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20260814132630 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+ALTER TABLE requirements
+    MODIFY COLUMN ai_model VARCHAR(16) NOT NULL DEFAULT 'opus';
+
+ALTER TABLE requirements
+    MODIFY COLUMN effort VARCHAR(16) NOT NULL DEFAULT 'high';
+
+UPDATE requirements SET ai_model = 'opus' WHERE ai_model = '';
+UPDATE requirements SET effort   = 'high' WHERE effort   = '';

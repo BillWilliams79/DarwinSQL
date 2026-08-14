@@ -496,17 +496,24 @@ def test_requirements_columns(db_connection):
         assert columns['affected_repos']['Null'] == 'YES'
         assert columns['affected_repos']['Default'] is None
 
+    # req #3434 (migration 20260814132630) REVERSED req #3007's "no column
+    # default — the caller must provide". #3007 assumed a human filling a form;
+    # the caller population is now overwhelmingly agentic, and an omitted NOT
+    # NULL VARCHAR with no DEFAULT does not fail under this instance's
+    # non-strict sql_mode — it stores '', which is illegal against both value
+    # sets and launches `claude --model '' --effort ''`. 26 production rows
+    # measured 2026-08-14. The defaults match what CLAUDE.md documents and what
+    # MCP create_requirement already applied, so the DB now agrees with the
+    # rest of the system rather than inventing a value.
     if 'ai_model' in columns:
         assert columns['ai_model']['Type'] == 'varchar(16)'
         assert columns['ai_model']['Null'] == 'NO'   # mandatory model (req #2909)
-        # req #3007: NO column default — the caller must provide ai_model.
-        assert columns['ai_model']['Default'] is None
+        assert columns['ai_model']['Default'] == 'opus'
 
     if 'effort' in columns:
         assert columns['effort']['Type'] == 'varchar(16)'
         assert columns['effort']['Null'] == 'NO'   # mandatory effort (req #2916)
-        # req #3007: NO column default — the caller must provide effort.
-        assert columns['effort']['Default'] is None
+        assert columns['effort']['Default'] == 'high'
 
     # req #2978 machine_fk (migration 066) — nullable FK, no default. Unlike
     # coordination_type / ai_model / effort this one is deliberately NULLable:

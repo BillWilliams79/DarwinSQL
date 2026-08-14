@@ -195,10 +195,26 @@ CREATE TABLE IF NOT EXISTS requirements (
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
     coordination_type VARCHAR(16)   NOT NULL DEFAULT 'implemented',
                                             -- discuss | planned | implemented | deployed (mandatory, req #2745; default: implemented)
-    ai_model        VARCHAR(16)     NOT NULL,
-                                            -- haiku | sonnet | opus | fable (req #2909; NO column default — caller must provide, req #3007; pre-#2909 rows assumed opus)
-    effort          VARCHAR(16)     NOT NULL,
-                                            -- low | medium | high | xhigh | ultracode (req #2916; NO column default — caller must provide, req #3007; pre-#2916 rows assumed high)
+    ai_model        VARCHAR(16)     NOT NULL DEFAULT 'opus',
+                                            -- haiku | sonnet | opus | fable (req #2909; pre-#2909 rows assumed opus).
+                                            -- DEFAULT 'opus' since req #3434, migration 20260814132630, REVERSING req
+                                            -- #3007's "no column default — caller must provide". #3007 assumed a human
+                                            -- filling a form, who can be required to pick; the caller population is now
+                                            -- overwhelmingly agentic, and an omitted NOT NULL VARCHAR with no DEFAULT
+                                            -- does not fail under this instance's non-strict sql_mode — it stores ''.
+                                            -- That is the same harm #3007 set out to prevent (a value nobody chose,
+                                            -- unexplainable in the UI) reached from the other direction, plus '' is
+                                            -- illegal against the value set above. 26 production rows measured.
+                                            -- 'opus' is not invented here: it is what CLAUDE.md documents and what MCP
+                                            -- create_requirement already applies, so the DB now agrees with the rest.
+                                            -- An explicitly-sent BLANK is refused at the gateway — req #3432, a
+                                            -- separate half; this column makes OMISSION safe, nothing more.
+    effort          VARCHAR(16)     NOT NULL DEFAULT 'high',
+                                            -- low | medium | high | xhigh | ultracode (req #2916; pre-#2916 rows
+                                            -- assumed high). DEFAULT 'high' since req #3434, migration
+                                            -- 20260814132630 — same reversal, same reasoning as ai_model above. The
+                                            -- two columns fail INDEPENDENTLY: production rows carried a real ai_model
+                                            -- next to a blank effort, so both needed the default.
     sort_order      SMALLINT        NULL DEFAULT NULL,
                                             -- in-card hand-sort position (req #2417); NULL = unranked, falls to id-order
     affected_repos  VARCHAR(255)    NULL DEFAULT NULL,
