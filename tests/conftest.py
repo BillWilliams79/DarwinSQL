@@ -141,10 +141,10 @@ def seed_test_profile(db_connection, test_creator_fk):
                     (test_creator_fk,))
         # Req #2380: test_cases/test_plans RESTRICT on categories, so delete
         # these BEFORE categories. test_results and test_runs also clean up
-        # explicitly to handle tests that commit mid-run. `features` and
-        # `feature_test_cases` were dropped at req #3355 (migration
-        # 20260811033413) — test cases now re-home onto Requirement via
-        # `requirement_test_cases`, cleaned up above with `requirements`
+        # explicitly to handle tests that commit mid-run. The Feature-tier
+        # catalog table and its test-case junction were dropped at req #3355
+        # (migration 20260811033413) — test cases now re-home onto Requirement
+        # via `requirement_test_cases`, cleaned up above with `requirements`
         # (ON DELETE CASCADE).
         cur.execute("DELETE FROM test_results WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_runs WHERE creator_fk = %s", (test_creator_fk,))

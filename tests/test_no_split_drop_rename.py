@@ -87,8 +87,9 @@ def _read(path):
 # (vacating file, claiming file) -> the reason a new entry was needed.
 #
 # A table name legitimately reused long after its DROP (e.g. Build Visualizer
-# tables dropped by 057, or `features`/`feature_test_cases` dropped by
-# 20260811033413) is NOT a case for this list — nothing reads a name that
+# tables dropped by 057, or the Feature-tier catalog table and its test-case
+# junction dropped by 20260811033413) is NOT a case for this list — nothing
+# reads a name that
 # stayed vacant. This list is only for a genuine split of one drop-then-claim
 # HANDOFF across two files; combine them into one migration instead of adding
 # a second entry unless that is truly impossible (the historical pair below

@@ -34,11 +34,10 @@ BASE_URL="https://${API_ID}.execute-api.${REGION}.amazonaws.com/${STAGE}"
 
 # The 21 Sids req #3002 removes — the redundant apigateway-darwin-<table>
 # statements, all fully subsumed by apigateway-darwin-wildcard.
-# `apigateway-darwin-features` and `apigateway-darwin-feature_test_cases` left
-# this list at req #3355 (migration 20260811033413): the `features` and
-# `feature_test_cases` tables — and their `/darwin/*`, `/darwin_dev/*` gateway
-# resources — no longer exist, so there is nothing left to verify the absence
-# of a redundant statement FOR.
+# The two Feature-tier entries (its catalog table and its test-case junction)
+# left this list at req #3355 (migration 20260811033413): those tables — and
+# their `/darwin/*`, `/darwin_dev/*` gateway resources — no longer exist, so
+# there is nothing left to verify the absence of a redundant statement FOR.
 REMOVED_SIDS=(
     apigateway-darwin-test_cases
     apigateway-darwin-test_plans

@@ -7,8 +7,9 @@
 
 WHY THIS EXISTS. On 2026-08-01 (req #3186 session 2518) `recreate_darwin_dev.sql`
 reset `darwin_dev` to empty tables. Everything else was rebuilt from a canonical
-seed — the pipeline fixture, requirements, epics, features, phase fixtures,
-build-viz — but `areas` and `tasks` had no canonical seed, so they came back
+seed — the pipeline fixture, requirements, epics, the since-retired Feature
+catalog, phase fixtures, build-viz — but `areas` and `tasks` had no canonical
+seed, so they came back
 empty and NOBODY KNEW WHAT THEY HAD HELD. Measured 2026-08-07: `domains` 6 (all
 of them e2e-worker leftovers), `areas` 0, `tasks` 0. The real dev account had no
 domain data at all.

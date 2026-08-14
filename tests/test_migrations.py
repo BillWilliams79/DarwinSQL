@@ -102,10 +102,14 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # `agents` token so the longer match wins.
         'agent_telemetry_rows',
         'agent_telemetry_runs',
-        # Req #2380 — Swarm Features & Test Cases registry (migrations 042/043/044).
+        # Req #2380 — Swarm Test Cases registry (migrations 042/043/044). The
+        # Feature-tier catalog table and its test-case junction are CREATED
+        # here by migration 042 and DROPPED by req #3355's migration
+        # (20260811033413) — both still have to be prefixed correctly by a
+        # full-history replay, which applies every migration in order.
         # Listed longest-first within this group to avoid partial matches
-        # (e.g., 'test_cases' inside 'feature_test_cases' is blocked by the
-        # regex lookbehind, but longest-first preserves future safety.)
+        # (e.g., 'test_cases' inside 'requirement_test_cases' is blocked by
+        # the regex lookbehind, but longest-first preserves future safety.)
         'feature_test_cases',
         # Req #3352 — requirement_test_cases (migration 20260809002149). Listed
         # before the shorter 'requirements' and 'test_cases' tokens (below) so
@@ -186,8 +190,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
 
     # Prefix explicitly-named FK/UNIQUE constraint names (migration 041+ convention).
     # MySQL 8.0+ enforces FK constraint-name uniqueness per schema, so prefix-test
-    # runs of migrations that name their constraints (e.g. 041's fk_requirements_category,
-    # 042's fk_features_category) need the constraint names to vary per test prefix.
+    # runs of migrations that name their constraints (e.g. 041's own
+    # fk_requirements_category) need the constraint names to vary per test prefix.
     # Pattern: any CONSTRAINT name matching fk_*_* or uq_*_* gets a prefix inserted.
     # Simple str.replace is safe — the constraint names are unique tokens and never
     # appear as column fragments inside other identifiers.
@@ -376,32 +380,36 @@ ALL_TABLE_SUFFIXES = [
     # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509), parallel
     # era. Placed BEFORE the 1.0 pipeline family, leaves first: deps/links, then
     # steps, then epics, then pipelines. Unlike 1.0's epics, epics
-    # needs no relationship to features — 2.0's epic has no feature_fk pointing
-    # at it — so it drops with its own family instead of near features below.
+    # needs no relationship to the Feature tier — 2.0's epic carries no link
+    # into it — so it drops with its own family instead of near that table below.
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
     'epics', 'pipelines',
     # Req #3111 — Swarm Orchestration 1.0. The tables were DROPPED from every
     # live database by req #3356 (migration 20260812175325), but migration 076
     # still CREATES them during a replay, so their prefixed copies still have to
     # be cleaned up. FK-safe order: the dep/link leaves, then steps, then
-    # pipelines. `epics` drops near features (below), since features.epic_fk is
-    # SET NULL and imposes no ordering of its own.
+    # pipelines. `epics` drops near the Feature-tier catalog table (below),
+    # since that table's own epic link is SET NULL and imposes no ordering of
+    # its own.
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps', 'pipelines',
     # Req #3096 — per-document actual-token rows, child of agent_telemetry_rows.
     # Req #3031 — agent context telemetry. FK-safe: row_docs, then rows, then runs.
     'agent_telemetry_row_docs', 'agent_telemetry_rows', 'agent_telemetry_runs',
     # Req #2380 validation registry — FK-safe drop order (leaves first).
     # test_results → test_runs CASCADE; test_runs → test_plans RESTRICT;
-    # feature_test_cases/test_plan_cases CASCADE from both sides;
-    # test_results → test_cases RESTRICT (so test_results must drop before test_cases).
+    # the Feature-tier test-case junction and test_plan_cases CASCADE from both
+    # sides; test_results → test_cases RESTRICT (so test_results must drop
+    # before test_cases).
     # Req #3352 — requirement_test_cases (migration 20260809002149) CASCADEs
-    # from both requirements and test_cases, same shape as feature_test_cases;
-    # it drops here too, a leaf before both requirements (below) and test_cases.
+    # from both requirements and test_cases, same shape as its dropped
+    # predecessor; it drops here too, a leaf before both requirements (below)
+    # and test_cases.
     'test_results', 'test_runs',
     'test_plan_cases', 'feature_test_cases', 'requirement_test_cases',
     'test_plans', 'test_cases', 'features',
-    # Req #3111 — epics drops after features (epics -> categories is RESTRICT;
-    # features.epic_fk is SET NULL so it imposes no order of its own).
+    # Req #3111 — epics drops after the Feature-tier catalog table
+    # (epics -> categories is RESTRICT; that table's own epic link is SET
+    # NULL so it imposes no order of its own).
     'epics',
     'user_integrations', 'map_run_partners', 'map_partners',
     'map_views', 'map_coordinates', 'map_runs', 'map_routes',
@@ -611,11 +619,11 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'map_routes', 'map_runs', 'map_coordinates',
             'map_views', 'map_partners', 'map_run_partners',
             'user_integrations',
-            # Req #2380 — Swarm Features & Test Cases registry. `features` and
-            # `feature_test_cases` are CREATED by migration 042 then DROPPED by
-            # req #3355 (migration 20260811033413 — Feature schema eradication),
-            # so — like the Build Visualizer tables below — they do NOT appear
-            # in the final replay state.
+            # Req #2380 — Swarm Test Cases registry. The Feature-tier catalog
+            # table and its test-case junction are CREATED by migration 042
+            # then DROPPED by req #3355 (migration 20260811033413 — Feature
+            # schema eradication), so — like the Build Visualizer tables
+            # below — they do NOT appear in the final replay state.
             'test_cases',
             'test_plans', 'test_plan_cases',
             'test_runs', 'test_results',
@@ -656,8 +664,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'pipelines', 'epics', 'pipeline_steps',
             'pipeline_step_requirements', 'pipeline_step_deps',
             # Req #3352 — requirement_test_cases (migration 20260809002149),
-            # the sole test-case junction since req #3355 dropped
-            # feature_test_cases.
+            # the sole test-case junction since req #3355 dropped its
+            # predecessor.
             'requirement_test_cases',
         ]
     }

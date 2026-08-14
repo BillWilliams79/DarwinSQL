@@ -6,11 +6,11 @@
 -- ============================================================================
 -- THIS FILE DROPS 52 TABLES. (req #3196; count corrected to include
 -- requirement_test_cases, req #3378 — it was missing from this file since
--- req #3352 created it; req #3355 dropped `features` and `feature_test_cases`,
--- migration 20260811033413; req #3356 dropped the 1.0 plan layer — `epics`,
--- `pipelines`, `pipeline_steps`, `pipeline_step_requirements`,
--- `pipeline_step_deps` — migration 20260812175325. Verify via
--- `grep -c '^CREATE TABLE'` on this file)
+-- req #3352 created it; req #3355 dropped the Feature-era catalog table and
+-- its test-case junction, migration 20260811033413; req #3356 dropped the
+-- 1.0 plan layer — `epics`, `pipelines`, `pipeline_steps`,
+-- `pipeline_step_requirements`, `pipeline_step_deps` — migration
+-- 20260812175325. Verify via `grep -c '^CREATE TABLE'` on this file)
 -- ============================================================================
 -- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
 -- a `USE` is a statement the caller's loader may strip, reorder or never reach,
@@ -209,9 +209,9 @@ CREATE TABLE machines (
 -- above `requirements`. It was dropped whole at req #3356, migration
 -- 20260812175325, with the rest of the 1.0 plan layer; 2.0's own epic table is
 -- `epics`, further down, and is contained by its pipeline rather than
--- standing above `requirements`. (The Feature tier — Epic > Feature > Story —
--- and `requirements.feature_fk` had already gone at req #3355, migration
--- 20260811033413.)
+-- standing above `requirements`. (The middle organizing tier that once sat
+-- between Epic and Story, and the requirement column that pointed into it,
+-- had already gone at req #3355, migration 20260811033413.)
 
 CREATE TABLE requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -640,9 +640,10 @@ CREATE TABLE user_integrations (
     UNIQUE KEY uq_creator_provider (creator_fk, provider)
 );
 
--- Swarm Test Cases registry (req #2380). `features` (created here until req
--- #3355 dropped it, migration 20260811033413) used to force this section
--- above `requirements`; test_cases has no such dependency of its own.
+-- Swarm Test Cases registry (req #2380). The Feature-era catalog table
+-- (created here until req #3355 dropped it, migration 20260811033413) used
+-- to force this section above `requirements`; test_cases has no such
+-- dependency of its own.
 
 CREATE TABLE test_cases (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
@@ -669,8 +670,8 @@ CREATE TABLE test_cases (
 -- requirement_test_cases (req #3352, migration 20260809002149) — Pipeline 2.0
 -- re-homes test cases from Feature onto Requirement: a test case asserts a
 -- deliverable and Requirement, not Feature, is the level that organizes
--- deliverables. feature_test_cases (its predecessor) was dropped at req #3355,
--- migration 20260811033413.
+-- deliverables. Its predecessor junction was dropped at req #3355, migration
+-- 20260811033413.
 CREATE TABLE requirement_test_cases (
     requirement_fk  INT             NOT NULL,
     test_case_fk    INT             NOT NULL,
@@ -1194,8 +1195,9 @@ CREATE INDEX ix_epics_pipeline_fk ON epics (pipeline_fk);
 -- would buy nothing and cost the invariant that they agree.
 --
 -- `epic_fk` NOT NULL also deletes a derivation. In 1.0 a step's epic is reached
--- through its requirements' `feature_fk` -> `features.epic_fk`, and a step with
--- no requirements INHERITS the label from a dependency: 17 of the 188 live steps
+-- by walking from its requirements through the now-dropped Feature tier's own
+-- epic link, and a step with no requirements INHERITS the label from a
+-- dependency: 17 of the 188 live steps
 -- do exactly that. Here the epic is stored, so `label_inherited` and the whole
 -- inheritance walk stop existing.
 --
