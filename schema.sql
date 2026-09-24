@@ -927,6 +927,7 @@ CREATE TABLE IF NOT EXISTS branches (
     sort_order          SMALLINT        NULL,
     external_id         VARCHAR(64)     NULL,     -- iframe slug ('main', 'release-1', 'dev-a') — req #2648 / migration 051
     acceptance_test_status VARCHAR(16)  NULL DEFAULT 'pass', -- single per-branch AT pass|fail — req #2633 / migration 061
+    branched_at         DATETIME        NULL,     -- when the branch was cut (UTC; NULL = not recorded) — req #3515
     creator_fk          VARCHAR(64)     NOT NULL,
     create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -953,6 +954,7 @@ CREATE TABLE IF NOT EXISTS builds (
     dot_color               VARCHAR(32)     NULL,        -- green|red|yellow|gray
     approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
     external_id             VARCHAR(64)     NULL,        -- iframe slug ('m1', 'r1c', 'sr3') — req #2648 / migration 051
+    built_at                DATETIME        NULL,        -- when the build ran (UTC; NULL = not recorded) — req #3515
     creator_fk              VARCHAR(64)     NOT NULL,
     create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -971,6 +973,7 @@ CREATE TABLE IF NOT EXISTS customer_releases (
     customer_fk     INT             NOT NULL,
     build_fk        INT             NOT NULL,
     release_notes   TEXT            NULL,
+    released_at     DATETIME        NULL,     -- when the build shipped to the customer (UTC; NULL = not recorded) — req #3515
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -987,6 +990,9 @@ CREATE TABLE IF NOT EXISTS customer_releases (
 );
 -- (Req #2606 directive: `closed` soft-delete column removed from every new
 -- build-feature table. Hard delete via FK CASCADE chain only.)
+-- (Req #3515: built_at / branched_at / released_at are EVENT times, distinct
+-- from the create_ts / update_ts row-write audit columns. UTC, nullable, no
+-- DEFAULT — migration 20260913064647, darwin_dev only.)
 
 -- Req #2633: Acceptance Tests (AT). Catalog + branch junction. Follows the
 -- build-viz CATALOG shape (mirrors `customers`: closed + sort_order, no
