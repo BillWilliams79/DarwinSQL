@@ -1965,6 +1965,20 @@ def test_branches_columns(db_connection):
     assert cols['acceptance_test_status']['Null'] == 'YES'
     assert 'varchar(16)' in cols['acceptance_test_status']['Type'].lower()
     assert cols['acceptance_test_status']['Default'] == 'pass'
+    # Req #3515: when the branch was cut — an EVENT time, UTC, nullable, no
+    # DEFAULT (NULL = "not recorded"; a CURRENT_TIMESTAMP default would restate
+    # create_ts as if it were the event).
+    _assert_event_datetime(cols, 'branched_at')
+
+
+def _assert_event_datetime(cols, name):
+    """Req #3515 event-time contract: DATETIME (never TIMESTAMP — no session-
+    zone conversion, no auto-initialisation), NULL allowed, no DEFAULT."""
+    assert name in cols, f'{name} missing — migration 20260913064647 not applied?'
+    assert cols[name]['Type'].lower() == 'datetime'
+    assert cols[name]['Null'] == 'YES'
+    assert cols[name]['Default'] is None
+    assert cols[name]['Extra'] == ''     # no DEFAULT_GENERATED / ON UPDATE
 
 
 def test_acceptance_tests_columns(db_connection):
@@ -2097,6 +2111,8 @@ def test_builds_columns(db_connection):
     # Req #2606: no `closed` column; auto-numbered (no `title`).
     assert 'closed' not in cols
     assert 'title' not in cols
+    # Req #3515: when the build ran (shown in the Build Visualizer, Pacific).
+    _assert_event_datetime(cols, 'built_at')
 
 
 def test_customer_releases_columns(db_connection):
@@ -2107,6 +2123,8 @@ def test_customer_releases_columns(db_connection):
     assert cols['release_notes']['Null'] == 'YES'
     assert cols['creator_fk']['Null'] == 'NO'
     assert 'closed' not in cols
+    # Req #3515: when the build shipped to the customer.
+    _assert_event_datetime(cols, 'released_at')
 
 
 # ============================================================================

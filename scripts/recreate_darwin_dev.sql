@@ -819,6 +819,7 @@ CREATE TABLE branches (
     sort_order          SMALLINT        NULL,
     external_id         VARCHAR(64)     NULL,
     acceptance_test_status VARCHAR(16)  NULL DEFAULT 'pass', -- single per-branch AT pass|fail — req #2633 / migration 061
+    branched_at         DATETIME        NULL,     -- req #3515
     creator_fk          VARCHAR(64)     NOT NULL,
     create_ts           TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts           TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -845,6 +846,7 @@ CREATE TABLE builds (
     dot_color               VARCHAR(32)     NULL,
     approved_for_release    TINYINT(1)      NOT NULL DEFAULT 0,
     external_id             VARCHAR(64)     NULL,
+    built_at                DATETIME        NULL,        -- req #3515
     creator_fk              VARCHAR(64)     NOT NULL,
     create_ts               TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts               TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -863,6 +865,7 @@ CREATE TABLE customer_releases (
     customer_fk     INT             NOT NULL,
     build_fk        INT             NOT NULL,
     release_notes   TEXT            NULL,
+    released_at     DATETIME        NULL,     -- req #3515
     creator_fk      VARCHAR(64)     NOT NULL,
     create_ts       TIMESTAMP       NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP       NULL ON UPDATE CURRENT_TIMESTAMP,
