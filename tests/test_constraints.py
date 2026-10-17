@@ -528,7 +528,8 @@ def test_swarm_status_not_null(db_connection, test_creator_fk):
 # ---------------------------------------------------------------------------
 
 def test_requirement_status_default(db_connection, test_creator_fk, test_category_id):
-    """INSERT requirement without requirement_status → defaults to 'authoring' (migration 039)"""
+    """INSERT requirement without requirement_status → 'swarm_ready' (req #3573, SRIOH;
+    was 'authoring' from migration 039 until migration 20261017110145)."""
     with db_connection.cursor() as cur:
         cur.execute(
             "INSERT INTO requirements (title, creator_fk, category_fk) VALUES (%s, %s, %s)",
@@ -540,7 +541,7 @@ def test_requirement_status_default(db_connection, test_creator_fk, test_categor
         cur.execute("SELECT requirement_status FROM requirements WHERE id = %s",
                     (requirement_id,))
         row = cur.fetchone()
-        assert row['requirement_status'] == 'authoring'
+        assert row['requirement_status'] == 'swarm_ready'
 
     db_connection.rollback()
 

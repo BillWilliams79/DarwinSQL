@@ -1,0 +1,54 @@
+-- 20261017110145_requirements_status_default_swarm_ready.sql
+--
+-- Req #3573: a new requirement is born SRIOH — Swarm-Ready / Implemented /
+-- Opus / High — so the column default for `requirement_status` moves from
+-- 'authoring' to 'swarm_ready'.
+--
+-- PROBLEM.  The user ruled that the default requirement is SRIOH. Three of the
+--           four columns already default to it (coordination_type 'implemented',
+--           ai_model 'opus', effort 'high' — req #2745 / #3434); the fourth,
+--           requirement_status, still defaults to 'authoring' (migration 039).
+--           Every application create path now sends 'swarm_ready' explicitly,
+--           but a writer that OMITS the field would still land 'authoring' —
+--           the database disagreeing with every other layer, which is the
+--           exact inexplicable-value shape req #3434 closed for ai_model/effort.
+--
+-- SHAPE.    One `ALTER TABLE ... ALTER COLUMN ... SET DEFAULT`. Unlike
+--           20260814132630 this does NOT restate the definition with MODIFY:
+--           the type, nullability and (absent) comment are unchanged, and
+--           SET DEFAULT cannot silently revert a later change to the column the
+--           way a restated MODIFY can. schema.sql carries the new DEFAULT.
+--
+--           NO EXISTING ROW IS TOUCHED. A default governs births only; an
+--           'authoring' requirement stays exactly where its author put it.
+--           Idempotent — re-applying sets the same default.
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261017110145_requirements_status_default_swarm_ready.sql darwin_dev
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261017110145_requirements_status_default_swarm_ready.sql darwin --production
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20261017110145` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20261017110145 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+
+
+ALTER TABLE requirements
+    ALTER COLUMN requirement_status SET DEFAULT 'swarm_ready';
