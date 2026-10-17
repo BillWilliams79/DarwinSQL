@@ -398,7 +398,7 @@ def test_requirements_columns(db_connection):
     - id: INT, PRI, AUTO_INCREMENT
     - title: VARCHAR(256), NOT NULL
     - description: TEXT, NULL
-    - requirement_status: VARCHAR(16), NOT NULL, DEFAULT 'authoring'
+    - requirement_status: VARCHAR(16), NOT NULL, DEFAULT 'swarm_ready' (req #3573, migration 20261017110145)
     - started_at: TIMESTAMP, NULL
     - completed_at: TIMESTAMP, NULL
     - deferred_at: TIMESTAMP, NULL
@@ -460,7 +460,7 @@ def test_requirements_columns(db_connection):
 
     assert columns['requirement_status']['Type'] == 'varchar(16)'
     assert columns['requirement_status']['Null'] == 'NO'
-    assert columns['requirement_status']['Default'] == 'authoring'
+    assert columns['requirement_status']['Default'] == 'swarm_ready'
 
     assert 'timestamp' in columns['deferred_at']['Type']
     assert columns['deferred_at']['Null'] == 'YES'

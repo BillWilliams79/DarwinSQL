@@ -183,8 +183,11 @@ CREATE TABLE IF NOT EXISTS requirements (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
     description     TEXT            NULL,
-    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'authoring',
+    requirement_status VARCHAR(16)  NOT NULL DEFAULT 'swarm_ready',
                                             -- authoring | approved | swarm_ready | development | met | deferred | wontfix
+                                            -- DEFAULT 'swarm_ready' since req #3573, migration 20261017110145 (was
+                                            -- 'authoring', migration 039): a requirement is born SRIOH —
+                                            -- Swarm-Ready / Implemented / Opus / High.
     started_at      TIMESTAMP       NULL,
     completed_at    TIMESTAMP       NULL,
     deferred_at     TIMESTAMP       NULL,
