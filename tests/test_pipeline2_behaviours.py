@@ -1,7 +1,7 @@
 """Pipeline 2.0 plan-layer schema behaviours (req #3337).
 
 # COVERS: SCH-001, SCH-002, SCH-003, SCH-004, SCH-005, SCH-006, SCH-007,
-# COVERS: SCH-008, SCH-010, SCH-011, SCH-012, SCH-030, SCH-036
+# COVERS: SCH-008, SCH-010, SCH-011, SCH-012, SCH-030, SCH-036, SCH-040
 
 Structural (DESCRIBE / SHOW INDEX / information_schema) and functional
 (insert/delete against real rows) proof for the behaviours stated by
@@ -219,6 +219,22 @@ def test_pipeline_status_default_is_draft(db_connection):
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'pipelines')
     assert cols['pipeline_status']['Default'] == 'draft'
+
+
+# ---------------------------------------------------------------------------
+# SCH-040 — req #3649: every step is born a CHECKPOINT, nothing is born LOCKED
+# ---------------------------------------------------------------------------
+
+def test_checkpoint_defaults_on_and_locked_defaults_off(db_connection):
+    with db_connection.cursor() as cur:
+        steps = _columns(cur, 'pipeline_steps')
+        epics = _columns(cur, 'epics')
+        pipelines = _columns(cur, 'pipelines')
+    assert steps['checkpoint']['Default'] == '1'
+    assert steps['checkpoint']['Null'] == 'NO'
+    for cols in (steps, epics, pipelines):
+        assert cols['locked']['Default'] == '0'
+        assert cols['locked']['Null'] == 'NO'
 
 
 # ---------------------------------------------------------------------------
