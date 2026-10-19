@@ -1137,6 +1137,9 @@ CREATE TABLE pipelines (
                                                               -- 1.0 `pipelines` — a real plan
                                                               -- property, not 1.0-specific debt, so
                                                               -- the #3356 importer must copy it.
+    locked          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3649: 1 = a relic in time; freezes
+                                                          -- the plan, its epics and steps (gateway-
+                                                          -- enforced, Lambda-Rest/plan_lock.py)
     machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
     creator_fk      VARCHAR(64)  NOT NULL,
     started_at      TIMESTAMP    NULL,                     -- derived from the status transition
@@ -1174,6 +1177,7 @@ CREATE TABLE epics (
     title       VARCHAR(256) NOT NULL,
     description TEXT         NULL,                         -- PURPOSE only (design rule 11)
     epic_status VARCHAR(16)  NOT NULL DEFAULT 'active',    -- active|paused; SUPPRESSION, not lifecycle
+    locked      TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this epic and its steps
     category_fk INT          NOT NULL,                     -- DISPLAY ONLY; gates nothing
     sort_order  SMALLINT     NULL,                         -- NULL=derived order; value=manual, wins
     closed      TINYINT(1)   NOT NULL DEFAULT 0,           -- finished; distinct from paused
@@ -1221,6 +1225,9 @@ CREATE TABLE pipeline_steps (
     epic_fk      INT          NOT NULL,                     -- CONTAINMENT; the pipeline is derived
     title        VARCHAR(256) NOT NULL,
     run          VARCHAR(8)   NOT NULL DEFAULT 'auto',      -- auto|manual
+    checkpoint   TINYINT(1)   NOT NULL DEFAULT 1,           -- req #3649: 1 = holds every downstream step until
+                                                            -- done; 0 = a launch priority only
+    locked       TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this step
     not_before   TIMESTAMP    NULL,                         -- the time gate, one instant per step
     notes        TEXT         NULL,                         -- evidence / findings / dispositions
     completed_at TIMESTAMP    NULL,                         -- manual stamp; gating-requirement-free steps only
