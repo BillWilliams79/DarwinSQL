@@ -1337,6 +1337,7 @@ CREATE TABLE orchestration_claims (
     epic_fk       INT          NULL DEFAULT NULL,       -- NULL = whole-plan scope
     epic_key      INT          AS (COALESCE(epic_fk, 0)) VIRTUAL, -- carries uq_..._scope
     machine_fk    INT          NULL DEFAULT NULL,       -- WHERE it runs
+    machine_key   INT          AS (COALESCE(machine_fk, 0)) VIRTUAL, -- req #3678, carries uq_..._scope
     terminal_pid  INT          NULL DEFAULT NULL,       -- the Claude Code CLI process
     engine_pid    INT          NULL DEFAULT NULL,       -- DIAGNOSTIC ONLY, never liveness
     polls         INT          NOT NULL DEFAULT 0,      -- the heartbeat payload
@@ -1344,7 +1345,7 @@ CREATE TABLE orchestration_claims (
     creator_fk    VARCHAR(64)  NOT NULL,
     create_ts     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts     TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,  -- THE liveness clock
-    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key),
+    UNIQUE KEY uq_orchestration_claims_scope (pipeline_fk, epic_key, machine_key),
     CONSTRAINT fk_oc_pipeline
         FOREIGN KEY (pipeline_fk) REFERENCES pipelines (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
