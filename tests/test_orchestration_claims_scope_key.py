@@ -79,8 +79,10 @@ def test_only_the_plain_scope_key_survives(db_connection):
     # The era-suffixed key name (`…_scope2`) is gone with the rest of the
     # `pipeline2_*` era marker; only the plain-named key survives, on the
     # same two columns it always carried.
+    # req #3678 — the machine joined the key, so a SECOND machine may hold a
+    # subscriber row on a scope another machine leads.
     assert by_key == {'uq_orchestration_claims_scope':
-                      ['pipeline_fk', 'epic_key']}, by_key
+                      ['pipeline_fk', 'epic_key', 'machine_key']}, by_key
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +171,59 @@ def test_two_different_epics_of_one_plan_both_insert(
         cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
         cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
     db_connection.commit()
+
+
+# ---------------------------------------------------------------------------
+# req #3678 — one row per scope PER MACHINE
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def two_machines(db_connection, test_creator_fk):
+    ids = []
+    with db_connection.cursor() as cur:
+        for tag in ('a', 'b'):
+            cur.execute("INSERT INTO machines (title, hostname, platform, arch, creator_fk) "
+                        "VALUES (%s, %s, 'darwin', 'arm64', %s)",
+                        (f'oc-m-{tag}-{uuid.uuid4().hex[:6]}',
+                         f'oc-host-{tag}-{uuid.uuid4().hex[:6]}', test_creator_fk))
+            ids.append(cur.lastrowid)
+    db_connection.commit()
+    yield ids
+    with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM orchestration_claims WHERE machine_fk IN (%s, %s)",
+                    tuple(ids))
+        cur.execute("DELETE FROM machines WHERE id IN (%s, %s)", tuple(ids))
+    db_connection.commit()
+
+
+def test_two_machines_may_hold_the_same_scope(
+        db_connection, p2_pipeline, two_machines, test_creator_fk):
+    # The lead and a subscriber: same whole-plan scope, different machines.
+    with db_connection.cursor() as cur:
+        for machine in two_machines:
+            cur.execute(
+                "INSERT INTO orchestration_claims (pipeline_fk, machine_fk, creator_fk) "
+                "VALUES (%s, %s, %s)", (p2_pipeline, machine, test_creator_fk))
+        cur.execute("SELECT COUNT(*) AS n FROM orchestration_claims "
+                    "WHERE pipeline_fk = %s", (p2_pipeline,))
+        count = cur.fetchone()['n']
+    db_connection.commit()
+    assert count == 2
+
+
+def test_one_machine_may_not_hold_the_same_scope_twice(
+        db_connection, p2_pipeline, two_machines, test_creator_fk):
+    machine = two_machines[0]
+    with db_connection.cursor() as cur:
+        cur.execute(
+            "INSERT INTO orchestration_claims (pipeline_fk, machine_fk, creator_fk) "
+            "VALUES (%s, %s, %s)", (p2_pipeline, machine, test_creator_fk))
+    db_connection.commit()
+    with pytest.raises(pymysql.err.IntegrityError) as exc:
+        with db_connection.cursor() as cur:
+            cur.execute(
+                "INSERT INTO orchestration_claims (pipeline_fk, machine_fk, creator_fk) "
+                "VALUES (%s, %s, %s)", (p2_pipeline, machine, test_creator_fk))
+    db_connection.rollback()
+    assert exc.value.args[0] == 1062
+    assert 'uq_orchestration_claims_scope' in str(exc.value.args[1])
