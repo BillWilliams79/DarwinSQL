@@ -1399,11 +1399,13 @@ CREATE TABLE IF NOT EXISTS pipeline_steps (
 
 CREATE INDEX ix_pipeline_steps_epic_fk ON pipeline_steps (epic_fk);
 
--- Membership, not ownership. Asymmetric on purpose, and carried over from 1.0:
--- `step_fk` CASCADE because the links are the step's own data, `requirement_fk`
--- RESTRICT because a requirement that appears in a plan cannot be deleted out
--- from under it. This deviates from the junction default of CASCADE on both
--- sides, deliberately.
+-- Membership, not ownership. CASCADE on both sides, the junction default.
+-- `step_fk` because the links are the step's own data; `requirement_fk` since
+-- req #3706 (migration 20261021060108), which reversed the original RESTRICT:
+-- deleting a requirement is the user's intent and its seat goes with it,
+-- exactly as `unlink_step_requirement` would remove it. The step survives. A
+-- LOCKED plan is still protected — the gateway refuses (423) deleting a
+-- requirement seated on an effectively locked step (Lambda-Rest plan_lock.py).
 --
 -- Points at the SHARED `requirements` table, not at a doubled copy. Held here
 -- rather than as a column on `requirements` because during the parallel era that
@@ -1424,7 +1426,7 @@ CREATE TABLE IF NOT EXISTS pipeline_step_requirements (
         ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_psr_requirement
         FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
-        ON UPDATE CASCADE ON DELETE RESTRICT
+        ON UPDATE CASCADE ON DELETE CASCADE
 );
 
 -- ONE ROW = ONE EDGE, and nothing else. The time gate left this table for a
