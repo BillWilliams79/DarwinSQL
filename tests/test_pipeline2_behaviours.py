@@ -177,16 +177,36 @@ def test_duplicate_step_dependency_edge_is_refused(db_connection, p2_graph):
 
 
 # ---------------------------------------------------------------------------
-# SCH-007 — pipeline_step_requirements is asymmetric: step_fk CASCADE,
-# requirement_fk RESTRICT
+# SCH-007 — pipeline_step_requirements CASCADEs on both sides: deleting a
+# step drops its links, deleting a requirement drops its seat (req #3706
+# reversed the requirement side's original RESTRICT)
 # ---------------------------------------------------------------------------
 
-def test_step_requirements_fk_actions_are_asymmetric(db_connection):
+def test_step_requirements_fk_actions_cascade_both_sides(db_connection):
     with db_connection.cursor() as cur:
-        step_update, step_delete = _referential_action(cur, 'fk_p2_psr_step')
-        req_update, req_delete = _referential_action(cur, 'fk_p2_psr_requirement')
+        step_update, step_delete = _referential_action(cur, 'fk_psr_step')
+        req_update, req_delete = _referential_action(cur, 'fk_psr_requirement')
     assert (step_update, step_delete) == ('CASCADE', 'CASCADE')
-    assert (req_update, req_delete) == ('CASCADE', 'RESTRICT')
+    assert (req_update, req_delete) == ('CASCADE', 'CASCADE')
+
+
+def test_deleting_a_seated_requirement_drops_its_seat_and_spares_the_step(
+        db_connection, p2_graph):
+    # req #3706 — the user-reported defect: a seated requirement could not be
+    # deleted (1451). It now deletes, its seat goes, the step stays.
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['requirement']))
+        cur.execute("DELETE FROM requirements WHERE id = %s", (p2_graph['requirement'],))
+        cur.execute("SELECT COUNT(*) AS n FROM pipeline_step_requirements "
+                    "WHERE requirement_fk = %s", (p2_graph['requirement'],))
+        seats = cur.fetchone()['n']
+        cur.execute("SELECT COUNT(*) AS n FROM pipeline_steps WHERE id = %s",
+                    (p2_graph['step_a'],))
+        steps = cur.fetchone()['n']
+    db_connection.commit()
+    assert seats == 0
+    assert steps == 1
 
 
 # ---------------------------------------------------------------------------
