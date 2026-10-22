@@ -1,0 +1,72 @@
+-- 20261022024615_drop_pipeline_steps_completed_at.sql
+--
+-- Req #3752: drop the dead column `pipeline_steps.completed_at` — phase 2 of
+-- req #3750 (a pipeline STEP HAS NO STATE).
+--
+-- PROBLEM.  Req #3750 (user ruling 2026-10-21) made a step a HOLDER of
+--           requirements with orchestration controls and no state of its own:
+--           never completed, never reopened. It removed every read and write
+--           of a step's `completed_at` — the Lambda-Rest compose read and
+--           derivation, `plan_lock.py`, darwin-mcp's complete/reopen tools
+--           (deleted), the engine and the browser — but could not drop the
+--           column, because the Lambda-Rest deployed before #3750 selected it
+--           by name in the composed plan read. The column is now a stored fact
+--           nothing reads and nothing may write.
+--
+-- SHAPE.    DROP COLUMN, and in the same ALTER restate `checkpoint` with a
+--           COMMENT, because its old wording ("holds every downstream step
+--           until done") described a step that could be DONE. The column's
+--           type, nullability and DEFAULT 1 are unchanged — the MODIFY only
+--           carries the comment.
+--
+-- LOSS.     Measured 2026-10-22 immediately before allocating this file:
+--             darwin_dev  0 of 106 steps stamped;
+--             production  1 of 263 — step 146 "Green Baseline" (plan 8, no
+--                         linked requirements), stamped 2026-07-28 05:25:47.
+--           Under #3750's rule an empty step holds nothing, so dropping that
+--           stamp changes no orchestration outcome. Re-measure before the
+--           production apply:
+--             SELECT id, title, completed_at FROM pipeline_steps
+--              WHERE completed_at IS NOT NULL;
+--
+-- SEQUENCING. Both readers that projected this column by name must already be
+--           running post-#3750 code before the PRODUCTION apply, or every plan
+--           read 400s on the unknown column: the deployed RestApi-MySql-Lambda
+--           (`pipeline2_compose.py::_STEP_COLUMNS`) and the shared darwin-mcp
+--           daemon (`services/common.py::TABLE_COLUMNS['pipeline_steps']`).
+--           Verified for this requirement on 2026-10-22: Lambda LastModified
+--           02:30:49Z with no step `completed_at`; daemon restarted onto
+--           primary 44b3752 (#3750's merge).
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261022024615_drop_pipeline_steps_completed_at.sql darwin_dev --destructive
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261022024615_drop_pipeline_steps_completed_at.sql darwin --production --destructive
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20261022024615` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20261022024615 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+--
+-- darwin:destructive
+
+ALTER TABLE pipeline_steps
+    DROP COLUMN completed_at,
+    MODIFY COLUMN checkpoint TINYINT(1) NOT NULL DEFAULT 1
+        COMMENT 'req #3649/#3750: 1 = holds every downstream step while it holds open work; 0 = launch priority only';

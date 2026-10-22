@@ -452,9 +452,11 @@ def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
     """
     p2 = ['pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
           'epics', 'pipelines']
-    p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps')
-
     p2_positions = [ALL_TABLE_SUFFIXES.index(name) for name in p2]
+    # Req #3356 renamed the 2.0 tables onto the 1.0 names, so both families
+    # list the same suffixes: the 1.0 block is the SECOND `pipeline_step_deps`.
+    p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps', p2_positions[0] + 1)
+
     assert p2_positions == sorted(p2_positions), \
         'pipeline2_* family must appear leaves-first, in this exact order'
     assert max(p2_positions) < p1_start, \

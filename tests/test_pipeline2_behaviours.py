@@ -136,6 +136,8 @@ def test_no_step_table_carries_a_state_column(db_connection, table):
     with db_connection.cursor() as cur:
         cols = _columns(cur, table)
     assert 'state' not in cols and 'status' not in cols
+    # req #3752 dropped the last of it: a step has no completion stamp either.
+    assert 'completed_at' not in cols
 
 
 # ---------------------------------------------------------------------------
