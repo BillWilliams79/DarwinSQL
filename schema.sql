@@ -230,8 +230,8 @@ CREATE TABLE IF NOT EXISTS requirements (
                                             -- being work performed inside it, so it stays `development` for that
                                             -- plan's whole life. A pipeline step EXCLUDES tracking requirements
                                             -- from its gating set (design rule 1) and from its /swarm-start
-                                            -- argument list (rule 8); a step whose links are ALL tracking derives
-                                            -- from its own completed_at, exactly as a link-less step does.
+                                            -- argument list (rule 8); a step whose links are ALL tracking holds
+                                            -- no open work, exactly as a link-less step does (req #3750).
                                             -- Orthogonal to requirement_status — a container has a lifecycle too
                                             -- — which is why this is a flag and not a status value.
     FOREIGN KEY (project_fk)
@@ -1372,20 +1372,21 @@ CREATE INDEX ix_epics_pipeline_fk ON epics (pipeline_fk);
 -- gate, so this is kept for its stated future use — organising around token
 -- windows — and not because anything depends on it today.
 --
--- `completed_at` stays a manual stamp valid ONLY for a step with no GATING
--- requirement. A requirement-backed step's state is DERIVED and has no column,
--- here as it was in 1.0.
+-- A step has NO STATE and no completion stamp (req #3750; its dead
+-- `completed_at` was dropped by req #3752, migration 20261022024615). It holds
+-- requirements and carries orchestration controls — `run`, `checkpoint`,
+-- `locked`, `not_before` and its dependency edges; every orchestration question
+-- is asked of the requirements it holds.
 CREATE TABLE IF NOT EXISTS pipeline_steps (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
     epic_fk      INT          NOT NULL,                     -- CONTAINMENT; the pipeline is derived
     title        VARCHAR(256) NOT NULL,
     run          VARCHAR(8)   NOT NULL DEFAULT 'auto',      -- auto|manual
-    checkpoint   TINYINT(1)   NOT NULL DEFAULT 1,           -- req #3649: 1 = holds every downstream step until
-                                                            -- done; 0 = a launch priority only
+    checkpoint   TINYINT(1)   NOT NULL DEFAULT 1
+        COMMENT 'req #3649/#3750: 1 = holds every downstream step while it holds open work; 0 = launch priority only',
     locked       TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this step
     not_before   TIMESTAMP    NULL,                         -- the time gate, one instant per step
     notes        TEXT         NULL,                         -- evidence / findings / dispositions
-    completed_at TIMESTAMP    NULL,                         -- manual stamp; gating-requirement-free steps only
     creator_fk   VARCHAR(64)  NOT NULL,
     create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
