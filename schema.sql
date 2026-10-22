@@ -1284,7 +1284,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
     id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal; PURPOSE only (design rule 11)
-    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed
     execution_mode  ENUM('parallel', 'serial')
                                  NOT NULL DEFAULT 'parallel', -- req #3388: parallel = every epic at
                                                               -- once; serial = one at a time, live
