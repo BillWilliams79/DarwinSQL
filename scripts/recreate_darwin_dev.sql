@@ -1217,20 +1217,21 @@ CREATE INDEX ix_epics_pipeline_fk ON epics (pipeline_fk);
 -- kept for its stated future use — organising around token windows — and not
 -- because anything depends on it today.
 --
--- `completed_at` stays a manual stamp valid ONLY for a step with no GATING
--- requirement. A requirement-backed step's state is DERIVED and has no column,
--- here as in 1.0.
+-- A step has NO STATE and no completion stamp (req #3750; its dead
+-- `completed_at` was dropped by req #3752, migration 20261022024615). It holds
+-- requirements and carries orchestration controls — `run`, `checkpoint`,
+-- `locked`, `not_before` and its dependency edges; every orchestration question
+-- is asked of the requirements it holds.
 CREATE TABLE pipeline_steps (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
     epic_fk      INT          NOT NULL,                     -- CONTAINMENT; the pipeline is derived
     title        VARCHAR(256) NOT NULL,
     run          VARCHAR(8)   NOT NULL DEFAULT 'auto',      -- auto|manual
-    checkpoint   TINYINT(1)   NOT NULL DEFAULT 1,           -- req #3649: 1 = holds every downstream step until
-                                                            -- done; 0 = a launch priority only
+    checkpoint   TINYINT(1)   NOT NULL DEFAULT 1
+        COMMENT 'req #3649/#3750: 1 = holds every downstream step while it holds open work; 0 = launch priority only',
     locked       TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this step
     not_before   TIMESTAMP    NULL,                         -- the time gate, one instant per step
     notes        TEXT         NULL,                         -- evidence / findings / dispositions
-    completed_at TIMESTAMP    NULL,                         -- manual stamp; gating-requirement-free steps only
     creator_fk   VARCHAR(64)  NOT NULL,
     create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
