@@ -70,6 +70,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Req #3756 — Engine 2 data contract (migration 20261022073056). No name
         # here occurs inside another table name; the FK column `engine_state_fk`
         # is not matched by `engine_states` (no trailing `s`).
+        # Req #3815 — requirement_debug_captures (migration 20261023103433).
+        # Contains `requirement` but no other table name is a substring of it.
+        'requirement_debug_captures',
         'engine_decision_records',
         'engine_heartbeats',
         'engine_outcomes',
@@ -326,6 +329,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_eo_record', 'fk_eo_requirement', 'fk_eo_step', 'fk_eo_creator',
         'uq_engine_outcomes_item', 'ix_engine_outcomes_requirement_fk',
         'fk_ei_creator', 'uq_engine_inputs_hash',
+        # Migration 20261023103433 — requirement_debug_captures (req #3815).
+        'fk_rdc_requirement', 'fk_rdc_creator', 'uq_requirement_debug_captures_req',
         # Migration 20261023090122 — rename epics to initiatives (req #3777).
         # Every renamed constraint and index, under its NEW name; the old names
         # above stay registered because the files that created them still replay.
@@ -406,6 +411,8 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3815 — a leaf: points at requirements and profiles, pointed at by nothing.
+    'requirement_debug_captures',
     # Req #3756 — Engine 2 data contract. Leaves first: outcomes point at
     # records, heartbeats at states and claims.
     'engine_outcomes', 'engine_decision_records', 'engine_heartbeats',
@@ -712,6 +719,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # Req #3756 — Engine 2 data contract (migration 20261022073056).
             'engine_states', 'engine_heartbeats', 'engine_decision_records',
             'engine_outcomes', 'engine_inputs',
+            # Req #3815 — the Bug button's debug capture (migration 20261023103433).
+            'requirement_debug_captures',
         ]
     }
     assert tables == expected_tables, \
