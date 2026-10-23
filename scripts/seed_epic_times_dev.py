@@ -29,7 +29,7 @@ columns and both AM and PM:
 
   Initiative "Shipped"     a chain of finished epics — single, relaunched,
                            a wide 5-requirement epic crossing noon, a
-                           Primary closeout (end only), a deferral closing a
+                           Primary closeout (end only), a deferral closing an
                            epic (its END is the deferral — needs the
                            Lambda-Rest `deferred_at` projection deployed)
   Initiative "In flight"   a multi-day epic finished today, a running epic
@@ -57,8 +57,7 @@ TARGETS = ['darwin_dev']
 CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
 
 PLAN_TITLE = 'seed-3825: Epic start/end times'
-LEGACY_PLAN_TITLE = 'seed-3825: Step start/end times'
-PREFIX = '__stepseed/'
+PREFIX = '__epicseed/'
 # PREFIX as a LIKE pattern: `_` is a one-character wildcard there.
 PREFIX_LIKE = PREFIX.replace('_', '\\_') + '%'
 
@@ -123,12 +122,7 @@ def existing_plan(cur):
 
 
 def delete_fixture(cur):
-    # The title this fixture carried before req #3780 renamed steps to epics,
-    # so a reset also clears a plan seeded under it.
-    cur.execute('SELECT id FROM pipelines WHERE title IN (%s, %s) AND creator_fk = %s',
-                (PLAN_TITLE, LEGACY_PLAN_TITLE, CREATOR_FK))
-    for row in cur.fetchall():
-        delete_plan(cur, row['id'])
+    delete_plan(cur, existing_plan(cur))
     cur.execute('DELETE FROM swarm_sessions WHERE task_name LIKE %s AND creator_fk = %s',
                 (PREFIX_LIKE, CREATOR_FK))
     cur.execute('DELETE FROM requirements WHERE title LIKE %s AND creator_fk = %s',

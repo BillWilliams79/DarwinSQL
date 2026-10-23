@@ -610,8 +610,8 @@ def test_swarm_sessions_columns(db_connection):
             expected_fields.append(envelope)
     assert set(columns.keys()) == set(expected_fields)
 
-    # req #3343 (SWM-022): step-addressed launch execution deliberately adds no
-    # column anywhere — a step is derivable from a session's requirement via
+    # req #3343 (SWM-022): epic-addressed launch execution deliberately adds no
+    # column anywhere — an epic is derivable from a session's requirement via
     # the plan's own membership junction (design rule 11). The exact-set
     # assertion above already proves this structurally; this one names the
     # specific column a future change must not reintroduce.
@@ -812,9 +812,9 @@ def test_swarm_starts_columns(db_connection):
     assert set(columns.keys()) == set(expected_fields)
 
     # req #3343 (SWM-022): the one swarm_starts row per invocation is the
-    # step-addressed launch unit's birth record via its `arguments` column
+    # epic-addressed launch unit's birth record via its `arguments` column
     # (holding the typed input verbatim) — no `epic_fk` column, deliberately;
-    # a step is derivable through session -> requirement -> step membership.
+    # an epic is derivable through session -> requirement -> epic membership.
     assert 'epic_fk' not in columns
 
     assert columns['id']['Type'] == 'int'
@@ -1887,7 +1887,7 @@ def test_table_count(db_connection):
         # guarantee crosses a machine boundary instead of living in /tmp.
         'orchestration_claims',
         # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
-        # Containment chain Pipeline -> Initiative -> Step -> Requirement.
+        # Containment chain Pipeline -> Initiative -> Epic -> Requirement.
         'pipelines', 'initiatives', 'epics',
         'epic_requirements', 'epic_deps',
         # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
@@ -2508,6 +2508,6 @@ def test_agent_telemetry_row_docs_columns(db_connection):
 # the whole section went with them.
 #
 # The 2.0 successors' shape — including the ABSENT columns, which are the
-# load-bearing half (no state column, no seq column, no pipeline reference on a
-# step) — is asserted in `tests/test_pipeline2_behaviours.py`.
+# load-bearing half (no state column, no seq column, no pipeline reference on an
+# epic) — is asserted in `tests/test_pipeline2_behaviours.py`.
 # ============================================================================

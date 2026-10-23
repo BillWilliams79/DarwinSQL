@@ -1283,8 +1283,8 @@ CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row
 -- ---------------------------------------------------------------------------
 -- The plan layer (req #3328 design)
 -- ---------------------------------------------------------------------------
--- It stood BESIDE the first-generation five (`pipelines`, `pipeline_steps`,
--- `pipeline_step_requirements`, `pipeline_step_deps`, `initiatives`) while both
+-- It stood BESIDE the first-generation five (`pipelines`, `epics`,
+-- `epic_requirements`, `epic_deps`, `initiatives`) while both
 -- eras ran in parallel; that first generation was archived and dropped at
 -- req #3356 (migration 20260812175325), and this layer was renamed into its
 -- freed plain names in the same requirement's second half (migration
