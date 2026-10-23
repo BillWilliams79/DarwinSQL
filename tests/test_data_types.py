@@ -1899,6 +1899,9 @@ def test_table_count(db_connection):
         # executor outcomes, content-addressed decide() inputs.
         'engine_states', 'engine_heartbeats', 'engine_decision_records',
         'engine_outcomes', 'engine_inputs',
+        # Req #3815 — the Requirement Filer Bug button's debug capture
+        # (migration 20261023103433), one row per requirement.
+        'requirement_debug_captures',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"

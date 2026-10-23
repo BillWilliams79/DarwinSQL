@@ -792,6 +792,27 @@ CREATE TABLE IF NOT EXISTS requirement_test_cases (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
+-- requirement_debug_captures (req #3815, migration 20261023103433) — the
+-- Requirement Filer Bug button's debug capture, one row per requirement. A side
+-- table because the bundle (7.5-44.4 KB measured, ~254 K chars at the caps)
+-- outgrows requirements.description and must never ride into a list read; it is
+-- read one row at a time by requirement id (darwin://requirement-debug/{id}).
+CREATE TABLE IF NOT EXISTS requirement_debug_captures (
+    id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    requirement_fk  INT          NOT NULL,               -- the requirement the Bug button filed
+    bundle          MEDIUMTEXT   NOT NULL,               -- the capture JSON, uncompressed
+    bundle_bytes    INT          NOT NULL DEFAULT 0,     -- its length, as the browser serialized it
+    creator_fk      VARCHAR(64)  NOT NULL,
+    create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_requirement_debug_captures_req (requirement_fk),
+    CONSTRAINT fk_rdc_requirement
+        FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_rdc_creator
+        FOREIGN KEY (creator_fk) REFERENCES profiles (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS test_plans (
     id              INT             NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256)    NOT NULL,
