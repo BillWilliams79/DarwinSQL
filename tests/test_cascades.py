@@ -1465,9 +1465,9 @@ def test_delete_profile_cascades_to_row_docs(db_connection):
 
 
 # ============================================================================
-# swarm_sessions orchestration attribution. `pipeline_fk` and `epic_fk` are
+# swarm_sessions orchestration attribution. `pipeline_fk` and `initiative_fk` are
 # ON DELETE SET NULL, and that choice is the whole safety argument for the
-# columns: session history must never be the reason a plan or an epic cannot be
+# columns: session history must never be the reason a plan or an initiative cannot be
 # deleted. RESTRICT here would be the grief-lock shape req #3125 catalogues — a
 # 409 naming a constraint held by rows the user has no reason to connect to the
 # delete they attempted.
@@ -1521,14 +1521,14 @@ def test_delete_pipeline_sets_session_pipeline2_fk_null(db_connection):
     db_connection.rollback()
 
 
-def test_delete_epic_sets_session_epic2_fk_null(db_connection, test_category_id):
-    """DELETE epic → swarm_sessions.epic_fk = NULL, session survives.
+def test_delete_initiative_sets_session_initiative_fk_null(db_connection, test_category_id):
+    """DELETE initiative → swarm_sessions.initiative_fk = NULL, session survives.
 
-    The epic is deleted DIRECTLY, not through its pipeline: deleting the
-    pipeline would cascade to the epic and NULL the session's `pipeline_fk`
+    The initiative is deleted DIRECTLY, not through its pipeline: deleting the
+    pipeline would cascade to the initiative and NULL the session's `pipeline_fk`
     too, so a passing assertion would not tell you which FK did the work.
     """
-    test_creator = 'cascade-test-attribution-epic'
+    test_creator = 'cascade-test-attribution-initiative'
 
     with db_connection.cursor() as cur:
         cur.execute(
@@ -1537,34 +1537,34 @@ def test_delete_epic_sets_session_epic2_fk_null(db_connection, test_category_id)
         )
         cur.execute(
             "INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
-            ('cascade-test-epic-plan', test_creator)
+            ('cascade-test-initiative-plan', test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         pipeline_id = cur.fetchone()['id']
         cur.execute(
-            "INSERT INTO epics (pipeline_fk, title, category_fk, creator_fk) "
+            "INSERT INTO initiatives (pipeline_fk, title, category_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s)",
-            (pipeline_id, 'cascade-test-epic', test_category_id, test_creator)
+            (pipeline_id, 'cascade-test-initiative', test_category_id, test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
-        epic_id = cur.fetchone()['id']
+        initiative_id = cur.fetchone()['id']
 
         cur.execute(
-            "INSERT INTO swarm_sessions (swarm_status, task_name, epic_fk, creator_fk) "
+            "INSERT INTO swarm_sessions (swarm_status, task_name, initiative_fk, creator_fk) "
             "VALUES (%s, %s, %s, %s)",
-            ('active', 'cascade-test-task', epic_id, test_creator)
+            ('active', 'cascade-test-task', initiative_id, test_creator)
         )
         cur.execute("SELECT LAST_INSERT_ID() AS id")
         session_id = cur.fetchone()['id']
 
-        cur.execute("DELETE FROM epics WHERE id = %s", (epic_id,))
+        cur.execute("DELETE FROM initiatives WHERE id = %s", (initiative_id,))
 
-        cur.execute("SELECT epic_fk, task_name FROM swarm_sessions WHERE id = %s",
+        cur.execute("SELECT initiative_fk, task_name FROM swarm_sessions WHERE id = %s",
                     (session_id,))
         row = cur.fetchone()
         assert row is not None, "session was deleted; SET NULL must preserve it"
-        assert row['epic_fk'] is None, \
-            "epic_fk should be NULLed by ON DELETE SET NULL"
+        assert row['initiative_fk'] is None, \
+            "initiative_fk should be NULLed by ON DELETE SET NULL"
         assert row['task_name'] == 'cascade-test-task', \
             "the rest of the session must survive the cascade unchanged"
 

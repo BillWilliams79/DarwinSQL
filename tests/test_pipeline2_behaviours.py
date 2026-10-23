@@ -34,7 +34,7 @@ def _referential_action(cur, constraint_name):
 
 
 # ---------------------------------------------------------------------------
-# Fixture graph: project -> category -> pipelines -> epics
+# Fixture graph: project -> category -> pipelines -> initiatives
 # -> pipeline_steps, plus one requirement to link/gate with.
 # ---------------------------------------------------------------------------
 
@@ -62,18 +62,18 @@ def p2_graph(db_connection, test_creator_fk):
         cur.execute("INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
                     (f'p2-pipeline-{uuid.uuid4().hex[:8]}', test_creator_fk))
         ids['pipeline'] = cur.lastrowid
-        cur.execute("INSERT INTO epics (pipeline_fk, title, category_fk, "
+        cur.execute("INSERT INTO initiatives (pipeline_fk, title, category_fk, "
                     "creator_fk) VALUES (%s, %s, %s, %s)",
-                    (ids['pipeline'], f'p2-epic-{uuid.uuid4().hex[:8]}',
+                    (ids['pipeline'], f'p2-initiative-{uuid.uuid4().hex[:8]}',
                      ids['category'], test_creator_fk))
-        ids['epic'] = cur.lastrowid
-        cur.execute("INSERT INTO pipeline_steps (epic_fk, title, creator_fk) "
+        ids['initiative'] = cur.lastrowid
+        cur.execute("INSERT INTO pipeline_steps (initiative_fk, title, creator_fk) "
                     "VALUES (%s, %s, %s)",
-                    (ids['epic'], f'p2-step-a-{uuid.uuid4().hex[:8]}', test_creator_fk))
+                    (ids['initiative'], f'p2-step-a-{uuid.uuid4().hex[:8]}', test_creator_fk))
         ids['step_a'] = cur.lastrowid
-        cur.execute("INSERT INTO pipeline_steps (epic_fk, title, creator_fk) "
+        cur.execute("INSERT INTO pipeline_steps (initiative_fk, title, creator_fk) "
                     "VALUES (%s, %s, %s)",
-                    (ids['epic'], f'p2-step-b-{uuid.uuid4().hex[:8]}', test_creator_fk))
+                    (ids['initiative'], f'p2-step-b-{uuid.uuid4().hex[:8]}', test_creator_fk))
         ids['step_b'] = cur.lastrowid
     db_connection.commit()
 
@@ -91,7 +91,7 @@ def p2_graph(db_connection, test_creator_fk):
                     "(SELECT id FROM requirements WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
         cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM initiatives WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s AND id = %s",
                     (test_creator_fk, ids['requirement']))
@@ -106,20 +106,20 @@ def p2_graph(db_connection, test_creator_fk):
 # SCH-001 / SCH-002 / SCH-003 — containment is in the DDL
 # ---------------------------------------------------------------------------
 
-def test_epic_belongs_to_exactly_one_pipeline(db_connection):
+def test_initiative_belongs_to_exactly_one_pipeline(db_connection):
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'epics')
+        cols = _columns(cur, 'initiatives')
     assert cols['pipeline_fk']['Null'] == 'NO'
 
 
-def test_step_belongs_to_exactly_one_epic(db_connection):
+def test_step_belongs_to_exactly_one_initiative(db_connection):
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'pipeline_steps')
-    assert cols['epic_fk']['Null'] == 'NO'
+    assert cols['initiative_fk']['Null'] == 'NO'
 
 
 def test_step_carries_no_pipeline_reference(db_connection):
-    """A step's pipeline is reached through its epic — zero extra reads (§ 6)."""
+    """A step's pipeline is reached through its initiative — zero extra reads (§ 6)."""
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'pipeline_steps')
     assert 'pipeline_fk' not in cols
@@ -215,21 +215,21 @@ def test_deleting_a_seated_requirement_drops_its_seat_and_spares_the_step(
 # SCH-008 — sort_order is NULLABLE, no default (stage-2 gate ruling, #3336)
 # ---------------------------------------------------------------------------
 
-def test_epics_sort_order_is_nullable_with_no_default(db_connection):
+def test_initiatives_sort_order_is_nullable_with_no_default(db_connection):
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'epics')
+        cols = _columns(cur, 'initiatives')
     assert cols['sort_order']['Null'] == 'YES'
     assert cols['sort_order']['Default'] is None
 
 
 # ---------------------------------------------------------------------------
-# SCH-010 — epic_status (suppression) and closed (completion) are distinct
+# SCH-010 — initiative_status (suppression) and closed (completion) are distinct
 # ---------------------------------------------------------------------------
 
-def test_epic_status_and_closed_are_independent_columns(db_connection):
+def test_initiative_status_and_closed_are_independent_columns(db_connection):
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'epics')
-    assert cols['epic_status']['Default'] == 'active'
+        cols = _columns(cur, 'initiatives')
+    assert cols['initiative_status']['Default'] == 'active'
     assert cols['closed']['Default'] == '0'
 
 
@@ -250,17 +250,17 @@ def test_pipeline_status_default_is_draft(db_connection):
 def test_checkpoint_defaults_on_and_locked_defaults_off(db_connection):
     with db_connection.cursor() as cur:
         steps = _columns(cur, 'pipeline_steps')
-        epics = _columns(cur, 'epics')
+        initiatives = _columns(cur, 'initiatives')
         pipelines = _columns(cur, 'pipelines')
     assert steps['checkpoint']['Default'] == '1'
     assert steps['checkpoint']['Null'] == 'NO'
-    for cols in (steps, epics, pipelines):
+    for cols in (steps, initiatives, pipelines):
         assert cols['locked']['Default'] == '0'
         assert cols['locked']['Null'] == 'NO'
 
 
 # ---------------------------------------------------------------------------
-# SCH-012 — deleting a pipeline cascades epics -> steps -> both edge tables,
+# SCH-012 — deleting a pipeline cascades initiatives -> steps -> both edge tables,
 # and can never delete a requirement
 # ---------------------------------------------------------------------------
 
@@ -277,8 +277,8 @@ def test_deleting_a_pipeline_cascades_and_spares_the_requirement(db_connection, 
     db_connection.commit()
 
     with db_connection.cursor() as cur:
-        cur.execute("SELECT COUNT(*) AS n FROM epics WHERE id = %s",
-                    (p2_graph['epic'],))
+        cur.execute("SELECT COUNT(*) AS n FROM initiatives WHERE id = %s",
+                    (p2_graph['initiative'],))
         assert cur.fetchone()['n'] == 0
         cur.execute("SELECT COUNT(*) AS n FROM pipeline_steps WHERE id IN (%s, %s)",
                     (p2_graph['step_a'], p2_graph['step_b']))
@@ -307,8 +307,8 @@ def _index_count_as_leftmost(cur, table, column):
 
 
 @pytest.mark.parametrize('table,column', [
-    ('epics', 'pipeline_fk'),
-    ('pipeline_steps', 'epic_fk'),
+    ('initiatives', 'pipeline_fk'),
+    ('pipeline_steps', 'initiative_fk'),
     ('pipeline_step_deps', 'dep_step_fk'),
     # Not a CREATE INDEX line — the gate-delta PRIMARY KEY (requirement_fk)
     # alone already serves this lookup, which is why ix_p2_psr_requirement_fk

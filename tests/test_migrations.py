@@ -91,6 +91,10 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'orchestration_claims',
         'pipelines',
         'epics',
+        # Migration 20261023090122 — rename epics to initiatives (req #3777,
+        # pass 1 of the plan-vocabulary rename). No partial-match conflict: the
+        # FK column is `initiative_fk`, which `initiatives` never matches.
+        'initiatives',
         # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509), the
         # parallel-era family. Order does not matter here — measured with the
         # real regex, no new name matches inside any other new name or any 1.0
@@ -322,6 +326,16 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_eo_record', 'fk_eo_requirement', 'fk_eo_step', 'fk_eo_creator',
         'uq_engine_outcomes_item', 'ix_engine_outcomes_requirement_fk',
         'fk_ei_creator', 'uq_engine_inputs_hash',
+        # Migration 20261023090122 — rename epics to initiatives (req #3777).
+        # Every renamed constraint and index, under its NEW name; the old names
+        # above stay registered because the files that created them still replay.
+        'fk_initiatives_pipeline', 'fk_initiatives_category', 'fk_initiatives_creator',
+        'ix_initiatives_pipeline_fk',
+        'fk_pipeline_steps_initiative', 'ix_pipeline_steps_initiative_fk',
+        'fk_swarm_sessions_initiative',
+        'fk_oc_initiative', 'ix_orchestration_claims_initiative_fk',
+        'fk_es_initiative', 'ix_engine_states_initiative_fk',
+        'fk_edr_initiative', 'ix_engine_decision_records_initiative_fk',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -406,6 +420,7 @@ ALL_TABLE_SUFFIXES = [
     # needs no relationship to the Feature tier — 2.0's epic carries no link
     # into it — so it drops with its own family instead of near that table below.
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
+    'initiatives',  # migration 20261023090122 renamed the 2.0 `epics` onto it (req #3777)
     'epics', 'pipelines',
     # Req #3111 — Swarm Orchestration 1.0. The tables were DROPPED from every
     # live database by req #3356 (migration 20260812175325), but migration 076
@@ -474,7 +489,7 @@ def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
     have to come down in FK-safe order.
     """
     p2 = ['pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
-          'epics', 'pipelines']
+          'initiatives', 'epics', 'pipelines']
     p2_positions = [ALL_TABLE_SUFFIXES.index(name) for name in p2]
     # Req #3356 renamed the 2.0 tables onto the 1.0 names, so both families
     # list the same suffixes: the 1.0 block is the SECOND `pipeline_step_deps`.
@@ -685,8 +700,10 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # Req #3224 — the durable orchestration reservation
             # (migration 20260801150404)
             'orchestration_claims',
-            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
-            'pipelines', 'epics', 'pipeline_steps',
+            # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509);
+            # its `epics` is renamed `initiatives` by migration 20261023090122
+            # (req #3777), so the final replayed state carries the new name.
+            'pipelines', 'initiatives', 'pipeline_steps',
             'pipeline_step_requirements', 'pipeline_step_deps',
             # Req #3352 — requirement_test_cases (migration 20260809002149),
             # the sole test-case junction since req #3355 dropped its
