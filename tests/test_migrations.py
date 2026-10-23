@@ -67,6 +67,14 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
     # (e.g., 'tasks' inside 'recurring_tasks') while preserving FK constraint
     # name replacement (e.g., 'domains_ibfk_1' → 'mig_xxx_domains_ibfk_1').
     table_names = [
+        # Req #3756 — Engine 2 data contract (migration 20261022073056). No name
+        # here occurs inside another table name; the FK column `engine_state_fk`
+        # is not matched by `engine_states` (no trailing `s`).
+        'engine_decision_records',
+        'engine_heartbeats',
+        'engine_outcomes',
+        'engine_inputs',
+        'engine_states',
         # Req #3111 — Swarm Orchestration foundation (migration 076). Listed
         # longest-first within the family: pipeline_step_requirements and
         # pipeline_step_deps must precede pipeline_steps, which must precede
@@ -303,6 +311,17 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # calls exposed (every ALTER on the prefixed `swarm_sessions` touching
         # these four names was silently skipped by tolerant mode until now).
         'fk_swarm_sessions_pipeline2', 'fk_swarm_sessions_epic2',
+        # Migration 20261022073056 — Engine 2 data contract (req #3756). The ix_*
+        # names are NOT optional: CREATE INDEX has no IF NOT EXISTS in MySQL.
+        'fk_es_pipeline', 'fk_es_epic', 'fk_es_machine', 'fk_es_creator',
+        'uq_engine_states_scope', 'ix_engine_states_epic_fk',
+        'fk_eh_state', 'fk_eh_claim', 'fk_eh_creator', 'uq_engine_heartbeats_state',
+        'fk_edr_pipeline', 'fk_edr_epic', 'fk_edr_machine', 'fk_edr_creator',
+        'uq_engine_decision_records_hash', 'ix_engine_decision_records_scope',
+        'ix_engine_decision_records_epic_fk', 'ix_engine_decision_records_machine_fk',
+        'fk_eo_record', 'fk_eo_requirement', 'fk_eo_step', 'fk_eo_creator',
+        'uq_engine_outcomes_item', 'ix_engine_outcomes_requirement_fk',
+        'fk_ei_creator', 'uq_engine_inputs_hash',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -373,6 +392,10 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3756 — Engine 2 data contract. Leaves first: outcomes point at
+    # records, heartbeats at states and claims.
+    'engine_outcomes', 'engine_decision_records', 'engine_heartbeats',
+    'engine_states', 'engine_inputs',
     # Req #3224 — the durable orchestration reservation. Drops FIRST of this
     # family: it points at pipelines, epics AND machines, and is pointed at by
     # nothing.
@@ -669,6 +692,9 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # the sole test-case junction since req #3355 dropped its
             # predecessor.
             'requirement_test_cases',
+            # Req #3756 — Engine 2 data contract (migration 20261022073056).
+            'engine_states', 'engine_heartbeats', 'engine_decision_records',
+            'engine_outcomes', 'engine_inputs',
         ]
     }
     assert tables == expected_tables, \
