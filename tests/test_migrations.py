@@ -70,6 +70,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Req #3756 — Engine 2 data contract (migration 20261022073056). No name
         # here occurs inside another table name; the FK column `engine_state_fk`
         # is not matched by `engine_states` (no trailing `s`).
+        # Req #3815 — requirement_debug_captures (migration 20261023103433).
+        # Contains `requirement` but no other table name is a substring of it.
+        'requirement_debug_captures',
         'engine_decision_records',
         'engine_heartbeats',
         'engine_outcomes',
@@ -90,6 +93,12 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # are all preceded by `_`, which the lookbehind below refuses.
         'orchestration_claims',
         'pipelines',
+        # Migration 20261023105658 — rename pipeline steps to epics (req #3780,
+        # pass 2 of the plan-vocabulary rename). Longest-first within the
+        # family; `epic_requirements`/`epic_deps` never match inside `epics`
+        # or inside the `epic_fk`/`dep_epic_fk` columns (the \b lookahead).
+        'epic_requirements',
+        'epic_deps',
         'epics',
         # Migration 20261023090122 — rename epics to initiatives (req #3777,
         # pass 1 of the plan-vocabulary rename). No partial-match conflict: the
@@ -326,6 +335,8 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_eo_record', 'fk_eo_requirement', 'fk_eo_step', 'fk_eo_creator',
         'uq_engine_outcomes_item', 'ix_engine_outcomes_requirement_fk',
         'fk_ei_creator', 'uq_engine_inputs_hash',
+        # Migration 20261023103433 — requirement_debug_captures (req #3815).
+        'fk_rdc_requirement', 'fk_rdc_creator', 'uq_requirement_debug_captures_req',
         # Migration 20261023090122 — rename epics to initiatives (req #3777).
         # Every renamed constraint and index, under its NEW name; the old names
         # above stay registered because the files that created them still replay.
@@ -336,6 +347,13 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_oc_initiative', 'ix_orchestration_claims_initiative_fk',
         'fk_es_initiative', 'ix_engine_states_initiative_fk',
         'fk_edr_initiative', 'ix_engine_decision_records_initiative_fk',
+        # Migration 20261023105658 — rename pipeline steps to epics (req #3780).
+        # Every renamed constraint and index under its NEW name
+        # (`fk_epics_creator` is a reused-from-076 name, already registered).
+        'fk_epics_initiative', 'ix_epics_initiative_fk',
+        'fk_er_epic', 'fk_er_requirement',
+        'fk_ed_epic', 'fk_ed_dep_epic', 'uq_epic_deps', 'ix_ed_dep_epic_fk',
+        'fk_eo_epic',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -406,6 +424,8 @@ def _get_dependency_ordered_migrations():
 # recurring_tasks must be dropped before tasks (tasks.recurring_task_fk → recurring_tasks)
 # map_coordinates → map_runs → map_routes (FK chain)
 ALL_TABLE_SUFFIXES = [
+    # Req #3815 — a leaf: points at requirements and profiles, pointed at by nothing.
+    'requirement_debug_captures',
     # Req #3756 — Engine 2 data contract. Leaves first: outcomes point at
     # records, heartbeats at states and claims.
     'engine_outcomes', 'engine_decision_records', 'engine_heartbeats',
@@ -419,6 +439,7 @@ ALL_TABLE_SUFFIXES = [
     # steps, then epics, then pipelines. Unlike 1.0's epics, epics
     # needs no relationship to the Feature tier — 2.0's epic carries no link
     # into it — so it drops with its own family instead of near that table below.
+    'epic_deps', 'epic_requirements',  # migration 20261023105658 renamed the 2.0 step tables onto these (req #3780)
     'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
     'initiatives',  # migration 20261023090122 renamed the 2.0 `epics` onto it (req #3777)
     'epics', 'pipelines',
@@ -488,12 +509,16 @@ def test_pipeline2_family_drops_leaves_first_before_the_1_0_family():
     REPLAY cleanup, and migration 076 still creates prefixed 1.0 copies that
     have to come down in FK-safe order.
     """
-    p2 = ['pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
+    p2 = ['epic_deps', 'epic_requirements',
+          'pipeline_step_deps', 'pipeline_step_requirements', 'pipeline_steps',
           'initiatives', 'epics', 'pipelines']
     p2_positions = [ALL_TABLE_SUFFIXES.index(name) for name in p2]
     # Req #3356 renamed the 2.0 tables onto the 1.0 names, so both families
-    # list the same suffixes: the 1.0 block is the SECOND `pipeline_step_deps`.
-    p1_start = ALL_TABLE_SUFFIXES.index('pipeline_step_deps', p2_positions[0] + 1)
+    # list the same suffixes: the 1.0 block is the SECOND `pipeline_step_deps`
+    # (the 2.0 block's own `pipeline_step_deps` now sits behind req #3780's
+    # `epic_deps` / `epic_requirements`, so the search starts past it).
+    p1_start = ALL_TABLE_SUFFIXES.index(
+        'pipeline_step_deps', ALL_TABLE_SUFFIXES.index('pipeline_step_deps') + 1)
 
     assert p2_positions == sorted(p2_positions), \
         'pipeline2_* family must appear leaves-first, in this exact order'
@@ -702,9 +727,11 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'orchestration_claims',
             # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509);
             # its `epics` is renamed `initiatives` by migration 20261023090122
-            # (req #3777), so the final replayed state carries the new name.
-            'pipelines', 'initiatives', 'pipeline_steps',
-            'pipeline_step_requirements', 'pipeline_step_deps',
+            # (req #3777) and its step tables are renamed `epics` /
+            # `epic_requirements` / `epic_deps` by migration 20261023105658
+            # (req #3780), so the final replayed state carries the new names.
+            'pipelines', 'initiatives', 'epics',
+            'epic_requirements', 'epic_deps',
             # Req #3352 — requirement_test_cases (migration 20260809002149),
             # the sole test-case junction since req #3355 dropped its
             # predecessor.
@@ -712,6 +739,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             # Req #3756 — Engine 2 data contract (migration 20261022073056).
             'engine_states', 'engine_heartbeats', 'engine_decision_records',
             'engine_outcomes', 'engine_inputs',
+            # Req #3815 — the Bug button's debug capture (migration 20261023103433).
+            'requirement_debug_captures',
         ]
     }
     assert tables == expected_tables, \

@@ -351,7 +351,7 @@ def test_hash_and_block_comments_do_not_split_either():
 
 def test_semicolons_hashes_and_dashes_inside_literals_survive_intact():
     """The corpus reason the splitter is hand-rolled: requirement titles carry
-    `;` and `#`, and pipeline_steps.notes carries `--no-hardlinks`."""
+    `;` and `#`, and epics.notes carries `--no-hardlinks`."""
     sql = ("INSERT INTO t (a) VALUES "
            "('from local mirrors; retire git-worktree machinery #3079 --no-hardlinks');")
     statements = db_guard.parse_statements(sql)

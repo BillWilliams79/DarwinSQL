@@ -588,7 +588,7 @@ def test_swarm_sessions_columns(db_connection):
             expected_fields.append(rollup)
     # Req #3350, migration 20260809081441 — orchestration attribution.
     # Tolerated the same way, for the same dev-before-production window.
-    # (Req #3186's 1.0 pair, `pipeline_fk`/`epic_fk`, was dropped at req #3356,
+    # (Req #3186's 1.0 pair, `pipeline_fk`/`initiative_fk`, was dropped at req #3356,
     # migration 20260812175325 — asserted ABSENT below rather than tolerated
     # here, because a tolerance clause cannot tell a dropped column from a
     # re-added one.)
@@ -615,13 +615,13 @@ def test_swarm_sessions_columns(db_connection):
     # the plan's own membership junction (design rule 11). The exact-set
     # assertion above already proves this structurally; this one names the
     # specific column a future change must not reintroduce.
-    assert 'step_fk' not in columns
+    assert 'epic_fk' not in columns
 
-    # req #3356 — the FIRST-GENERATION `pipeline_fk`/`epic_fk` pair (req #3186)
+    # req #3356 — the FIRST-GENERATION `pipeline_fk`/`initiative_fk` pair (req #3186)
     # is GONE, dropped at migration 20260812175325. It briefly meant these two
     # column names were absent entirely; migration 20260812184333, in the same
     # requirement's second half, renamed the surviving second-generation
-    # attribution pair (until then `pipeline2_fk`/`epic2_fk`) INTO these same
+    # attribution pair (until then `pipeline2_fk`/`initiative2_fk`) INTO these same
     # freed names. So `pipeline_fk`/`initiative_fk` exist again on this table today
     # — correctly — and asserting their absence would be testing an
     # intermediate state that no longer exists. What must stay true is the
@@ -813,9 +813,9 @@ def test_swarm_starts_columns(db_connection):
 
     # req #3343 (SWM-022): the one swarm_starts row per invocation is the
     # step-addressed launch unit's birth record via its `arguments` column
-    # (holding the typed input verbatim) — no `step_fk` column, deliberately;
+    # (holding the typed input verbatim) — no `epic_fk` column, deliberately;
     # a step is derivable through session -> requirement -> step membership.
-    assert 'step_fk' not in columns
+    assert 'epic_fk' not in columns
 
     assert columns['id']['Type'] == 'int'
     assert columns['id']['Key'] == 'PRI'
@@ -1878,8 +1878,8 @@ def test_table_count(db_connection):
         'agent_telemetry_runs', 'agent_telemetry_rows',
         # Req #3096 — per-document actual-token rows (child of agent_telemetry_rows)
         'agent_telemetry_row_docs',
-        # Req #3111's five 1.0 orchestration tables — `epics`, `pipelines`,
-        # `pipeline_steps`, `pipeline_step_requirements`, `pipeline_step_deps`
+        # Req #3111's five 1.0 orchestration tables — `initiatives`, `pipelines`,
+        # `epics`, `epic_requirements`, `epic_deps`
         # — were dropped at req #3356 (migration 20260812175325). The
         # `pipeline2_*` five below are the surviving plan layer.
         # Req #3224 — the durable, SHARED orchestration reservation (migration
@@ -1888,8 +1888,8 @@ def test_table_count(db_connection):
         'orchestration_claims',
         # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
         # Containment chain Pipeline -> Initiative -> Step -> Requirement.
-        'pipelines', 'initiatives', 'pipeline_steps',
-        'pipeline_step_requirements', 'pipeline_step_deps',
+        'pipelines', 'initiatives', 'epics',
+        'epic_requirements', 'epic_deps',
         # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
         # Requirement (migration 20260809002149). The sole test-case junction
         # since req #3355 dropped its predecessor.
@@ -1899,6 +1899,9 @@ def test_table_count(db_connection):
         # executor outcomes, content-addressed decide() inputs.
         'engine_states', 'engine_heartbeats', 'engine_decision_records',
         'engine_outcomes', 'engine_inputs',
+        # Req #3815 — the Requirement Filer Bug button's debug capture
+        # (migration 20261023103433), one row per requirement.
+        'requirement_debug_captures',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
@@ -2498,9 +2501,9 @@ def test_agent_telemetry_row_docs_columns(db_connection):
 # ============================================================================
 # Req #3111 — Swarm Orchestration 1.0 schema foundation (migration 076): GONE
 #
-# `epics`, `pipelines`, `pipeline_steps`, `pipeline_step_requirements` and
-# `pipeline_step_deps` each had a DESCRIBE test here, plus the two that pinned
-# `epics.epic_status` as SUPPRESSION rather than lifecycle and the dep table's
+# `initiatives`, `pipelines`, `initiatives`, `epic_requirements` and
+# `epic_deps` each had a DESCRIBE test here, plus the two that pinned
+# `initiatives.initiative_status` as SUPPRESSION rather than lifecycle and the dep table's
 # UNIQUE key. Req #3356 (migration 20260812175325) dropped all five tables and
 # the whole section went with them.
 #

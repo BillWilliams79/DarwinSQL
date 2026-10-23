@@ -123,6 +123,13 @@ GRANDFATHERED_SPLIT_PAIRS = {
      '20260812184333_rename_pipeline2_to_plain_names_now_that_1_0_is_gone.sql'):
         'req #3495 — already applied to production in two separate DDL operations '
         '49 minutes apart before this guard existed; cannot be retroactively combined.',
+    ('20261023090122_rename_epics_to_initiatives.sql',
+     '20261023105658_rename_pipeline_steps_to_epics.sql'):
+        'req #3772 — the plan-vocabulary rename is a deliberate two-pass vacate-then-claim '
+        '(memory/cross-stack-rename-guide.md § 2): pass 1 (req #3777) renamed `epics` away to '
+        '`initiatives` and deployed, the census proved `epic` meant nothing anywhere, and pass 2 '
+        '(req #3780) renamed `pipeline_steps` onto the vacated name. Nothing read `epics` in the '
+        'gap: pass 1\'s deployed code reads `initiatives`.',
 }
 
 
