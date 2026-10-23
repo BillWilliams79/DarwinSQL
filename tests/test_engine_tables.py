@@ -156,7 +156,7 @@ def test_a_desired_flip_never_stamps_a_heartbeat(db_connection, scope, test_crea
 
 
 def test_record_json_reads_back_equal(db_connection, scope, test_creator_fk):
-    record = {'schema': 'engine2.decision_record/1', 'queue': [{'step_id': 1,
+    record = {'schema': 'engine2.decision_record/1', 'queue': [{'epic_id': 1,
               'requirement_id': 2, 'code': 'ADMITTED', 'detail': None}],
               'cut': 1, 'outcomes': {'2': {'state': 'pending', 'session_ids': []}},
               'cycle': {'seq': 1, 'now': '2026-10-22T07:00:00Z'}}

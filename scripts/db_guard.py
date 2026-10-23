@@ -118,7 +118,7 @@ def split_statements(text):
     `seed_pipelines_darwin_dev.sql` carries requirement titles containing both
     semicolons ("...from local mirrors; retire git-worktree machinery...") and
     `#` characters ("...CORRECTED 2026-07-26: #3079 completed..."), and
-    `pipeline_steps.notes` carries `--` (`--no-hardlinks`). Splitting or
+    `epics.notes` carries `--` (`--no-hardlinks`). Splitting or
     comment-stripping through those corrupts the text being stored.
 
     A `;` inside a COMMENT is not a separator either — and THAT half was

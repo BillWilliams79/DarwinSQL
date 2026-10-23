@@ -8,10 +8,10 @@ DISTINCT).
 
 WAS `test_orchestration_claims_parallel_era.py` until req #3356 renamed this
 table's columns twice in succession: migration 20260812175325 dropped the
-first-generation `pipeline_fk`/`epic_fk`/`epic_key`/`uq_orchestration_claims_scope`
+first-generation `pipeline_fk`/`initiative_fk`/`initiative_key`/`uq_orchestration_claims_scope`
 entirely (the parallel era this file was originally named for), then migration
 20260812184333, in the same requirement's second half, renamed the surviving
-second-generation pair — until then `pipeline2_fk`/`epic2_fk`/`epic2_key`/
+second-generation pair — until then `pipeline2_fk`/`initiative2_fk`/`initiative2_key`/
 `uq_orchestration_claims_scope2` — into those same freed plain names. There is
 only one scope pair on this table now, under the plain names, and only one
 scope key (`uq_orchestration_claims_scope`) backing it.

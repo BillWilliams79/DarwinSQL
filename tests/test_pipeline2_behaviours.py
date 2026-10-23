@@ -35,7 +35,7 @@ def _referential_action(cur, constraint_name):
 
 # ---------------------------------------------------------------------------
 # Fixture graph: project -> category -> pipelines -> initiatives
-# -> pipeline_steps, plus one requirement to link/gate with.
+# -> epics, plus one requirement to link/gate with.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -67,30 +67,30 @@ def p2_graph(db_connection, test_creator_fk):
                     (ids['pipeline'], f'p2-initiative-{uuid.uuid4().hex[:8]}',
                      ids['category'], test_creator_fk))
         ids['initiative'] = cur.lastrowid
-        cur.execute("INSERT INTO pipeline_steps (initiative_fk, title, creator_fk) "
+        cur.execute("INSERT INTO epics (initiative_fk, title, creator_fk) "
                     "VALUES (%s, %s, %s)",
-                    (ids['initiative'], f'p2-step-a-{uuid.uuid4().hex[:8]}', test_creator_fk))
-        ids['step_a'] = cur.lastrowid
-        cur.execute("INSERT INTO pipeline_steps (initiative_fk, title, creator_fk) "
+                    (ids['initiative'], f'p2-epic-a-{uuid.uuid4().hex[:8]}', test_creator_fk))
+        ids['epic_a'] = cur.lastrowid
+        cur.execute("INSERT INTO epics (initiative_fk, title, creator_fk) "
                     "VALUES (%s, %s, %s)",
-                    (ids['initiative'], f'p2-step-b-{uuid.uuid4().hex[:8]}', test_creator_fk))
-        ids['step_b'] = cur.lastrowid
+                    (ids['initiative'], f'p2-epic-b-{uuid.uuid4().hex[:8]}', test_creator_fk))
+        ids['epic_b'] = cur.lastrowid
     db_connection.commit()
 
     yield ids
 
     with db_connection.cursor() as cur:
-        cur.execute("DELETE FROM pipeline_step_deps WHERE step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
-                    "OR dep_step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s)",
+        cur.execute("DELETE FROM epic_deps WHERE epic_fk IN "
+                    "(SELECT id FROM epics WHERE creator_fk = %s) "
+                    "OR dep_epic_fk IN "
+                    "(SELECT id FROM epics WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline_step_requirements WHERE step_fk IN "
-                    "(SELECT id FROM pipeline_steps WHERE creator_fk = %s) "
+        cur.execute("DELETE FROM epic_requirements WHERE epic_fk IN "
+                    "(SELECT id FROM epics WHERE creator_fk = %s) "
                     "OR requirement_fk IN "
                     "(SELECT id FROM requirements WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
-        cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM initiatives WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s AND id = %s",
@@ -112,103 +112,103 @@ def test_initiative_belongs_to_exactly_one_pipeline(db_connection):
     assert cols['pipeline_fk']['Null'] == 'NO'
 
 
-def test_step_belongs_to_exactly_one_initiative(db_connection):
+def test_epic_belongs_to_exactly_one_initiative(db_connection):
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'pipeline_steps')
+        cols = _columns(cur, 'epics')
     assert cols['initiative_fk']['Null'] == 'NO'
 
 
-def test_step_carries_no_pipeline_reference(db_connection):
-    """A step's pipeline is reached through its initiative — zero extra reads (§ 6)."""
+def test_epic_carries_no_pipeline_reference(db_connection):
+    """An epic's pipeline is reached through its initiative — zero extra reads (§ 6)."""
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'pipeline_steps')
+        cols = _columns(cur, 'epics')
     assert 'pipeline_fk' not in cols
 
 
 # ---------------------------------------------------------------------------
-# SCH-004 — no step table carries a state column
+# SCH-004 — no epic table carries a state column
 # ---------------------------------------------------------------------------
 
 # Parametrized over both eras until req #3356 (migration 20260812175325)
-# dropped `pipeline_steps`; the design rule it carried forward is 2.0's now.
-@pytest.mark.parametrize('table', ['pipeline_steps'])
-def test_no_step_table_carries_a_state_column(db_connection, table):
+# dropped `epics`; the design rule it carried forward is 2.0's now.
+@pytest.mark.parametrize('table', ['epics'])
+def test_no_epic_table_carries_a_state_column(db_connection, table):
     with db_connection.cursor() as cur:
         cols = _columns(cur, table)
     assert 'state' not in cols and 'status' not in cols
-    # req #3752 dropped the last of it: a step has no completion stamp either.
+    # req #3752 dropped the last of it: an epic has no completion stamp either.
     assert 'completed_at' not in cols
 
 
 # ---------------------------------------------------------------------------
-# SCH-005 — dep_step_fk NOT NULL makes uq_p2_step_deps a TOTAL unique key
+# SCH-005 — dep_epic_fk NOT NULL makes uq_p2_epic_deps a TOTAL unique key
 # ---------------------------------------------------------------------------
 
-def test_step_deps_columns_have_no_time_gate(db_connection):
-    """SCH-006: the time gate is pipeline_steps.not_before, not a dep row."""
+def test_epic_deps_columns_have_no_time_gate(db_connection):
+    """SCH-006: the time gate is epics.not_before, not a dep row."""
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'pipeline_step_deps')
-    assert set(cols.keys()) == {'id', 'step_fk', 'dep_step_fk'}
+        cols = _columns(cur, 'epic_deps')
+    assert set(cols.keys()) == {'id', 'epic_fk', 'dep_epic_fk'}
     with db_connection.cursor() as cur:
-        step_cols = _columns(cur, 'pipeline_steps')
-    assert 'not_before' in step_cols
-    assert step_cols['not_before']['Null'] == 'YES'
+        epic_cols = _columns(cur, 'epics')
+    assert 'not_before' in epic_cols
+    assert epic_cols['not_before']['Null'] == 'YES'
 
 
-def test_dep_step_fk_is_not_null(db_connection):
+def test_dep_epic_fk_is_not_null(db_connection):
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'pipeline_step_deps')
-    assert cols['dep_step_fk']['Null'] == 'NO'
+        cols = _columns(cur, 'epic_deps')
+    assert cols['dep_epic_fk']['Null'] == 'NO'
 
 
-def test_duplicate_step_dependency_edge_is_refused(db_connection, p2_graph):
-    """The UNIQUE key is TOTAL (unlike 1.0's, where a nullable dep_step_fk lets
+def test_duplicate_epic_dependency_edge_is_refused(db_connection, p2_graph):
+    """The UNIQUE key is TOTAL (unlike 1.0's, where a nullable dep_epic_fk lets
     MySQL treat two NULLs as distinct): a second identical edge is a 1062, not
     a silently accepted duplicate."""
     with db_connection.cursor() as cur:
-        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) "
-                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['step_b']))
+        cur.execute("INSERT INTO epic_deps (epic_fk, dep_epic_fk) "
+                    "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['epic_b']))
     db_connection.commit()
 
     with pytest.raises(pymysql.err.IntegrityError) as exc:
         with db_connection.cursor() as cur:
-            cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) "
-                        "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['step_b']))
+            cur.execute("INSERT INTO epic_deps (epic_fk, dep_epic_fk) "
+                        "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['epic_b']))
     db_connection.rollback()
     assert exc.value.args[0] == 1062
 
 
 # ---------------------------------------------------------------------------
-# SCH-007 — pipeline_step_requirements CASCADEs on both sides: deleting a
-# step drops its links, deleting a requirement drops its seat (req #3706
+# SCH-007 — epic_requirements CASCADEs on both sides: deleting a
+# epic drops its links, deleting a requirement drops its seat (req #3706
 # reversed the requirement side's original RESTRICT)
 # ---------------------------------------------------------------------------
 
-def test_step_requirements_fk_actions_cascade_both_sides(db_connection):
+def test_epic_requirements_fk_actions_cascade_both_sides(db_connection):
     with db_connection.cursor() as cur:
-        step_update, step_delete = _referential_action(cur, 'fk_psr_step')
-        req_update, req_delete = _referential_action(cur, 'fk_psr_requirement')
-    assert (step_update, step_delete) == ('CASCADE', 'CASCADE')
+        epic_update, epic_delete = _referential_action(cur, 'fk_er_epic')
+        req_update, req_delete = _referential_action(cur, 'fk_er_requirement')
+    assert (epic_update, epic_delete) == ('CASCADE', 'CASCADE')
     assert (req_update, req_delete) == ('CASCADE', 'CASCADE')
 
 
-def test_deleting_a_seated_requirement_drops_its_seat_and_spares_the_step(
+def test_deleting_a_seated_requirement_drops_its_seat_and_spares_the_epic(
         db_connection, p2_graph):
     # req #3706 — the user-reported defect: a seated requirement could not be
-    # deleted (1451). It now deletes, its seat goes, the step stays.
+    # deleted (1451). It now deletes, its seat goes, the epic stays.
     with db_connection.cursor() as cur:
-        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
-                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['requirement']))
+        cur.execute("INSERT INTO epic_requirements (epic_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['requirement']))
         cur.execute("DELETE FROM requirements WHERE id = %s", (p2_graph['requirement'],))
-        cur.execute("SELECT COUNT(*) AS n FROM pipeline_step_requirements "
+        cur.execute("SELECT COUNT(*) AS n FROM epic_requirements "
                     "WHERE requirement_fk = %s", (p2_graph['requirement'],))
         seats = cur.fetchone()['n']
-        cur.execute("SELECT COUNT(*) AS n FROM pipeline_steps WHERE id = %s",
-                    (p2_graph['step_a'],))
-        steps = cur.fetchone()['n']
+        cur.execute("SELECT COUNT(*) AS n FROM epics WHERE id = %s",
+                    (p2_graph['epic_a'],))
+        epics = cur.fetchone()['n']
     db_connection.commit()
     assert seats == 0
-    assert steps == 1
+    assert epics == 1
 
 
 # ---------------------------------------------------------------------------
@@ -244,32 +244,32 @@ def test_pipeline_status_default_is_draft(db_connection):
 
 
 # ---------------------------------------------------------------------------
-# SCH-040 — req #3649: every step is born a CHECKPOINT, nothing is born LOCKED
+# SCH-040 — req #3649: every epic is born a CHECKPOINT, nothing is born LOCKED
 # ---------------------------------------------------------------------------
 
 def test_checkpoint_defaults_on_and_locked_defaults_off(db_connection):
     with db_connection.cursor() as cur:
-        steps = _columns(cur, 'pipeline_steps')
+        epics = _columns(cur, 'epics')
         initiatives = _columns(cur, 'initiatives')
         pipelines = _columns(cur, 'pipelines')
-    assert steps['checkpoint']['Default'] == '1'
-    assert steps['checkpoint']['Null'] == 'NO'
-    for cols in (steps, initiatives, pipelines):
+    assert epics['checkpoint']['Default'] == '1'
+    assert epics['checkpoint']['Null'] == 'NO'
+    for cols in (epics, initiatives, pipelines):
         assert cols['locked']['Default'] == '0'
         assert cols['locked']['Null'] == 'NO'
 
 
 # ---------------------------------------------------------------------------
-# SCH-012 — deleting a pipeline cascades initiatives -> steps -> both edge tables,
+# SCH-012 — deleting a pipeline cascades initiatives -> epics -> both edge tables,
 # and can never delete a requirement
 # ---------------------------------------------------------------------------
 
 def test_deleting_a_pipeline_cascades_and_spares_the_requirement(db_connection, p2_graph):
     with db_connection.cursor() as cur:
-        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
-                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['requirement']))
-        cur.execute("INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) "
-                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['step_b']))
+        cur.execute("INSERT INTO epic_requirements (epic_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['requirement']))
+        cur.execute("INSERT INTO epic_deps (epic_fk, dep_epic_fk) "
+                    "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['epic_b']))
     db_connection.commit()
 
     with db_connection.cursor() as cur:
@@ -280,14 +280,14 @@ def test_deleting_a_pipeline_cascades_and_spares_the_requirement(db_connection, 
         cur.execute("SELECT COUNT(*) AS n FROM initiatives WHERE id = %s",
                     (p2_graph['initiative'],))
         assert cur.fetchone()['n'] == 0
-        cur.execute("SELECT COUNT(*) AS n FROM pipeline_steps WHERE id IN (%s, %s)",
-                    (p2_graph['step_a'], p2_graph['step_b']))
+        cur.execute("SELECT COUNT(*) AS n FROM epics WHERE id IN (%s, %s)",
+                    (p2_graph['epic_a'], p2_graph['epic_b']))
         assert cur.fetchone()['n'] == 0
-        cur.execute("SELECT COUNT(*) AS n FROM pipeline_step_requirements "
-                    "WHERE step_fk = %s", (p2_graph['step_a'],))
+        cur.execute("SELECT COUNT(*) AS n FROM epic_requirements "
+                    "WHERE epic_fk = %s", (p2_graph['epic_a'],))
         assert cur.fetchone()['n'] == 0
-        cur.execute("SELECT COUNT(*) AS n FROM pipeline_step_deps WHERE step_fk = %s",
-                    (p2_graph['step_a'],))
+        cur.execute("SELECT COUNT(*) AS n FROM epic_deps WHERE epic_fk = %s",
+                    (p2_graph['epic_a'],))
         assert cur.fetchone()['n'] == 0
         # The requirement itself is untouched — containment stops at Requirement.
         cur.execute("SELECT COUNT(*) AS n FROM requirements WHERE id = %s",
@@ -308,19 +308,19 @@ def _index_count_as_leftmost(cur, table, column):
 
 @pytest.mark.parametrize('table,column', [
     ('initiatives', 'pipeline_fk'),
-    ('pipeline_steps', 'initiative_fk'),
-    ('pipeline_step_deps', 'dep_step_fk'),
+    ('epics', 'initiative_fk'),
+    ('epic_deps', 'dep_epic_fk'),
     # Not a CREATE INDEX line — the gate-delta PRIMARY KEY (requirement_fk)
     # alone already serves this lookup, which is why ix_p2_psr_requirement_fk
     # does not exist. A future migration re-adding it alongside the PK would
     # be the fourth duplicate the record's § 3.1 measurement excluded.
-    ('pipeline_step_requirements', 'requirement_fk'),
+    ('epic_requirements', 'requirement_fk'),
 ])
 def test_explicit_index_is_not_duplicated_by_the_fk_auto_index(db_connection, table, column):
     """Measured 2026-08-08 against darwin_dev after the migration 20260808115509
     apply: each of these four columns carries exactly ONE index with it as the
     leftmost column — mirroring 1.0's identical measured behaviour on
-    pipeline_steps/pipeline_step_deps/pipeline_step_requirements. A second entry
+    epics/epic_deps/epic_requirements. A second entry
     here would mean a future migration re-introduced a duplicate."""
     with db_connection.cursor() as cur:
         n = _index_count_as_leftmost(cur, table, column)
@@ -328,34 +328,34 @@ def test_explicit_index_is_not_duplicated_by_the_fk_auto_index(db_connection, ta
 
 
 # ---------------------------------------------------------------------------
-# SCH-036 — pipeline_step_requirements PK is requirement_fk ALONE (stage-2
-# gate ruling, req #3336 §9): a requirement exists on at most one step,
+# SCH-036 — epic_requirements PK is requirement_fk ALONE (stage-2
+# gate ruling, req #3336 §9): a requirement exists on at most one epic,
 # structurally.
 # ---------------------------------------------------------------------------
 
-def test_step_requirements_primary_key_is_requirement_fk_alone(db_connection):
+def test_epic_requirements_primary_key_is_requirement_fk_alone(db_connection):
     with db_connection.cursor() as cur:
-        cur.execute("SHOW KEYS FROM pipeline_step_requirements WHERE Key_name = 'PRIMARY'")
+        cur.execute("SHOW KEYS FROM epic_requirements WHERE Key_name = 'PRIMARY'")
         pk_cols = [r['Column_name'] for r in cur.fetchall()]
     assert pk_cols == ['requirement_fk']
     with db_connection.cursor() as cur:
-        cols = _columns(cur, 'pipeline_step_requirements')
-    assert cols['step_fk']['Null'] == 'NO'
-    assert cols['step_fk']['Key'] != 'PRI'
+        cols = _columns(cur, 'epic_requirements')
+    assert cols['epic_fk']['Null'] == 'NO'
+    assert cols['epic_fk']['Key'] != 'PRI'
 
 
-def test_a_requirement_cannot_be_seated_on_two_steps(db_connection, p2_graph):
-    """The structural proof: seating the SAME requirement on a second step is a
+def test_a_requirement_cannot_be_seated_on_two_epics(db_connection, p2_graph):
+    """The structural proof: seating the SAME requirement on a second epic is a
     1062 on the PRIMARY KEY, not a silently accepted second row — this is what
     'duplicate it if you need to run 2' (the user ruling) is enforcing against."""
     with db_connection.cursor() as cur:
-        cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
-                    "VALUES (%s, %s)", (p2_graph['step_a'], p2_graph['requirement']))
+        cur.execute("INSERT INTO epic_requirements (epic_fk, requirement_fk) "
+                    "VALUES (%s, %s)", (p2_graph['epic_a'], p2_graph['requirement']))
     db_connection.commit()
 
     with pytest.raises(pymysql.err.IntegrityError) as exc:
         with db_connection.cursor() as cur:
-            cur.execute("INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) "
-                        "VALUES (%s, %s)", (p2_graph['step_b'], p2_graph['requirement']))
+            cur.execute("INSERT INTO epic_requirements (epic_fk, requirement_fk) "
+                        "VALUES (%s, %s)", (p2_graph['epic_b'], p2_graph['requirement']))
     db_connection.rollback()
     assert exc.value.args[0] == 1062

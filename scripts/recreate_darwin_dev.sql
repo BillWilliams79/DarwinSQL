@@ -8,8 +8,8 @@
 -- requirement_test_cases, req #3378 — it was missing from this file since
 -- req #3352 created it; req #3355 dropped the Feature-era catalog table and
 -- its test-case junction, migration 20260811033413; req #3356 dropped the
--- 1.0 plan layer — `epics`, `pipelines`, `pipeline_steps`,
--- `pipeline_step_requirements`, `pipeline_step_deps` — migration
+-- 1.0 plan layer — `initiatives`, `pipelines`, `initiatives`,
+-- `epic_requirements`, `epic_deps` — migration
 -- 20260812175325. Verify via `grep -c '^CREATE TABLE'` on this file)
 -- ============================================================================
 -- It opened with `USE darwin_dev;`, which LOOKED like protection and was not:
@@ -35,7 +35,7 @@ DROP TABLE IF EXISTS requirement_debug_captures,
     engine_inputs, engine_outcomes, engine_decision_records,
     engine_heartbeats, engine_states,
     orchestration_claims,
-    pipeline_step_deps, pipeline_step_requirements, pipeline_steps,
+    epic_deps, epic_requirements, epics,
     initiatives, pipelines,
     agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
@@ -208,7 +208,7 @@ CREATE TABLE machines (
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
--- The 1.0 agile hierarchy (`epics`, req #3111 migration 076) was created here,
+-- The 1.0 agile hierarchy (`initiatives`, req #3111 migration 076) was created here,
 -- above `requirements`. It was dropped whole at req #3356, migration
 -- 20260812175325, with the rest of the 1.0 plan layer; 2.0's own initiative table is
 -- `initiatives`, further down, and is contained by its pipeline rather than
@@ -247,7 +247,7 @@ CREATE TABLE requirements (
                                             -- machine pin (req #2978, migration 066); NULL = "Any" machine may run it
     tracking        TINYINT(1)      NOT NULL DEFAULT 0,
                                             -- CONTAINER, not work (req #3123): 1 = holds a plan/initiative rather than
-                                            -- being work inside it, so it is excluded from a pipeline step's
+                                            -- being work inside it, so it is excluded from a pipeline epic's
                                             -- gating set (design rule 1) and its /swarm-start args (rule 8)
     FOREIGN KEY (project_fk)
         REFERENCES projects (id)
@@ -294,7 +294,7 @@ CREATE TABLE swarm_sessions (
     -- 2.0 orchestration attribution (req #3350, migration 20260809081441):
     -- WHICH PLAN / WHICH INITIATIVE this session was advancing. Stamped once at
     -- requirement-link time; NULL = work outside any plan. (The 1.0 pair,
-    -- `pipeline_fk`/`epic_fk`, req #3186, was archived and dropped at
+    -- `pipeline_fk`/`initiative_fk`, req #3186, was archived and dropped at
     -- req #3356, migration 20260812175325.)
     pipeline_fk     INT             NULL DEFAULT NULL,
     initiative_fk         INT             NULL DEFAULT NULL,
@@ -1076,6 +1076,8 @@ CREATE TABLE agent_telemetry_rows (
     mcp_tools_tokens            INT          NULL,   -- MCP tools/resources listing (req #3095, migration 074)
     skills_tokens               INT          NULL,   -- available-skills listing (req #3095, migration 074)
     custom_agents_tokens        INT          NULL,   -- other-custom-agent listing (req #3095, migration 074)
+    system_tools_deferred_tokens INT         NULL,   -- deferred built-in tool schemas (req #3472, migration 20260813)
+    mcp_tools_deferred_tokens   INT          NULL,   -- deferred MCP tool schemas (req #3472, migration 20260813)
     claude_md_tokens            INT          NULL,
     charter_stub_tokens         INT          NULL,
     boot_payload_tokens         INT          NULL,
@@ -1122,8 +1124,8 @@ CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row
 -- ============================================================================
 -- Swarm Orchestration 1.0 (req #3111, migration 076) — DROPPED
 -- ============================================================================
--- The first-generation `pipelines`, `pipeline_steps`,
--- `pipeline_step_requirements`, `pipeline_step_deps` and `initiatives` were
+-- The first-generation `pipelines`, `epics`,
+-- `epic_requirements`, `epic_deps` and `initiatives` were
 -- declared here, along with the 1.0 attribution columns on `swarm_sessions`
 -- and `orchestration_claims`. All were dropped whole at req #3356
 -- (migration 20260812175325); the five tables below are the surviving
@@ -1140,12 +1142,12 @@ CREATE INDEX ix_agent_telemetry_row_docs_row_fk ON agent_telemetry_row_docs (row
 -- for the same work.
 --
 -- CONTAINMENT IS IN THE DDL, NOT IN CONVENTION. An initiative belongs to exactly one
--- pipeline and a step to exactly one initiative, both NOT NULL. That single change is
+-- pipeline and an epic to exactly one initiative, both NOT NULL. That single change is
 -- what removes the session-attribution tie-break, gives initiative pause a scope key,
 -- makes reservation scoping a containment question rather than an inferred one,
 -- and turns display order into a tree walk.
 --
--- Containment STOPS at Requirement: a step ORGANIZES requirements and does not
+-- Containment STOPS at Requirement: an epic ORGANIZES requirements and does not
 -- own them, so membership is an edge table. Three levels of ownership, one of
 -- membership — the one asymmetry in the chain, and deliberate.
 
@@ -1162,7 +1164,7 @@ CREATE TABLE pipelines (
                                                               -- property, not 1.0-specific debt, so
                                                               -- the #3356 importer must copy it.
     locked          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3649: 1 = a relic in time; freezes
-                                                          -- the plan, its initiatives and steps (gateway-
+                                                          -- the plan, its initiatives and epics (gateway-
                                                           -- enforced, Lambda-Rest/plan_lock.py)
     machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
     creator_fk      VARCHAR(64)  NOT NULL,
@@ -1183,7 +1185,7 @@ CREATE TABLE pipelines (
 -- scoped pause rather than a global one: 1.0's initiative pause has no scope key, so
 -- pausing an initiative pauses it in every plan holding it.
 --
--- `category_fk` is DISPLAY ONLY and gates nothing. An initiative owns its steps; it
+-- `category_fk` is DISPLAY ONLY and gates nothing. An initiative owns its epics; it
 -- does not govern their attributes, and the work of one initiative routinely spans
 -- several categories. It must not be read by orchestration, launch, repo
 -- resolution or any eligibility predicate — the category that matters is the one
@@ -1201,7 +1203,7 @@ CREATE TABLE initiatives (
     title       VARCHAR(256) NOT NULL,
     description TEXT         NULL,                         -- PURPOSE only (design rule 11)
     initiative_status VARCHAR(16)  NOT NULL DEFAULT 'active',    -- active|paused; SUPPRESSION, not lifecycle
-    locked      TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this initiative and its steps
+    locked      TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this initiative and its epics
     category_fk INT          NOT NULL,                     -- DISPLAY ONLY; gates nothing
     sort_order  SMALLINT     NULL,                         -- NULL=derived order; value=manual, wins
     closed      TINYINT(1)   NOT NULL DEFAULT 0,           -- finished; distinct from paused
@@ -1221,61 +1223,61 @@ CREATE TABLE initiatives (
 
 CREATE INDEX ix_initiatives_pipeline_fk ON initiatives (pipeline_fk);
 
--- NO `pipeline_fk`. A step's pipeline is its initiative's, and § 6 shows the composed
+-- NO `pipeline_fk`. An epic's pipeline is its initiative's, and § 6 shows the composed
 -- read costs one FEWER gateway read without it, not one more — so storing both
 -- would buy nothing and cost the invariant that they agree.
 --
--- `initiative_fk` NOT NULL also deletes a derivation. In 1.0 a step's initiative is reached
+-- `initiative_fk` NOT NULL also deletes a derivation. In 1.0 an epic's initiative is reached
 -- by walking from its requirements through the now-dropped Feature tier's own
--- initiative link, and a step with no requirements INHERITS the label from a
--- dependency: 17 of the 188 live steps
+-- initiative link, and an epic with no requirements INHERITS the label from a
+-- dependency: 17 of the 188 live epics
 -- do exactly that. Here the initiative is stored, so `label_inherited` and the whole
 -- inheritance walk stop existing.
 --
 -- `not_before` is the time gate, as a column. 1.0 holds it as a ROW in the
 -- dependency table, which forces that table to carry two condition kinds and
--- forces every derivation to branch on which kind a row is. One instant per step
--- is the same capability with one fewer shape: several time gates on one step is
+-- forces every derivation to branch on which kind a row is. One instant per epic
+-- is the same capability with one fewer shape: several time gates on one epic is
 -- not a lost capability, because the latest instant always wins and is therefore
 -- one value. ZERO of the 175 live dependency rows is a time gate, so this is
 -- kept for its stated future use — organising around token windows — and not
 -- because anything depends on it today.
 --
--- A step has NO STATE and no completion stamp (req #3750; its dead
+-- An epic has NO STATE and no completion stamp (req #3750; its dead
 -- `completed_at` was dropped by req #3752, migration 20261022024615). It holds
 -- requirements and carries orchestration controls — `run`, `checkpoint`,
 -- `locked`, `not_before` and its dependency edges; every orchestration question
 -- is asked of the requirements it holds.
-CREATE TABLE pipeline_steps (
+CREATE TABLE epics (
     id           INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,  -- STABLE: never renumbered/reused
     initiative_fk      INT          NOT NULL,                     -- CONTAINMENT; the pipeline is derived
     title        VARCHAR(256) NOT NULL,
     run          VARCHAR(8)   NOT NULL DEFAULT 'auto',      -- auto|manual
     checkpoint   TINYINT(1)   NOT NULL DEFAULT 1
-        COMMENT 'req #3649/#3750: 1 = holds every downstream step while it holds open work; 0 = launch priority only',
-    locked       TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this step
-    not_before   TIMESTAMP    NULL,                         -- the time gate, one instant per step
+        COMMENT 'req #3649/#3750: 1 = holds every downstream epic while it holds open work; 0 = launch priority only',
+    locked       TINYINT(1)   NOT NULL DEFAULT 0,           -- req #3649: freezes this epic
+    not_before   TIMESTAMP    NULL,                         -- the time gate, one instant per epic
     notes        TEXT         NULL,                         -- evidence / findings / dispositions
     creator_fk   VARCHAR(64)  NOT NULL,
     create_ts    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts    TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_pipeline_steps_initiative
+    CONSTRAINT fk_epics_initiative
         FOREIGN KEY (initiative_fk) REFERENCES initiatives (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_pipeline_steps_creator
+    CONSTRAINT fk_epics_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
-CREATE INDEX ix_pipeline_steps_initiative_fk ON pipeline_steps (initiative_fk);
+CREATE INDEX ix_epics_initiative_fk ON epics (initiative_fk);
 
 -- Membership, not ownership. CASCADE on both sides, the junction default.
--- `step_fk` because the links are the step's own data; `requirement_fk` since
+-- `epic_fk` because the links are the epic's own data; `requirement_fk` since
 -- req #3706 (migration 20261021060108), which reversed the original RESTRICT:
 -- deleting a requirement is the user's intent and its seat goes with it,
--- exactly as `unlink_step_requirement` would remove it. The step survives. A
+-- exactly as `unlink_epic_requirement` would remove it. The epic survives. A
 -- LOCKED plan is still protected — the gateway refuses (423) deleting a
--- requirement seated on an effectively locked step (Lambda-Rest plan_lock.py).
+-- requirement seated on an effectively locked epic (Lambda-Rest plan_lock.py).
 --
 -- Points at the SHARED `requirements` table, not at a doubled copy. Held here
 -- rather than as a column on `requirements` because during the parallel era that
@@ -1283,31 +1285,31 @@ CREATE INDEX ix_pipeline_steps_initiative_fk ON pipeline_steps (initiative_fk);
 -- which is the mess the parallel-table scheme exists to avoid.
 --
 -- PRIMARY KEY (requirement_fk) ALONE — stage-2 gate ruling, req #3336, supersedes
--- this record's original composite PK: ONE STEP PER REQUIREMENT, structural (a
--- requirement must not run twice; duplicate it if it needs to run 2). `step_fk`
+-- this record's original composite PK: ONE EPIC PER REQUIREMENT, structural (a
+-- requirement must not run twice; duplicate it if it needs to run 2). `epic_fk`
 -- stays NOT NULL beside it. No `ix_p2_psr_requirement_fk`: the PK already serves
--- lookup by `requirement_fk`, and the `fk_psr_step` FK auto-index covers
--- lookup by `step_fk` for the composed read.
-CREATE TABLE pipeline_step_requirements (
-    step_fk        INT NOT NULL,
+-- lookup by `requirement_fk`, and the `fk_er_epic` FK auto-index covers
+-- lookup by `epic_fk` for the composed read.
+CREATE TABLE epic_requirements (
+    epic_fk        INT NOT NULL,
     requirement_fk INT NOT NULL PRIMARY KEY,
-    CONSTRAINT fk_psr_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+    CONSTRAINT fk_er_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_psr_requirement
+    CONSTRAINT fk_er_requirement
         FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
         ON UPDATE CASCADE ON DELETE CASCADE
 );
 
 -- ONE ROW = ONE EDGE, and nothing else. The time gate left this table for a
--- column on the step, so `dep_step_fk` is NOT NULL and the row has exactly one
+-- column on the epic, so `dep_epic_fk` is NOT NULL and the row has exactly one
 -- meaning — no condition-kind discriminator, no derivation branching on which
 -- kind a row is.
 --
 -- THAT NOT NULL IS WHAT MAKES THE UNIQUE KEY TOTAL. 1.0 declares a
--- byte-identical `UNIQUE (step_fk, dep_step_fk)` that does NOT prevent
--- duplicates, because `dep_step_fk` is nullable there and MySQL treats NULLs in
--- a UNIQUE index as DISTINCT — so 1.0 can hold two time-gate rows on one step
+-- byte-identical `UNIQUE (epic_fk, dep_epic_fk)` that does NOT prevent
+-- duplicates, because `dep_epic_fk` is nullable there and MySQL treats NULLs in
+-- a UNIQUE index as DISTINCT — so 1.0 can hold two time-gate rows on one epic
 -- with no constraint objecting. (Same NULL semantics that force
 -- `orchestration_claims.initiative_key` to exist.) Nothing exploits it today: 0 of the
 -- 175 live rows is a time gate.
@@ -1321,26 +1323,26 @@ CREATE TABLE pipeline_step_requirements (
 -- Dropping the column would buy nothing the composite UNIQUE key does not
 -- already give.
 --
--- `dep_step_fk` RESTRICT is design rule 4's teeth: a step something else gates
+-- `dep_epic_fk` RESTRICT is design rule 4's teeth: an epic something else gates
 -- on cannot be deleted or merged away.
 --
 -- AN EDGE MAY NOT CROSS AN INITIATIVE, and the schema cannot say so — the constraint
 -- is between two rows' parents. Enforced in the service layer, the same place
 -- the cycle check and the cross-pipeline check already live.
-CREATE TABLE pipeline_step_deps (
+CREATE TABLE epic_deps (
     id          INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
-    step_fk     INT NOT NULL,
-    dep_step_fk INT NOT NULL,                              -- NOT NULL: the time gate is a step column now
-    UNIQUE KEY uq_pipeline_step_deps (step_fk, dep_step_fk),
-    CONSTRAINT fk_psd_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+    epic_fk     INT NOT NULL,
+    dep_epic_fk INT NOT NULL,                              -- NOT NULL: the time gate is an epic column now
+    UNIQUE KEY uq_epic_deps (epic_fk, dep_epic_fk),
+    CONSTRAINT fk_ed_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_psd_dep_step
-        FOREIGN KEY (dep_step_fk) REFERENCES pipeline_steps (id)
+    CONSTRAINT fk_ed_dep_epic
+        FOREIGN KEY (dep_epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
-CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
+CREATE INDEX ix_ed_dep_epic_fk ON epic_deps (dep_epic_fk);
 
 -- Orchestration reservations (req #3224, migration 20260801150404).
 --
@@ -1352,8 +1354,8 @@ CREATE INDEX ix_psd_dep_step_fk ON pipeline_step_deps (dep_step_fk);
 -- unloadable through load_sql.py until #3196 fixed the statement splitter.
 --
 -- It served BOTH ERAS from req #3369 (migration 20260809024954) until req #3356
--- (migration 20260812175325) dropped the 1.0 half — `pipeline_fk`, `epic_fk`,
--- the generated `epic_key`, `uq_orchestration_claims_scope`, both 1.0 FKs and
+-- (migration 20260812175325) dropped the 1.0 half — `pipeline_fk`, `initiative_fk`,
+-- the generated `initiative_key`, `uq_orchestration_claims_scope`, both 1.0 FKs and
 -- `ix_orchestration_claims_initiative_fk` — leaving the 2.0 scope pair alone. See
 -- schema.sql for the full rationale. Placed here, after the plan layer, because
 -- it carries a live FK into it.
@@ -1506,7 +1508,7 @@ CREATE TABLE engine_outcomes (
     id              INT           NOT NULL PRIMARY KEY AUTO_INCREMENT,
     record_fk       INT           NOT NULL,               -- the record that ADMITTED it
     requirement_fk  INT           NOT NULL,
-    step_fk         INT           NULL DEFAULT NULL,
+    epic_fk         INT           NULL DEFAULT NULL,
     outcome_state   VARCHAR(16)   NOT NULL DEFAULT 'pending', -- pending | landed | failed
     session_ids     JSON          NULL,                   -- landed: the swarm_sessions ids
     reason          VARCHAR(512)  NULL DEFAULT NULL,      -- failed: why
@@ -1520,8 +1522,8 @@ CREATE TABLE engine_outcomes (
     CONSTRAINT fk_eo_requirement
         FOREIGN KEY (requirement_fk) REFERENCES requirements (id)
         ON UPDATE CASCADE ON DELETE CASCADE,
-    CONSTRAINT fk_eo_step
-        FOREIGN KEY (step_fk) REFERENCES pipeline_steps (id)
+    CONSTRAINT fk_eo_epic
+        FOREIGN KEY (epic_fk) REFERENCES epics (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_eo_creator
         FOREIGN KEY (creator_fk) REFERENCES profiles (id)
