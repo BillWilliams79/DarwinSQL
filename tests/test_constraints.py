@@ -1598,15 +1598,15 @@ def test_agent_instructions_delete_then_repost_swap_is_legal(
 # ---------------------------------------------------------------------------
 # Req #3111 — Swarm Orchestration 1.0 schema foundation (migration 076): GONE
 #
-# This file carried ~465 lines of FK-policy tests over `epics`, `pipelines`,
-# `pipeline_steps`, `pipeline_step_requirements` and `pipeline_step_deps`,
-# plus their `_insert_epic` / `_insert_pipeline` / `_insert_step` /
+# This file carried ~465 lines of FK-policy tests over `initiatives`, `pipelines`,
+# `epics`, `epic_requirements` and `epic_deps`,
+# plus their `_insert_initiative` / `_insert_pipeline` / `_insert_step` /
 # `_insert_requirement` fixtures. Req #3356 (migration 20260812175325) dropped
 # all five tables, so the whole section went with them — a constraint test for
 # a table that does not exist cannot fail for a real reason.
 #
 # The equivalent 2.0 coverage lives in `tests/test_pipeline2_behaviours.py`:
-# the step->requirement asymmetry (step_fk CASCADE, requirement_fk RESTRICT —
+# the step->requirement asymmetry (epic_fk CASCADE, requirement_fk RESTRICT —
 # design rule 4 with teeth), the duplicate-edge refusal, and a pipeline delete
 # that cascades to its steps while sparing the requirement.
 # ---------------------------------------------------------------------------

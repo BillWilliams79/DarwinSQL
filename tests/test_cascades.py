@@ -1476,7 +1476,7 @@ def test_delete_profile_cascades_to_row_docs(db_connection):
 # every other column, and only the attribution goes to NULL.
 #
 # RETARGETED FROM 1.0 BY req #3356 (migration 20260812175325), which dropped
-# `pipelines`/`epics` and req #3186's `pipeline_fk`/`epic_fk`. The 2.0 pair
+# `pipelines`/`initiatives` and req #3186's `pipeline_fk`/`initiative_fk`. The 2.0 pair
 # (req #3350, migration 20260809081441) carries the identical policy and had no
 # cascade coverage of its own, so these two were moved rather than deleted —
 # deleting them would have left the SET NULL contract unasserted anywhere.
