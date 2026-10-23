@@ -547,7 +547,7 @@ def test_swarm_sessions_columns(db_connection):
     - instrumented: TINYINT, NOT NULL, DEFAULT 1               (req #2332)
     - pre_pause_status: VARCHAR(16), NULL                      (req #2332)
     - pipeline_fk: INT, NULL, MUL                             (req #3350, migration 20260809081441)
-    - epic_fk: INT, NULL, MUL                                 (req #3350, migration 20260809081441)
+    - initiative_fk: INT, NULL, MUL                                 (req #3350, migration 20260809081441)
     - phase_tokens: JSON, NULL                                 (req #2839, migration 060)
     - tokens_at_last_transition: JSON, NULL                    (req #2839, migration 060)
     - start_summary: TEXT, NULL
@@ -592,7 +592,7 @@ def test_swarm_sessions_columns(db_connection):
     # migration 20260812175325 — asserted ABSENT below rather than tolerated
     # here, because a tolerance clause cannot tell a dropped column from a
     # re-added one.)
-    for attribution in ('pipeline_fk', 'epic_fk'):
+    for attribution in ('pipeline_fk', 'initiative_fk'):
         if attribution in columns:
             expected_fields.append(attribution)
     # Req #3455, migration 20260810013244 — WHICH TERMINAL WINDOW this session's
@@ -622,18 +622,18 @@ def test_swarm_sessions_columns(db_connection):
     # column names were absent entirely; migration 20260812184333, in the same
     # requirement's second half, renamed the surviving second-generation
     # attribution pair (until then `pipeline2_fk`/`epic2_fk`) INTO these same
-    # freed names. So `pipeline_fk`/`epic_fk` exist again on this table today
+    # freed names. So `pipeline_fk`/`initiative_fk` exist again on this table today
     # — correctly — and asserting their absence would be testing an
     # intermediate state that no longer exists. What must stay true is the
     # SHAPE, checked below: unconditionally present now (not "if present",
     # since there is only one attribution pair left to be conditional about).
     assert 'pipeline_fk' in columns
-    assert 'epic_fk' in columns
+    assert 'initiative_fk' in columns
 
     # req #3350 attribution columns — NULLable INT FKs with no default. NULL is
-    # meaningful: "this session belongs to no plan / no epic", which is a real
+    # meaningful: "this session belongs to no plan / no initiative", which is a real
     # answer for ad-hoc work outside any pipeline, not a missing value.
-    for attribution in ('pipeline_fk', 'epic_fk'):
+    for attribution in ('pipeline_fk', 'initiative_fk'):
         assert columns[attribution]['Type'] == 'int'
         assert columns[attribution]['Null'] == 'YES'
         assert columns[attribution]['Default'] is None
@@ -1887,8 +1887,8 @@ def test_table_count(db_connection):
         # guarantee crosses a machine boundary instead of living in /tmp.
         'orchestration_claims',
         # Req #3337 — Pipeline 2.0 plan layer (migration 20260808115509).
-        # Containment chain Pipeline -> Epic -> Step -> Requirement.
-        'pipelines', 'epics', 'pipeline_steps',
+        # Containment chain Pipeline -> Initiative -> Step -> Requirement.
+        'pipelines', 'initiatives', 'pipeline_steps',
         'pipeline_step_requirements', 'pipeline_step_deps',
         # Req #3352 — Pipeline 2.0 Feature retirement: test cases re-home onto
         # Requirement (migration 20260809002149). The sole test-case junction

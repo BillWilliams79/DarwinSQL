@@ -35,6 +35,22 @@ is `DROP TABLE`, `RENAME TABLE old TO archive`, or `ALTER TABLE old RENAME TO
 archive` (all three make `old`'s original name available), and whether the
 claim side is `RENAME TABLE new TO old` or `ALTER TABLE new RENAME TO old`.
 
+THE ORDER RULE (req #3777)
+--------------------------
+A claim pairs ONLY with the NEAREST vacate of the same name that PRECEDES it
+by migration stamp — never with an earlier vacate of that name, and never
+with a vacate that comes after it. Before #3777 the detector paired every
+file that vacated a name with every OTHER file that claimed it regardless of
+order, so a pass that vacates `epics` (renaming it away) was paired with
+`20260812184333`, which claimed `epics` months EARLIER — not a split, nothing
+was waiting on it. A plain "later claims only" rule is not enough either: it
+would pair a claim with EVERY earlier vacate of the name, so pass 2's claim of
+`epics` would be reported against the August 2026 drop `20260812175325` as
+well as against pass 1's vacate. Nearest-preceding leaves exactly the one
+handoff a vacate-then-claim rename produces on purpose, for the claiming pass
+to record. A same-file vacate+claim (`RENAME TABLE a TO tmp, b TO a`) is the
+safe atomic shape and is never reported.
+
 INVOCATION. This module needs no database and runs the same way
 `test_sql_targets.py` does — as part of the DarwinSQL suite
 (`cd DarwinSQL && python3 -m pytest tests/ -q`), which is why it is not
@@ -88,12 +104,18 @@ def _read(path):
 #
 # A table name legitimately reused long after its DROP (e.g. Build Visualizer
 # tables dropped by 057, or the Feature-tier catalog table and its test-case
-# junction dropped by 20260811033413) is NOT a case for this list — nothing
-# reads a name that
-# stayed vacant. This list is only for a genuine split of one drop-then-claim
-# HANDOFF across two files; combine them into one migration instead of adding
-# a second entry unless that is truly impossible (the historical pair below
-# already shipped to production and cannot be retroactively combined).
+# junction dropped by 20260811033413) is reported only against THAT drop, and
+# only when no nearer vacate of the name exists: the detector is ORDER-AWARE
+# (req #3777) and pairs a claim with the nearest vacate that precedes it by
+# stamp — never with an earlier vacate a later one superseded, never with a
+# vacate that comes after the claim (a CREATE is not a claim, so a plain
+# re-creation of a dropped name is never reported at all). This list is only for a genuine split of one
+# vacate-then-claim HANDOFF across two files; combine them into one migration
+# instead of adding a second entry unless that is truly impossible (the
+# historical pair below already shipped to production and cannot be
+# retroactively combined; a deliberate two-pass rename — pass 1 vacates a
+# name, pass 2 claims it after a deploy between — is the claiming pass's
+# entry to record, with the reason nothing read the name in the gap).
 # ---------------------------------------------------------------------------
 
 GRANDFATHERED_SPLIT_PAIRS = {
@@ -185,11 +207,20 @@ def test_there_are_migration_files_to_check():
 
 
 def _find_split_pairs(files, exceptions):
-    """Every (table_name, vacating_file, claiming_file) where a DIFFERENT
-    file claims a name this file vacated, excluding pairs in `exceptions`.
-    This is the detector both the real test and its own sanity check drive —
-    factored out so the sanity check exercises the real logic instead of
-    duplicating one assertion from it.
+    """Every (table_name, vacating_file, claiming_file) where a file claims a
+    name and the NEAREST vacate of that name that precedes it by migration
+    stamp sits in a DIFFERENT file, excluding pairs in `exceptions`.
+
+    ORDER-AWARE (req #3777): a claim is matched against the vacates of its
+    name sorted by stamp (the basename — the frozen `NNN_` era sorts before
+    the `YYYYMMDDHHMMSS_` era, which is chronological), and only the latest
+    vacate at or before the claim's own stamp is its partner. An earlier
+    vacate was superseded; a later one was never waited on; a vacate in the
+    claiming file itself is the safe, atomic shape.
+
+    This is the detector both the real test and its own sanity checks drive —
+    factored out so they exercise the real logic instead of duplicating one
+    assertion from it.
     """
     vacated_in = {}   # table name -> set of relative paths that vacate it
     claimed_in = {}   # table name -> set of relative paths that claim it
@@ -203,15 +234,20 @@ def _find_split_pairs(files, exceptions):
             claimed_in.setdefault(name, set()).add(rel)
 
     violations = []
-    for name, vacating_files in vacated_in.items():
-        for vacating_path in vacating_files:
-            for claiming_path in claimed_in.get(name, set()):
-                if vacating_path == claiming_path:
-                    continue  # same file — the safe, atomic shape
-                pair = (os.path.basename(vacating_path), os.path.basename(claiming_path))
-                if pair in exceptions:
-                    continue
-                violations.append((name, vacating_path, claiming_path))
+    for name, claiming_files in sorted(claimed_in.items()):
+        vacates = sorted(vacated_in.get(name, ()), key=os.path.basename)
+        for claiming_path in sorted(claiming_files, key=os.path.basename):
+            stamp = os.path.basename(claiming_path)
+            preceding = [v for v in vacates if os.path.basename(v) <= stamp]
+            if not preceding:
+                continue  # nothing vacated this name first — a fresh name
+            vacating_path = preceding[-1]
+            if vacating_path == claiming_path:
+                continue  # same file — the safe, atomic shape
+            pair = (os.path.basename(vacating_path), os.path.basename(claiming_path))
+            if pair in exceptions:
+                continue
+            violations.append((name, vacating_path, claiming_path))
     return violations
 
 
@@ -268,3 +304,64 @@ def test_detector_fires_without_the_grandfather_exception(monkeypatch):
                               'pipeline_step_requirements', 'pipeline_step_deps'}, (
         f'expected the historical incident\'s five table names to be flagged, got {flagged_names}'
     )
+
+
+def test_detector_pairs_a_claim_only_with_the_nearest_preceding_vacate(tmp_path):
+    """THE ORDER RULE (req #3777), driven through the real detector on a
+    synthetic corpus: of three files that vacate `x`, only the one nearest
+    BEFORE the claim is its partner — not the older vacate it superseded, and
+    not the vacate that comes AFTER the claim (which was never waited on). A
+    file that vacates and claims a name itself is the safe shape and is not
+    reported.
+    """
+    def migration(stamp, body):
+        path = tmp_path / f'{stamp}_order_rule.sql'
+        path.write_text(body + '\n', encoding='utf-8')
+        return str(path)
+
+    superseded = migration('20260101000000', 'DROP TABLE x;')
+    nearest = migration('20260102000000', 'RENAME TABLE x TO x_archive;')
+    claim = migration('20260103000000', 'RENAME TABLE y TO x;')
+    later = migration('20260104000000', 'DROP TABLE x;')
+    atomic = migration('20260105000000', 'RENAME TABLE q TO q_old, r TO q;')
+
+    violations = _find_split_pairs(
+        [superseded, nearest, claim, later, atomic], exceptions=set())
+
+    assert violations == [('x', _relative(nearest), _relative(claim))], violations
+    flagged_files = {v for _n, v, _c in violations} | {c for _n, _v, c in violations}
+    assert _relative(superseded) not in flagged_files, 'an earlier vacate was superseded'
+    assert _relative(later) not in flagged_files, 'a vacate AFTER the claim was never waited on'
+    assert _relative(atomic) not in flagged_files, 'same-file vacate+claim is the safe shape'
+
+
+def test_a_claim_long_after_an_unrelated_drop_is_a_split_only_with_the_nearest_vacate(tmp_path):
+    """The case the module comment used to carve out by hand — a name reused
+    long after its DROP — is simply what the order rule reports when the
+    nearest preceding vacate IS that old drop (one pair, naming that drop), and
+    never reported at all once a nearer vacate exists. So a two-pass rename
+    (pass 1 renames `epics` away, pass 2 renames another table onto `epics`)
+    yields exactly the pass-1/pass-2 pair for pass 2 to record — never a pair
+    with the drop that preceded pass 1.
+    """
+    def migration(stamp, body):
+        path = tmp_path / f'{stamp}_two_pass.sql'
+        path.write_text(body + '\n', encoding='utf-8')
+        return str(path)
+
+    old_drop = migration('20260812175325', 'DROP TABLE epics;')
+    old_claim = migration('20260812184333', 'RENAME TABLE pipeline2_epics TO epics;')
+    pass_1 = migration('20261023090122', 'RENAME TABLE epics TO initiatives;')
+    pass_2 = migration('20261101000000', 'RENAME TABLE pipeline_steps TO epics;')
+
+    violations = _find_split_pairs([old_drop, old_claim, pass_1, pass_2], exceptions=set())
+    assert violations == [
+        ('epics', _relative(old_drop), _relative(old_claim)),
+        ('epics', _relative(pass_1), _relative(pass_2)),
+    ], violations
+
+    # And pass 1 on its own — vacating `epics` after the August claim — is no
+    # split at all: the only claim of `epics` precedes it.
+    assert _find_split_pairs([old_drop, old_claim, pass_1], exceptions=set()) == [
+        ('epics', _relative(old_drop), _relative(old_claim)),
+    ]

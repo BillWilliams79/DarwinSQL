@@ -2,9 +2,9 @@
 
 Three properties a schema-derived Lambda-Rest or darwin-mcp test cannot show:
 
-  * the scope keys really refuse a duplicate WHOLE-PLAN row — `epic_fk` is NULL
+  * the scope keys really refuse a duplicate WHOLE-PLAN row — `initiative_fk` is NULL
     there, and MySQL treats NULLs in a UNIQUE index as DISTINCT, which is why
-    `engine_states` keys on the generated `epic_key`;
+    `engine_states` keys on the generated `initiative_key`;
   * a desired-state flip on `engine_states` never stamps a heartbeat — the
     reason the heartbeat is a table of its own;
   * a decision record's JSON reads back equal to what was written, and the
@@ -21,7 +21,7 @@ HASH = 'sha256:' + '0' * 64
 
 @pytest.fixture
 def scope(db_connection, test_creator_fk):
-    """A plan, an epic and a machine to hang engine rows on."""
+    """A plan, an initiative and a machine to hang engine rows on."""
     tag = uuid.uuid4().hex[:8]
     with db_connection.cursor() as cur:
         cur.execute("INSERT INTO pipelines (title, creator_fk) VALUES (%s, %s)",
@@ -33,17 +33,17 @@ def scope(db_connection, test_creator_fk):
         cur.execute("INSERT INTO categories (category_name, project_fk, creator_fk) "
                     "VALUES (%s, %s, %s)", (f'eng-{tag}', project_id, test_creator_fk))
         category_id = cur.lastrowid
-        cur.execute("INSERT INTO epics (title, pipeline_fk, category_fk, creator_fk) "
+        cur.execute("INSERT INTO initiatives (title, pipeline_fk, category_fk, creator_fk) "
                     "VALUES (%s, %s, %s, %s)",
                     (f'eng-{tag}', pipeline_id, category_id, test_creator_fk))
-        epic_id = cur.lastrowid
+        initiative_id = cur.lastrowid
         cur.execute("INSERT INTO machines (title, hostname, platform, arch, creator_fk) "
                     "VALUES (%s, %s, 'darwin', 'arm64', %s)",
                     (f'eng-{tag}', f'eng-{tag}.local', test_creator_fk))
         machine_id = cur.lastrowid
     db_connection.commit()
 
-    yield {'pipeline': pipeline_id, 'epic': epic_id, 'machine': machine_id}
+    yield {'pipeline': pipeline_id, 'initiative': initiative_id, 'machine': machine_id}
 
     with db_connection.cursor() as cur:
         cur.execute("DELETE FROM engine_inputs WHERE creator_fk = %s", (test_creator_fk,))
@@ -59,9 +59,9 @@ def _columns(cur, table):
     return {row['Field']: row for row in cur.fetchall()}
 
 
-def _insert_state(cur, scope, creator, epic=None):
-    cur.execute("INSERT INTO engine_states (pipeline_fk, epic_fk, machine_fk, creator_fk) "
-                "VALUES (%s, %s, %s, %s)", (scope['pipeline'], epic, scope['machine'], creator))
+def _insert_state(cur, scope, creator, initiative=None):
+    cur.execute("INSERT INTO engine_states (pipeline_fk, initiative_fk, machine_fk, creator_fk) "
+                "VALUES (%s, %s, %s, %s)", (scope['pipeline'], initiative, scope['machine'], creator))
     return cur.lastrowid
 
 
@@ -86,7 +86,7 @@ def test_engine_states_defaults_are_off_and_stopped(db_connection):
     assert cols['desired_state']['Null'] == 'NO'
     assert cols['actual_state']['Default'] == 'stopped'
     assert cols['actual_state']['Null'] == 'NO'
-    assert cols['epic_key']['Extra'] == 'VIRTUAL GENERATED'
+    assert cols['initiative_key']['Extra'] == 'VIRTUAL GENERATED'
     assert cols['machine_fk']['Null'] == 'NO'
 
 
@@ -126,11 +126,11 @@ def test_a_second_whole_plan_state_on_one_machine_is_refused(db_connection, scop
     assert 'uq_engine_states_scope' in str(exc.value.args[1])
 
 
-def test_an_epic_scope_beside_the_whole_plan_scope_is_allowed(db_connection, scope,
+def test_an_initiative_scope_beside_the_whole_plan_scope_is_allowed(db_connection, scope,
                                                               test_creator_fk):
     with db_connection.cursor() as cur:
         _insert_state(cur, scope, test_creator_fk)
-        _insert_state(cur, scope, test_creator_fk, epic=scope['epic'])
+        _insert_state(cur, scope, test_creator_fk, initiative=scope['initiative'])
     db_connection.commit()
 
 
@@ -181,8 +181,8 @@ def test_a_record_hash_is_unique_per_creator(db_connection, scope, test_creator_
 def test_an_outcome_dies_with_its_record(db_connection, scope, test_creator_fk):
     with db_connection.cursor() as cur:
         cur.execute("INSERT INTO requirements (title, category_fk, creator_fk) "
-                    "SELECT 'eng-outcome', category_fk, %s FROM epics WHERE id = %s",
-                    (test_creator_fk, scope['epic']))
+                    "SELECT 'eng-outcome', category_fk, %s FROM initiatives WHERE id = %s",
+                    (test_creator_fk, scope['initiative']))
         req_id = cur.lastrowid
         record_id = _insert_record(cur, scope, test_creator_fk, {})
         cur.execute("INSERT INTO engine_outcomes (record_fk, requirement_fk, creator_fk) "

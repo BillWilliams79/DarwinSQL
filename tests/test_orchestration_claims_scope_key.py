@@ -2,7 +2,7 @@
 
 The one thing a schema-derived Lambda-Rest/darwin-mcp test cannot show: the
 generated-column UNIQUE key `uq_orchestration_claims_scope` really does refuse
-a duplicate whole-plan claim, where a key written over the nullable `epic_fk`
+a duplicate whole-plan claim, where a key written over the nullable `initiative_fk`
 directly would let both inserts through (MySQL treats NULLs in a UNIQUE index as
 DISTINCT).
 
@@ -54,16 +54,16 @@ def _columns(cur, table):
 # ---------------------------------------------------------------------------
 
 def test_the_scope_pair_is_nullable_and_the_key_column_is_generated(db_connection):
-    # `epic_fk` NULL is what "whole-plan scope" MEANS, so the key cannot sit on
-    # it directly — `epic_key` is the VIRTUAL generated column that folds NULL
-    # into a comparable 0. `pipeline_fk` is nullable because an epic scope may
+    # `initiative_fk` NULL is what "whole-plan scope" MEANS, so the key cannot sit on
+    # it directly — `initiative_key` is the VIRTUAL generated column that folds NULL
+    # into a comparable 0. `pipeline_fk` is nullable because an initiative scope may
     # name the plan implicitly; the both-or-neither refusal is an
     # application-layer check in darwin-mcp, not a SQL CHECK.
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'orchestration_claims')
     assert cols['pipeline_fk']['Null'] == 'YES'
-    assert cols['epic_fk']['Null'] == 'YES'
-    assert cols['epic_key']['Extra'] == 'VIRTUAL GENERATED'
+    assert cols['initiative_fk']['Null'] == 'YES'
+    assert cols['initiative_key']['Extra'] == 'VIRTUAL GENERATED'
 
 
 def test_only_the_plain_scope_key_survives(db_connection):
@@ -82,7 +82,7 @@ def test_only_the_plain_scope_key_survives(db_connection):
     # req #3678 — the machine joined the key, so a SECOND machine may hold a
     # subscriber row on a scope another machine leads.
     assert by_key == {'uq_orchestration_claims_scope':
-                      ['pipeline_fk', 'epic_key', 'machine_key']}, by_key
+                      ['pipeline_fk', 'initiative_key', 'machine_key']}, by_key
 
 
 # ---------------------------------------------------------------------------
@@ -91,9 +91,9 @@ def test_only_the_plain_scope_key_survives(db_connection):
 
 def test_a_second_whole_plan_claim_is_refused_by_the_database(
         db_connection, p2_pipeline, test_creator_fk):
-    # THE regression this column exists for: `epic_fk` is NULL on both rows,
+    # THE regression this column exists for: `initiative_fk` is NULL on both rows,
     # and MySQL treats NULLs in a UNIQUE index as DISTINCT. A key written
-    # directly over `epic_fk` would let both inserts succeed.
+    # directly over `initiative_fk` would let both inserts succeed.
     with db_connection.cursor() as cur:
         cur.execute(
             "INSERT INTO orchestration_claims (pipeline_fk, creator_fk) "
@@ -110,7 +110,7 @@ def test_a_second_whole_plan_claim_is_refused_by_the_database(
     assert 'uq_orchestration_claims_scope' in str(exc.value.args[1])
 
 
-def test_the_generated_column_carries_the_key_not_epic_fk_directly(
+def test_the_generated_column_carries_the_key_not_initiative_fk_directly(
         db_connection, p2_pipeline, test_creator_fk):
     # Assert the stored key value directly, mirroring
     # test_pipeline2_behaviours.py's SCH-005 pattern — pins the MECHANISM, not
@@ -119,17 +119,17 @@ def test_the_generated_column_carries_the_key_not_epic_fk_directly(
         cur.execute(
             "INSERT INTO orchestration_claims (pipeline_fk, creator_fk) "
             "VALUES (%s, %s)", (p2_pipeline, test_creator_fk))
-        cur.execute("SELECT epic_fk, epic_key FROM orchestration_claims "
+        cur.execute("SELECT initiative_fk, initiative_key FROM orchestration_claims "
                     "WHERE pipeline_fk = %s", (p2_pipeline,))
         row = cur.fetchone()
     db_connection.commit()
-    assert row['epic_fk'] is None
-    assert row['epic_key'] == 0
+    assert row['initiative_fk'] is None
+    assert row['initiative_key'] == 0
 
 
-def test_two_different_epics_of_one_plan_both_insert(
+def test_two_different_initiatives_of_one_plan_both_insert(
         db_connection, p2_pipeline, test_creator_fk):
-    # The mirror of the refusal above: two DIFFERENT epic scopes on the same
+    # The mirror of the refusal above: two DIFFERENT initiative scopes on the same
     # plan are not a collision — the constraint must not be over-eager.
     with db_connection.cursor() as cur:
         cur.execute("INSERT INTO projects (project_name, creator_fk) VALUES (%s, %s)",
@@ -139,24 +139,24 @@ def test_two_different_epics_of_one_plan_both_insert(
                     "VALUES (%s, %s, %s)",
                     (f'oc-cat-{uuid.uuid4().hex[:8]}', project_id, test_creator_fk))
         category_id = cur.lastrowid
-        cur.execute("INSERT INTO epics "
+        cur.execute("INSERT INTO initiatives "
                     "(pipeline_fk, title, category_fk, creator_fk) "
                     "VALUES (%s, %s, %s, %s)",
                     (p2_pipeline, f'oc-e2a-{uuid.uuid4().hex[:8]}', category_id,
                      test_creator_fk))
-        epic_a = cur.lastrowid
-        cur.execute("INSERT INTO epics "
+        initiative_a = cur.lastrowid
+        cur.execute("INSERT INTO initiatives "
                     "(pipeline_fk, title, category_fk, creator_fk) "
                     "VALUES (%s, %s, %s, %s)",
                     (p2_pipeline, f'oc-e2b-{uuid.uuid4().hex[:8]}', category_id,
                      test_creator_fk))
-        epic_b = cur.lastrowid
+        initiative_b = cur.lastrowid
         cur.execute(
-            "INSERT INTO orchestration_claims (pipeline_fk, epic_fk, creator_fk) "
-            "VALUES (%s, %s, %s)", (p2_pipeline, epic_a, test_creator_fk))
+            "INSERT INTO orchestration_claims (pipeline_fk, initiative_fk, creator_fk) "
+            "VALUES (%s, %s, %s)", (p2_pipeline, initiative_a, test_creator_fk))
         cur.execute(
-            "INSERT INTO orchestration_claims (pipeline_fk, epic_fk, creator_fk) "
-            "VALUES (%s, %s, %s)", (p2_pipeline, epic_b, test_creator_fk))
+            "INSERT INTO orchestration_claims (pipeline_fk, initiative_fk, creator_fk) "
+            "VALUES (%s, %s, %s)", (p2_pipeline, initiative_b, test_creator_fk))
         cur.execute("SELECT COUNT(*) AS n FROM orchestration_claims "
                     "WHERE pipeline_fk = %s", (p2_pipeline,))
         count = cur.fetchone()['n']
@@ -166,8 +166,8 @@ def test_two_different_epics_of_one_plan_both_insert(
     with db_connection.cursor() as cur:
         cur.execute("DELETE FROM orchestration_claims WHERE pipeline_fk = %s",
                     (p2_pipeline,))
-        cur.execute("DELETE FROM epics WHERE id IN (%s, %s)",
-                    (epic_a, epic_b))
+        cur.execute("DELETE FROM initiatives WHERE id IN (%s, %s)",
+                    (initiative_a, initiative_b))
         cur.execute("DELETE FROM categories WHERE id = %s", (category_id,))
         cur.execute("DELETE FROM projects WHERE id = %s", (project_id,))
     db_connection.commit()
