@@ -1,0 +1,59 @@
+-- 20261023232657_drop_pipelines_execution_mode.sql
+--
+-- Req #3822: drop `pipelines.execution_mode` — a pipeline always runs every
+-- initiative at once, so the plan has no execution mode.
+--
+-- PROBLEM.  `execution_mode` (req #3388, migration 20260808092732) had one
+--           non-default value, `serial`, that nothing used. Req #3822 removed
+--           every reader and writer — the Lambda-Rest compose read and the
+--           `derived.serial` block, darwin-mcp's create/update_pipeline param,
+--           the Darwin Pipelines page and New Pipeline dialog, and the engine.
+--           The column is now a stored fact nothing reads and nothing may write.
+--           Ordering between initiatives belongs to initiative dependencies.
+--
+-- SHAPE.    DROP COLUMN. Nothing else changes.
+--
+-- LOSS.     None. Measured 2026-10-23 immediately before allocating this file:
+--             darwin_dev  11 of 11 pipelines `parallel`;
+--             production   8 of 8  pipelines `parallel`.
+--           Re-measure before the production apply:
+--             SELECT id, execution_mode FROM pipelines WHERE execution_mode <> 'parallel';
+--
+-- SEQUENCING. The deployed RestApi-MySql-Lambda selected this column by name
+--           (`pipeline2_compose.py::_PIPELINE_COLUMNS`), the deployed Darwin
+--           bundle requested it in `fields=` (Pipelines page, devops queries)
+--           and the darwin-mcp daemon projected it (`services/common.py`). All
+--           three must be running post-#3822 code before EITHER apply — the one
+--           Lambda serves both databases — or every plan read fails on the
+--           unknown column (the req #3750 -> #3752 precedent).
+--
+-- TARGET.   NEVER write `USE <db>;` or `CREATE DATABASE` into this file. A
+--           `USE` is a statement, not a declaration: it re-points the session
+--           the moment it executes and overrides whatever database the caller
+--           named — which on 2026-08-01 sent a dev-aimed apply to production.
+--           load_sql.py REFUSES a file that names its own database, and
+--           DarwinSQL/tests/test_sql_targets.py fails the build (req #3196).
+--           If this migration may only be applied to ONE database, say so as a
+--           constraint instead: `-- darwin:targets = darwin`.
+--
+-- APPLY.    darwin_dev FIRST, production SECOND. Two separate commands:
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261023232657_drop_pipelines_execution_mode.sql darwin_dev --destructive
+--
+--             python3 DarwinSQL/scripts/load_sql.py \
+--               DarwinSQL/migrations/20261023232657_drop_pipelines_execution_mode.sql darwin --production --destructive
+--
+--           Production is named TWICE — by name and by intent. The loader
+--           refuses `darwin` without --production, and refuses --production on
+--           any other database (req #3196). The production command also
+--           requires `bash scripts/db/rds-snapshot.sh 20261023232657` to report
+--           status=ok first. See memory/database.md § Schema Migration Workflow.
+--
+-- Migration id 20261023232657 is a UTC timestamp allocated by
+-- DarwinSQL/scripts/new-migration.sh (req #3121). Do not renumber it.
+--
+-- darwin:destructive
+
+ALTER TABLE pipelines
+    DROP COLUMN execution_mode;

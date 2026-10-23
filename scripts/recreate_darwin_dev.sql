@@ -1156,13 +1156,6 @@ CREATE TABLE pipelines (
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal; PURPOSE only (design rule 11)
     pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
-    execution_mode  ENUM('parallel', 'serial')
-                                 NOT NULL DEFAULT 'parallel', -- req #3388: parallel = every initiative at
-                                                              -- once; serial = one at a time, live
-                                                              -- initiative DERIVED. Carried forward from
-                                                              -- 1.0 `pipelines` — a real plan
-                                                              -- property, not 1.0-specific debt, so
-                                                              -- the #3356 importer must copy it.
     locked          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3649: 1 = a relic in time; freezes
                                                           -- the plan, its initiatives and epics (gateway-
                                                           -- enforced, Lambda-Rest/plan_lock.py)
