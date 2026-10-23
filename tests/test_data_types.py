@@ -1894,6 +1894,11 @@ def test_table_count(db_connection):
         # Requirement (migration 20260809002149). The sole test-case junction
         # since req #3355 dropped its predecessor.
         'requirement_test_cases',
+        # Req #3756 — Orchestration Engine 2 data contract (migration
+        # 20261022073056): desired/actual state, heartbeat, decision records,
+        # executor outcomes, content-addressed decide() inputs.
+        'engine_states', 'engine_heartbeats', 'engine_decision_records',
+        'engine_outcomes', 'engine_inputs',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
