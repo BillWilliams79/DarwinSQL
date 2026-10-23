@@ -7,7 +7,7 @@
 
 WHY THIS EXISTS. On 2026-08-01 (req #3186 session 2518) `recreate_darwin_dev.sql`
 reset `darwin_dev` to empty tables. Everything else was rebuilt from a canonical
-seed — the pipeline fixture, requirements, epics, the since-retired Feature
+seed — the pipeline fixture, requirements, initiatives, the since-retired Feature
 catalog, phase fixtures, build-viz — but `areas` and `tasks` had no canonical
 seed, so they came back
 empty and NOBODY KNEW WHAT THEY HAD HELD. Measured 2026-08-07: `domains` 6 (all

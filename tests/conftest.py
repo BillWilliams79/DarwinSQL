@@ -118,7 +118,7 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM requirements WHERE creator_fk = %s)",
                     (test_creator_fk, test_creator_fk))
         cur.execute("DELETE FROM pipeline_steps WHERE creator_fk = %s", (test_creator_fk,))
-        cur.execute("DELETE FROM epics WHERE creator_fk = %s", (test_creator_fk,))
+        cur.execute("DELETE FROM initiatives WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM pipelines WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM requirements WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM swarm_sessions WHERE creator_fk = %s", (test_creator_fk,))
@@ -152,7 +152,7 @@ def seed_test_profile(db_connection, test_creator_fk):
                     "(SELECT id FROM test_plans WHERE creator_fk = %s)", (test_creator_fk,))
         cur.execute("DELETE FROM test_plans WHERE creator_fk = %s", (test_creator_fk,))
         cur.execute("DELETE FROM test_cases WHERE creator_fk = %s", (test_creator_fk,))
-        # `epics -> categories` is RESTRICT; the epics are already
+        # `initiatives -> categories` is RESTRICT; the initiatives are already
         # cleared above, with the rest of the plan layer. (1.0's `epics` was
         # deleted here for the same reason until req #3356 dropped it.)
         cur.execute("DELETE FROM categories WHERE creator_fk = %s", (test_creator_fk,))
