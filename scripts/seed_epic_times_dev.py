@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Step start/end time fixtures for the Pipeline plan visualizer. (req #3825)
+"""Epic start/end time fixtures for the Pipeline plan visualizer. (req #3825)
 
     . Lambda-Rest/exports.sh
-    python3 DarwinSQL/scripts/seed_step_times_dev.py darwin_dev                 # idempotent
-    python3 DarwinSQL/scripts/seed_step_times_dev.py darwin_dev --reset --destructive
+    python3 DarwinSQL/scripts/seed_epic_times_dev.py darwin_dev                 # idempotent
+    python3 DarwinSQL/scripts/seed_epic_times_dev.py darwin_dev --reset --destructive
 
 A plain run never rewrites a plan already present under PLAN_TITLE, so a
 darwin_dev holding a fixture from an EARLIER version of this script keeps it
 until re-seeded with `--reset --destructive`.
 
-WHY THIS EXISTS. Req #3825 draws a step card's START (its requirements' first
+WHY THIS EXISTS. Req #3825 draws an epic card's START (its requirements' first
 swarm start) in the card's lower-left corner and its END (the last requirement
 coming back closed, once no work is open) in the lower-right. Both are derived
 from rows `darwin_dev` does not otherwise hold together — linked swarm sessions
@@ -17,25 +17,25 @@ with `started_at`, and met requirements with `completed_at` — so without this
 the time line renders blank, which is indistinguishable from broken.
 
 A SIMULATION OF PRODUCTION, NOT A CASE LIST. The shapes are the ones measured
-across production's 280 steps on 2026-10-23 (read-only): 220 steps hold one
-requirement and the rest 2-21; 160 finished steps spanned under 2 hours, 54
+across production's 280 epics on 2026-10-23 (read-only): 220 epics hold one
+requirement and the rest 2-21; 160 finished epics spanned under 2 hours, 54
 2-12 hours, 15 12-24 hours and 11 more than a day; 4 requirements were
 relaunched (two sessions — the START is the FIRST); one Primary-executed
 requirement's only session is its closeout record, written 30 seconds AFTER
-the requirement closed (step 160 — it must show no start, never a start after
-its end); and 8 steps were closed wontfix / deferred without ever launching.
+the requirement closed (epic 160 — it must show no start, never a start after
+its end); and 8 epics were closed wontfix / deferred without ever launching.
 Stamps are relative to NOW, two days back, so the plan spans several day
 columns and both AM and PM:
 
-  Initiative "Shipped"     a chain of finished steps — single, relaunched,
-                           a wide 5-requirement step crossing noon, a
+  Initiative "Shipped"     a chain of finished epics — single, relaunched,
+                           a wide 5-requirement epic crossing noon, a
                            Primary closeout (end only), a deferral closing a
-                           step (its END is the deferral — needs the
+                           epic (its END is the deferral — needs the
                            Lambda-Rest `deferred_at` projection deployed)
-  Initiative "In flight"   a multi-day step finished today, a running step
+  Initiative "In flight"   a multi-day epic finished today, a running epic
                            (met + development + queued: start only), a
                            requirement with no session yet (its own
-                           started_at), a step holding a tracking container
+                           started_at), an epic holding a tracking container
                            (ignored), a never-launched wontfix (end only),
                            and queued work downstream (no time line)
 
@@ -56,7 +56,8 @@ TARGETS = ['darwin_dev']
 # The dev-server login. Every read is scoped by creator_fk.
 CREATOR_FK = '37df7531-000d-4470-8be4-1792d8261f69'
 
-PLAN_TITLE = 'seed-3825: Step start/end times'
+PLAN_TITLE = 'seed-3825: Epic start/end times'
+LEGACY_PLAN_TITLE = 'seed-3825: Step start/end times'
 PREFIX = '__stepseed/'
 # PREFIX as a LIKE pattern: `_` is a one-character wildcard there.
 PREFIX_LIKE = PREFIX.replace('_', '\\_') + '%'
@@ -97,7 +98,7 @@ INITIATIVES = [
             R('Thumbnail draw', 'swarm_ready')]),
         ('fly-3', 'Primary-run fix in progress', ['fly-1'], [
             R('Hotfix (no session yet)', 'development', own=1.25)]),
-        ('fly-4', 'Plan container step', ['fly-1'], [
+        ('fly-4', 'Plan container epic', ['fly-1'], [
             R('Plan tracker', 'development', [48.0], own=48.0, tracking=True),
             R('Measure', 'met', [9.0], closed=8.4)]),
         ('fly-5', 'Abandoned idea', ['ship-5'], [
@@ -122,46 +123,54 @@ def existing_plan(cur):
 
 
 def delete_fixture(cur):
-    plan_id = existing_plan(cur)
-    if plan_id is not None:
-        cur.execute('SELECT s.id FROM pipeline_steps s JOIN initiatives i ON i.id = s.initiative_fk '
-                    'WHERE i.pipeline_fk = %s', (plan_id,))
-        step_ids = [r['id'] for r in cur.fetchall()]
-        if step_ids:
-            marks = ','.join(['%s'] * len(step_ids))
-            cur.execute(f'DELETE FROM pipeline_step_deps WHERE step_fk IN ({marks})', step_ids)
-            cur.execute(f'DELETE FROM pipeline_step_requirements WHERE step_fk IN ({marks})',
-                        step_ids)
-            cur.execute(f'DELETE FROM pipeline_steps WHERE id IN ({marks})', step_ids)
-        cur.execute('DELETE FROM initiatives WHERE pipeline_fk = %s', (plan_id,))
-        cur.execute('DELETE FROM pipelines WHERE id = %s', (plan_id,))
+    # The title this fixture carried before req #3780 renamed steps to epics,
+    # so a reset also clears a plan seeded under it.
+    cur.execute('SELECT id FROM pipelines WHERE title IN (%s, %s) AND creator_fk = %s',
+                (PLAN_TITLE, LEGACY_PLAN_TITLE, CREATOR_FK))
+    for row in cur.fetchall():
+        delete_plan(cur, row['id'])
     cur.execute('DELETE FROM swarm_sessions WHERE task_name LIKE %s AND creator_fk = %s',
                 (PREFIX_LIKE, CREATOR_FK))
     cur.execute('DELETE FROM requirements WHERE title LIKE %s AND creator_fk = %s',
                 (PREFIX_LIKE, CREATOR_FK))
 
 
+def delete_plan(cur, plan_id):
+    if plan_id is not None:
+        cur.execute('SELECT s.id FROM epics s JOIN initiatives i ON i.id = s.initiative_fk '
+                    'WHERE i.pipeline_fk = %s', (plan_id,))
+        epic_ids = [r['id'] for r in cur.fetchall()]
+        if epic_ids:
+            marks = ','.join(['%s'] * len(epic_ids))
+            cur.execute(f'DELETE FROM epic_deps WHERE epic_fk IN ({marks})', epic_ids)
+            cur.execute(f'DELETE FROM epic_requirements WHERE epic_fk IN ({marks})',
+                        epic_ids)
+            cur.execute(f'DELETE FROM epics WHERE id IN ({marks})', epic_ids)
+        cur.execute('DELETE FROM initiatives WHERE pipeline_fk = %s', (plan_id,))
+        cur.execute('DELETE FROM pipelines WHERE id = %s', (plan_id,))
+
+
 def seed(cur, category_fk):
     now = datetime.datetime.utcnow().replace(microsecond=0)
     cur.execute("INSERT INTO pipelines (title, description, pipeline_status, creator_fk) "
                 "VALUES (%s, %s, 'active', %s)",
-                (PLAN_TITLE, 'Req #3825 review fixture: production-shaped step start/end times.',
+                (PLAN_TITLE, 'Req #3825 review fixture: production-shaped epic start/end times.',
                  CREATOR_FK))
     plan_id = cur.lastrowid
-    step_ids = {}
-    for order, (initiative_title, steps) in enumerate(INITIATIVES, start=1):
+    epic_ids = {}
+    for order, (initiative_title, epics) in enumerate(INITIATIVES, start=1):
         cur.execute("INSERT INTO initiatives (pipeline_fk, title, category_fk, sort_order, "
                     "creator_fk) VALUES (%s, %s, %s, %s, %s)",
                     (plan_id, initiative_title, category_fk, order, CREATOR_FK))
         initiative_id = cur.lastrowid
-        for key, title, deps, reqs in steps:
-            cur.execute("INSERT INTO pipeline_steps (initiative_fk, title, run, checkpoint, "
+        for key, title, deps, reqs in epics:
+            cur.execute("INSERT INTO epics (initiative_fk, title, run, checkpoint, "
                         "creator_fk) VALUES (%s, %s, 'auto', 0, %s)",
                         (initiative_id, title, CREATOR_FK))
-            step_ids[key] = cur.lastrowid
+            epic_ids[key] = cur.lastrowid
             for dep in deps:
-                cur.execute('INSERT INTO pipeline_step_deps (step_fk, dep_step_fk) '
-                            'VALUES (%s, %s)', (step_ids[key], step_ids[dep]))
+                cur.execute('INSERT INTO epic_deps (epic_fk, dep_epic_fk) '
+                            'VALUES (%s, %s)', (epic_ids[key], epic_ids[dep]))
             for rtitle, status, sessions, own_h, closed_h, tracking in reqs:
                 completed_h = closed_h if status in ('met', 'wontfix') else None
                 deferred_h = closed_h if status == 'deferred' else None
@@ -174,8 +183,8 @@ def seed(cur, category_fk):
                      stamp(now, own_h), stamp(now, completed_h), stamp(now, deferred_h),
                      CREATOR_FK))
                 req_id = cur.lastrowid
-                cur.execute('INSERT INTO pipeline_step_requirements (step_fk, requirement_fk) '
-                            'VALUES (%s, %s)', (step_ids[key], req_id))
+                cur.execute('INSERT INTO epic_requirements (epic_fk, requirement_fk) '
+                            'VALUES (%s, %s)', (epic_ids[key], req_id))
                 for i, session_h in enumerate(sessions):
                     if session_h == 'closeout':
                         session_h = closed_h - 30 / 3600
@@ -192,7 +201,7 @@ def seed(cur, category_fk):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Seed step start/end time fixtures for the plan visualizer (req #3825).')
+        description='Seed epic start/end time fixtures for the plan visualizer (req #3825).')
     db_guard.add_target_arguments(parser, override_file_target=False)
     parser.add_argument('--reset', action='store_true',
                         help="DELETE this fixture's rows before re-seeding.")
@@ -201,7 +210,7 @@ def main():
     try:
         db_guard.require_database(args.database, production=args.production)
         db_guard.require_declared_target(args.database, TARGETS,
-                                         'seed_step_times_dev.py', overridable=False)
+                                         'seed_epic_times_dev.py', overridable=False)
         if args.reset and not args.destructive:
             raise db_guard.GuardError(
                 "REFUSED: --reset DELETEs this fixture's rows. "
@@ -211,7 +220,7 @@ def main():
         print(exc, file=sys.stderr)
         return 2
 
-    db_guard.banner(args.database, 'seed_step_times_dev.py fixture', TARGETS)
+    db_guard.banner(args.database, 'seed_epic_times_dev.py fixture', TARGETS)
 
     try:
         with conn.cursor() as cur:
