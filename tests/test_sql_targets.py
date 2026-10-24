@@ -170,7 +170,7 @@ def test_recreate_darwin_dev_is_declared_destructive():
 def test_recreate_darwin_dev_drop_list_matches_create_list():
     """The `DROP TABLE IF EXISTS` list must name exactly the tables this file creates.
 
-    Req #3395: `execution_mode` surfaced a pre-existing, independent bug — the DROP
+    Req #3395: a `pipelines` column change surfaced a pre-existing, independent bug — the DROP
     list was missing `acceptance_tests`, `branch_acceptance_tests`,
     `swarm_complete_sessions` and `swarm_completes`, all four created later in this
     same file. Running the destructive rebuild against a database that already had
