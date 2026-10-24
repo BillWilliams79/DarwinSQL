@@ -35,7 +35,7 @@ DROP TABLE IF EXISTS requirement_debug_captures,
     engine_inputs, engine_outcomes, engine_decision_records,
     engine_heartbeats, engine_states,
     orchestration_claims,
-    epic_deps, epic_requirements, epics,
+    initiative_deps, epic_deps, epic_requirements, epics,
     initiatives, pipelines,
     agent_telemetry_row_docs, agent_telemetry_rows, agent_telemetry_runs,
     customer_releases, builds, branches, build_projects,
@@ -1336,6 +1336,32 @@ CREATE TABLE epic_deps (
 );
 
 CREATE INDEX ix_ed_dep_epic_fk ON epic_deps (dep_epic_fk);
+
+-- Initiative-to-initiative dependencies (req #3823, migration 20261024111150).
+-- ONE ROW = ONE EDGE: `initiative_fk` waits for ALL of `dep_initiative_fk` —
+-- no epic under it launches while any epic under the dependency holds open
+-- work. A GATE, unlike an `epic_deps` edge (a launch priority since req
+-- #3597); the hold is DERIVED on every read (Lambda-Rest pipeline2_derive.py),
+-- never stored. `initiative_fk` CASCADE (an initiative's own edges are its
+-- data); `dep_initiative_fk` RESTRICT (design rule 4, as on `epic_deps`: an
+-- initiative something waits on cannot be deleted until the edge is removed).
+-- Same plan, no self-edge, no cycle on the combined initiative + epic graph:
+-- rules between two rows' parents, enforced at the gateway
+-- (Lambda-Rest initiative_deps_guard.py).
+CREATE TABLE initiative_deps (
+    id                INT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    initiative_fk     INT NOT NULL,                         -- the initiative that waits
+    dep_initiative_fk INT NOT NULL,                         -- the initiative it waits for
+    UNIQUE KEY uq_initiative_deps (initiative_fk, dep_initiative_fk),
+    CONSTRAINT fk_id_initiative
+        FOREIGN KEY (initiative_fk) REFERENCES initiatives (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_id_dep_initiative
+        FOREIGN KEY (dep_initiative_fk) REFERENCES initiatives (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+CREATE INDEX ix_id_dep_initiative_fk ON initiative_deps (dep_initiative_fk);
 
 -- Orchestration reservations (req #3224, migration 20260801150404).
 --

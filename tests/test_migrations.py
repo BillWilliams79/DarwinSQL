@@ -73,6 +73,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         # Req #3815 — requirement_debug_captures (migration 20261023103433).
         # Contains `requirement` but no other table name is a substring of it.
         'requirement_debug_captures',
+        # Req #3823 — initiative_deps (migration 20261024111150). No other
+        # table name is a substring of it (`initiatives` is not: no `s`).
+        'initiative_deps',
         'engine_decision_records',
         'engine_heartbeats',
         'engine_outcomes',
@@ -354,6 +357,9 @@ def _apply_migration(cur, sql_content, table_prefix, tolerant=False):
         'fk_er_epic', 'fk_er_requirement',
         'fk_ed_epic', 'fk_ed_dep_epic', 'uq_epic_deps', 'ix_ed_dep_epic_fk',
         'fk_eo_epic',
+        # Migration 20261024111150 — initiative_deps (req #3823).
+        'fk_id_initiative', 'fk_id_dep_initiative', 'uq_initiative_deps',
+        'ix_id_dep_initiative_fk',
     ]
     for cname in named_constraints:
         sql = sql.replace(cname, f'{table_prefix}_{cname}')
@@ -426,6 +432,8 @@ def _get_dependency_ordered_migrations():
 ALL_TABLE_SUFFIXES = [
     # Req #3815 — a leaf: points at requirements and profiles, pointed at by nothing.
     'requirement_debug_captures',
+    # Req #3823 — a leaf: both columns point at initiatives, pointed at by nothing.
+    'initiative_deps',
     # Req #3756 — Engine 2 data contract. Leaves first: outcomes point at
     # records, heartbeats at states and claims.
     'engine_outcomes', 'engine_decision_records', 'engine_heartbeats',
@@ -741,6 +749,8 @@ def test_migration_sequence_applies(db_connection, migration_test_prefix):
             'engine_outcomes', 'engine_inputs',
             # Req #3815 — the Bug button's debug capture (migration 20261023103433).
             'requirement_debug_captures',
+            # Req #3823 — initiative-to-initiative dependencies (migration 20261024111150).
+            'initiative_deps',
         ]
     }
     assert tables == expected_tables, \

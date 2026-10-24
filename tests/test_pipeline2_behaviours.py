@@ -80,6 +80,11 @@ def p2_graph(db_connection, test_creator_fk):
     yield ids
 
     with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM initiative_deps WHERE initiative_fk IN "
+                    "(SELECT id FROM initiatives WHERE creator_fk = %s) "
+                    "OR dep_initiative_fk IN "
+                    "(SELECT id FROM initiatives WHERE creator_fk = %s)",
+                    (test_creator_fk, test_creator_fk))
         cur.execute("DELETE FROM epic_deps WHERE epic_fk IN "
                     "(SELECT id FROM epics WHERE creator_fk = %s) "
                     "OR dep_epic_fk IN "
@@ -359,3 +364,80 @@ def test_a_requirement_cannot_be_seated_on_two_epics(db_connection, p2_graph):
                         "VALUES (%s, %s)", (p2_graph['epic_b'], p2_graph['requirement']))
     db_connection.rollback()
     assert exc.value.args[0] == 1062
+
+
+# ---------------------------------------------------------------------------
+# req #3823 — initiative_deps: one row = one edge, CASCADE on the waiting side,
+# RESTRICT on the side waited for (design rule 4, as on epic_deps)
+# ---------------------------------------------------------------------------
+
+def _second_initiative(db_connection, p2_graph, test_creator_fk):
+    with db_connection.cursor() as cur:
+        cur.execute("INSERT INTO initiatives (pipeline_fk, title, category_fk, "
+                    "creator_fk) VALUES (%s, %s, %s, %s)",
+                    (p2_graph['pipeline'], f'p2-initiative-b-{uuid.uuid4().hex[:8]}',
+                     p2_graph['category'], test_creator_fk))
+        initiative_b = cur.lastrowid
+        cur.execute("INSERT INTO initiative_deps (initiative_fk, dep_initiative_fk) "
+                    "VALUES (%s, %s)", (initiative_b, p2_graph['initiative']))
+    db_connection.commit()
+    return initiative_b
+
+
+def test_initiative_deps_referential_actions(db_connection):
+    with db_connection.cursor() as cur:
+        assert _referential_action(cur, 'fk_id_initiative') == ('CASCADE', 'CASCADE')
+        assert _referential_action(cur, 'fk_id_dep_initiative') == ('CASCADE', 'RESTRICT')
+        cols = _columns(cur, 'initiative_deps')
+    assert cols['initiative_fk']['Null'] == 'NO'
+    assert cols['dep_initiative_fk']['Null'] == 'NO'
+
+
+def test_initiative_deps_unique_edge(db_connection, p2_graph, test_creator_fk):
+    initiative_b = _second_initiative(db_connection, p2_graph, test_creator_fk)
+    with pytest.raises(pymysql.err.IntegrityError) as exc:
+        with db_connection.cursor() as cur:
+            cur.execute("INSERT INTO initiative_deps (initiative_fk, dep_initiative_fk) "
+                        "VALUES (%s, %s)", (initiative_b, p2_graph['initiative']))
+    db_connection.rollback()
+    assert exc.value.args[0] == 1062
+
+
+def test_an_initiative_waited_on_cannot_be_deleted(db_connection, p2_graph, test_creator_fk):
+    _second_initiative(db_connection, p2_graph, test_creator_fk)
+    with pytest.raises(pymysql.err.IntegrityError) as exc:
+        with db_connection.cursor() as cur:
+            cur.execute("DELETE FROM initiatives WHERE id = %s", (p2_graph['initiative'],))
+    db_connection.rollback()
+    assert exc.value.args[0] == 1451
+
+
+def test_deleting_the_waiting_initiative_takes_its_edges(db_connection, p2_graph, test_creator_fk):
+    initiative_b = _second_initiative(db_connection, p2_graph, test_creator_fk)
+    with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM initiatives WHERE id = %s", (initiative_b,))
+    db_connection.commit()
+    with db_connection.cursor() as cur:
+        cur.execute("SELECT COUNT(*) AS n FROM initiative_deps WHERE initiative_fk = %s",
+                    (initiative_b,))
+        assert cur.fetchone()['n'] == 0
+
+
+def test_pipeline_delete_needs_its_initiative_edges_cleared_first(
+        db_connection, p2_graph, test_creator_fk):
+    """MEASURED: InnoDB's cascade from `pipelines` does NOT clear an edge whose
+    both ends it is deleting — the RESTRICT side refuses (1451), exactly as
+    `epic_deps` does. So every pipeline delete clears `initiative_deps` first
+    (darwin-mcp `delete_pipeline`, the browser's `deletePipeline`)."""
+    _second_initiative(db_connection, p2_graph, test_creator_fk)
+    with pytest.raises(pymysql.err.IntegrityError) as exc:
+        with db_connection.cursor() as cur:
+            cur.execute("DELETE FROM pipelines WHERE id = %s", (p2_graph['pipeline'],))
+    db_connection.rollback()
+    assert exc.value.args[0] == 1451
+    with db_connection.cursor() as cur:
+        cur.execute("DELETE FROM initiative_deps WHERE initiative_fk IN "
+                    "(SELECT id FROM initiatives WHERE pipeline_fk = %s)",
+                    (p2_graph['pipeline'],))
+        cur.execute("DELETE FROM pipelines WHERE id = %s", (p2_graph['pipeline'],))
+    db_connection.commit()
