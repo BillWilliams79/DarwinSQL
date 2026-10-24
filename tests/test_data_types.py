@@ -1902,6 +1902,9 @@ def test_table_count(db_connection):
         # Req #3815 — the Requirement Filer Bug button's debug capture
         # (migration 20261023103433), one row per requirement.
         'requirement_debug_captures',
+        # Req #3823 — initiative-to-initiative dependency edges (migration
+        # 20261024111150).
+        'initiative_deps',
     }
     assert expected_tables == tables, \
         f"Unexpected tables: {tables - expected_tables}, missing: {expected_tables - tables}"
