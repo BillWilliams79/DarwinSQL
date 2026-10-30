@@ -239,13 +239,15 @@ def test_initiative_status_and_closed_are_independent_columns(db_connection):
 
 
 # ---------------------------------------------------------------------------
-# SCH-011 — pipeline_status keeps draft as the birth value
+# SCH-011 — req #3965: pipeline_status is born `authoring` and is wide enough
+# for `orchestration_ready`
 # ---------------------------------------------------------------------------
 
-def test_pipeline_status_default_is_draft(db_connection):
+def test_pipeline_status_default_is_authoring(db_connection):
     with db_connection.cursor() as cur:
         cols = _columns(cur, 'pipelines')
-    assert cols['pipeline_status']['Default'] == 'draft'
+    assert cols['pipeline_status']['Default'] == 'authoring'
+    assert cols['pipeline_status']['Type'].lower() == 'varchar(24)'
 
 
 # ---------------------------------------------------------------------------

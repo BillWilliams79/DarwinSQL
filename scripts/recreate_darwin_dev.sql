@@ -1155,16 +1155,17 @@ CREATE TABLE pipelines (
     id              INT          NOT NULL PRIMARY KEY AUTO_INCREMENT,
     title           VARCHAR(256) NOT NULL,
     description     TEXT         NULL,                     -- the goal; PURPOSE only (design rule 11)
-    pipeline_status VARCHAR(16)  NOT NULL DEFAULT 'draft', -- draft|active|paused|completed|aborted
+    pipeline_status VARCHAR(24)  NOT NULL DEFAULT 'authoring', -- req #3965: authoring|authorized|
+                                                          -- orchestration_ready|orchestrating|met|wontfix|deferred
     locked          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3649: 1 = a relic in time; freezes
                                                           -- the plan, its initiatives and epics (gateway-
                                                           -- enforced, Lambda-Rest/plan_lock.py)
-    closed          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3804: 1 = closed (hidden; launch-suppressed)
+    closed          TINYINT(1)   NOT NULL DEFAULT 0,      -- DORMANT since req #3965 (dropped by its follow-on)
     sort_order      INT          NULL DEFAULT NULL,        -- req #3804: hand-sorted card position, asc
     machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
     creator_fk      VARCHAR(64)  NOT NULL,
-    started_at      TIMESTAMP    NULL,                     -- derived from the status transition
-    completed_at    TIMESTAMP    NULL,                     -- ditto; never passed by a caller
+    started_at      TIMESTAMP    NULL,                     -- derived at the gateway: entering orchestrating
+    completed_at    TIMESTAMP    NULL,                     -- ditto: entering met|wontfix|deferred
     create_ts       TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
     update_ts       TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_pipelines_machine
