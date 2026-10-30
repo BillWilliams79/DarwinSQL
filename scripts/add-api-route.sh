@@ -36,6 +36,12 @@
 #     adding a per-table statement or silently continuing. Fixing a genuine gap
 #     requires an AWS Architect consult (data-architect-charter.md), not a
 #     script-level workaround.
+#
+# Req #4043 changes (2026-10-30):
+#   - Steps 7/8 also emit Access-Control-Max-Age (CORS_MAX_AGE, Chrome's 7200 s
+#     ceiling). Without it Chrome caches a preflight for 5 s, so every browser
+#     page poll paid an OPTIONS request first. Every existing OPTIONS method was
+#     patched the same way by DarwinAI-Config scripts/aws/apigw-cors-max-age.py.
 
 set -eo pipefail
 
@@ -54,6 +60,7 @@ STAGE="eng"
 CORS_ALLOW_HEADERS="'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
 CORS_ALLOW_METHODS="'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
 CORS_ALLOW_ORIGIN="'*'"
+CORS_MAX_AGE="'7200'"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -204,7 +211,7 @@ run "aws apigateway put-method-response \
     --resource-id \"$RESOURCE_ID\" \
     --http-method OPTIONS \
     --status-code 200 \
-    --response-parameters 'method.response.header.Access-Control-Allow-Headers=false,method.response.header.Access-Control-Allow-Methods=false,method.response.header.Access-Control-Allow-Origin=false' \
+    --response-parameters 'method.response.header.Access-Control-Allow-Headers=false,method.response.header.Access-Control-Allow-Methods=false,method.response.header.Access-Control-Allow-Origin=false,method.response.header.Access-Control-Max-Age=false' \
     --response-models 'application/json=Empty'"
 
 # ---------------------------------------------------------------------------
@@ -219,7 +226,7 @@ else
         --resource-id "$RESOURCE_ID" \
         --http-method OPTIONS \
         --status-code 200 \
-        --response-parameters "{\"method.response.header.Access-Control-Allow-Headers\":\"'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'\",\"method.response.header.Access-Control-Allow-Methods\":\"'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'\",\"method.response.header.Access-Control-Allow-Origin\":\"'*'\"}"
+        --response-parameters "{\"method.response.header.Access-Control-Allow-Headers\":\"'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'\",\"method.response.header.Access-Control-Allow-Methods\":\"'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'\",\"method.response.header.Access-Control-Allow-Origin\":\"'*'\",\"method.response.header.Access-Control-Max-Age\":\"${CORS_MAX_AGE}\"}"
 fi
 
 # ---------------------------------------------------------------------------
