@@ -1311,9 +1311,6 @@ CREATE TABLE IF NOT EXISTS pipelines (
     locked          TINYINT(1)   NOT NULL DEFAULT 0,      -- req #3649: 1 = a relic in time; freezes
                                                           -- the plan, its initiatives and epics (gateway-
                                                           -- enforced, Lambda-Rest/plan_lock.py)
-    closed          TINYINT(1)   NOT NULL DEFAULT 0,      -- DORMANT since req #3965: nothing reads or
-                                                          -- writes it; dropped by its follow-on once
-                                                          -- the #3965 deploy has landed
     sort_order      INT          NULL DEFAULT NULL,        -- req #3804: hand-sorted card position, asc;
                                                           -- a new plan goes below the minimum (front)
     machine_fk      INT          NULL DEFAULT NULL,        -- NULL = any machine
