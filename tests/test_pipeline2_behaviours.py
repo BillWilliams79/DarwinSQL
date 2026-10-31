@@ -248,6 +248,8 @@ def test_pipeline_status_default_is_authoring(db_connection):
         cols = _columns(cur, 'pipelines')
     assert cols['pipeline_status']['Default'] == 'authoring'
     assert cols['pipeline_status']['Type'].lower() == 'varchar(24)'
+    # req #4091: the dormant flag req #3965 stopped reading is gone.
+    assert 'closed' not in cols
 
 
 # ---------------------------------------------------------------------------
